@@ -11,7 +11,7 @@ import json
 import os
 from time import sleep
 from inspect import isclass
-from mprov.common.jobserver.plugin import JobServerPlugin
+from .plugins.plugin import JobServerPlugin
 import mprov.mprov_jobserver.plugins
 
 
