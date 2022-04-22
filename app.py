@@ -9,7 +9,6 @@ import socket
 import platform
 import json
 import os
-from time import sleep
 from inspect import isclass
 from .plugins.plugin import JobServerPlugin
 import mprov.mprov_jobserver.plugins
@@ -54,8 +53,12 @@ class JobServer ():
 
   def load_config(self):
     # load the config yaml
-    with open(self.configfile, "r") as yamlfile:
-      data = yaml.load(yamlfile, Loader=yaml.FullLoader)
+    if os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK):
+      with open(self.configfile, "r") as yamlfile:
+        data = yaml.load(yamlfile, Loader=yaml.FullLoader)
+    else:
+      with open(os.getcwd() + "/jobserver.conf", "r") as yamlefile:
+        data = yaml.load(yamlefile, Loader=yaml.FullLoader)
     # map the global config on to our object
     for config_entry in data[0]['global'].keys():
       try:
@@ -90,14 +93,14 @@ class JobServer ():
           if mod in self.running_threads: 
             # check if this thread is still running
             if not self.running_threads[mod].isAlive() :
-              print ("Thread " + mod + " ended.")
+              #print ("Thread " + mod + " ended.")
               # if it's done running remove it.
               self.running_threads[mod].handled = True
               del self.running_threads[mod]
 
           # if a thread of this plugin is not running, start one.
           if mod not in self.running_threads:
-            print ("Starting mod... " + mod)
+            #print ("Starting mod... " + mod)
             mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
             self.running_threads[mod] = mod_cls(self)
             self.running_threads[mod].start()
@@ -139,7 +142,7 @@ class JobServer ():
       return False
 
     data['id'] = response.json()[0]['id']
-    print(data)
+    #print(data)
     response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
 
     if response.status_code == 400:
