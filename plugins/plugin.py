@@ -1,10 +1,11 @@
 from time import sleep
-
+import threading
 
    
-class JobServerPlugin():
+class JobServerPlugin(threading.Thread):
   jobModule = ""
   js = None
+
 
   def set_job_running(self):
     return self.js.update_job_status(self.jobModule, 2) # RUNNING = 2
@@ -16,8 +17,13 @@ class JobServerPlugin():
     return self.js.update_job_status(self.jobModule, 3) # FAILURE = 3
 
   def __init__(self, js):
+    threading.Thread.__init__(self)
+    self.name = self.__class__
     self.js = js
     pass
+
+  def run(self):
+    self.handle_jobs()
 
   def handle_jobs(self):
     # NOTE:
@@ -46,8 +52,6 @@ class JobServerPlugin():
     
     # Update our jobs with success or failure
     self.set_job_success()
-
-    pass
 
 
 # jobserver class gets passed to handle_jobs.   Provides methods to update jobs to RUNNING SUCCESS or FAILURE

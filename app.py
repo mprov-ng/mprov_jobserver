@@ -25,6 +25,7 @@ class JobServer ():
   ip_address = ""
   plugin_dir = os.path.dirname(os.path.realpath(__file__)) + '/plugins/'
   jobmodules = []
+  running_threads = {}
 
 
   def __init__(self, **kwargs):
@@ -72,7 +73,7 @@ class JobServer ():
 
         if isclass(attribute) and issubclass(attribute, JobServerPlugin):
             globals()[attribute_name.replace('-', '_')] = attribute
-            self.job_module_plugins.append(attribute(self))
+            
     pass
 
   def stop(self):
@@ -84,17 +85,23 @@ class JobServer ():
     counter=self.heartbeatInterval
     while(self.running):
       if(counter == self.heartbeatInterval):
-        # print(self.job_module_plugins)
-        for mod in self.job_module_plugins:
-          # print(mod)
-          if mod is not None:
-            # TODO: Check for PENDING jobs of this type.
-            # try:
-            mod.handle_jobs()
-            # except:
-            #   print("exception.")
-            #   pass
-       
+        for mod in self.jobmodules:
+          # first check if the thread is done running.
+          if mod in self.running_threads: 
+            # check if this thread is still running
+            if not self.running_threads[mod].isAlive() :
+              print ("Thread " + mod + " ended.")
+              # if it's done running remove it.
+              self.running_threads[mod].handled = True
+              del self.running_threads[mod]
+
+          # if a thread of this plugin is not running, start one.
+          if mod not in self.running_threads:
+            print ("Starting mod... " + mod)
+            mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+            self.running_threads[mod] = mod_cls(self)
+            self.running_threads[mod].start()
+            
         #print(".", sep=None)
         self.register_server()
         counter=0
