@@ -66,7 +66,7 @@ class JobServer ():
     pass
 
   def load_plugins(self):
-    # TODO: Load plugins set in the config file.
+    # Load plugins set in the config file.
     for attribute_name in self.jobmodules:
         attribute = getattr(mprov.mprov_jobserver.plugins, attribute_name.replace('-', '_'))
 
