@@ -1,6 +1,6 @@
 
-
 from datetime import datetime
+import importlib
 import yaml
 import time
 import requests
@@ -18,7 +18,7 @@ class JobServer ():
   mprovURL = "http://127.0.0.1:8080/"
   running = True
   session = requests.Session()
-  job_module_plugins = []
+  job_module_plugins = {}
   heartbeatInterval = 10
   configfile="/etc/mprov/jobserver.conf"
   ip_address = ""
@@ -71,11 +71,12 @@ class JobServer ():
 
   def load_plugins(self):
     # Load plugins set in the config file.
-    for attribute_name in self.jobmodules:
-        attribute = getattr(mprov.mprov_jobserver.plugins, attribute_name.replace('-', '_'))
-
-        if isclass(attribute) and issubclass(attribute, JobServerPlugin):
-            globals()[attribute_name.replace('-', '_')] = attribute
+    for mod in self.jobmodules:
+      # self.job_module_plugins[mod] = importlib.import_module('.' + mod, 'mprov.mprov_jobserver.plugins')
+      attribute = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+        # attribute = getattr(attribute, attribute_name.replace('-', '_'))
+      if isclass(attribute) and issubclass(attribute, JobServerPlugin):
+        globals()[mod.replace('-', '_')] = attribute
             
     pass
 
@@ -102,6 +103,7 @@ class JobServer ():
           if mod not in self.running_threads:
             #print ("Starting mod... " + mod)
             mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+            mod_cls = getattr(mod_cls, mod.replace('-', '_'))
             self.running_threads[mod] = mod_cls(self)
             self.running_threads[mod].start()
             
