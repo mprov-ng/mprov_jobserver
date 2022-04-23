@@ -25,6 +25,7 @@ class JobServer ():
   plugin_dir = os.path.dirname(os.path.realpath(__file__)) + '/plugins/'
   jobmodules = []
   running_threads = {}
+  config_data = {}
 
 
   def __init__(self, **kwargs):
@@ -55,15 +56,15 @@ class JobServer ():
     # load the config yaml
     if os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK):
       with open(self.configfile, "r") as yamlfile:
-        data = yaml.load(yamlfile, Loader=yaml.FullLoader)
+        self.data = yaml.load(yamlfile, Loader=yaml.FullLoader)
     else:
       with open(os.getcwd() + "/jobserver.conf", "r") as yamlefile:
-        data = yaml.load(yamlefile, Loader=yaml.FullLoader)
+        self.data = yaml.load(yamlefile, Loader=yaml.FullLoader)
     # map the global config on to our object
-    for config_entry in data[0]['global'].keys():
+    for config_entry in self.data[0]['global'].keys():
       try:
         getattr(self, config_entry)
-        setattr(self, config_entry, data[0]['global'][config_entry])
+        setattr(self, config_entry, self.data[0]['global'][config_entry])
       except:
         print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
         sys.exit(1)
