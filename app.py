@@ -179,10 +179,9 @@ class JobServer ():
 
 
   def startSession(self):
-    # FIXME: acutal auth
-    authorization = 'Basic YWRtaW46YWRtaW4='
+    
     self.session.headers.update({
-      'Authorization': authorization,
+      'Authorization': 'Api-Key ' + self.apikey,
       'Content-Type': 'application/json'
       })
 
