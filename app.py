@@ -26,6 +26,8 @@ class JobServer ():
   jobmodules = []
   running_threads = {}
   config_data = {}
+  apikey = ""
+  
 
 
   def __init__(self, **kwargs):
