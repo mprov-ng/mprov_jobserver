@@ -1,6 +1,6 @@
 - global:
     mprovURL: "http://localhost:8080/"
-    apikey: '7lghRadT.EL5dyrF4JLUF56Y13C7ZcRFHuUXXQQEF'
+    apikey: 'loIow87q.UyOPe0sYHVuMHiXT4ffa7oy6yxTanOsN'
     heartbeatInterval: 10
     jobmodules:
       # - repo-delete
