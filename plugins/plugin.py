@@ -1,5 +1,6 @@
 from time import sleep
 import threading
+import sys
 
    
 class JobServerPlugin(threading.Thread):
@@ -26,8 +27,9 @@ class JobServerPlugin(threading.Thread):
     pass
 
   def run(self):
-    self.load_config()
-    self.handle_jobs()
+    if self.load_config():
+      self.handle_jobs()
+    
 
   def load_config(self):
     # NOTE: Override with your config loading routine if needed. 
@@ -37,7 +39,17 @@ class JobServerPlugin(threading.Thread):
     # 
     # This data structure is loaded by the JobServer class at 
     # startup
-    pass
+    
+    if self.jobModule not in self.js.config_data:
+      print("Error: Configuration issue for plugin " + self.jobModule, file=sys.stderr)
+      return False  
+    for config_entry in self.js.config_data[self.jobModule].keys():
+        try:
+          getattr(self, config_entry)
+          setattr(self, config_entry, self.js.config_data[self.jobModule][config_entry])
+        except:
+          print("Error: Unknown config entry " + config_entry + " in " + self.jobModule)
+    return True
 
   def handle_jobs(self):
     # NOTE:

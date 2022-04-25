@@ -12,6 +12,9 @@ import os
 from inspect import isclass
 from .plugins.plugin import JobServerPlugin
 import mprov.mprov_jobserver.plugins
+from yamlinclude import YamlIncludeConstructor
+import pprint
+import glob
 
 
 class JobServer ():
@@ -20,7 +23,7 @@ class JobServer ():
   session = requests.Session()
   job_module_plugins = {}
   heartbeatInterval = 10
-  configfile="/etc/mprov/jobserver.conf"
+  configfile="/etc/mprov/jobserver.yaml"
   ip_address = ""
   plugin_dir = os.path.dirname(os.path.realpath(__file__)) + '/plugins/'
   jobmodules = []
@@ -54,19 +57,40 @@ class JobServer ():
 
     pass
 
+  def yaml_include(self, loader, node):
+      # Get the path out of the yaml file
+    file_name = os.path.join(os.path.dirname(loader.name), node.value)
+    
+    # we have a glob, so we will iterate.
+    for file in glob.glob(file_name):
+      with open(file) as inputfile:
+          return yaml.load(inputfile, Loader=yaml.FullLoader)[0]
+
+
+
   def load_config(self):
     # load the config yaml
-    if os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK):
-      with open(self.configfile, "r") as yamlfile:
-        self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
-    else:
-      with open(os.getcwd() + "/jobserver.conf", "r") as yamlefile:
-        self.config_data = yaml.load(yamlefile, Loader=yaml.FullLoader)
+    yaml.add_constructor("!include", self.yaml_include)
+    if not(os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK)):
+      self.configfile = os.getcwd() + "/jobserver.yaml"
+    
+    # YamlIncludeConstructor.add_to_loader_class(loader_class=yaml.FullLoader, base_dir=os.path.dirname(self.configfile))
+    with open(self.configfile, "r") as yamlfile:
+      self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
+
+    # flatten the config space
+    result = {}
+    for entry in self.config_data:
+      result.update(entry)
+    self.config_data = result
+  
+    # pp = pprint.PrettyPrinter(indent=2,width=100,)
+    # pp.pprint(self.config_data)
     # map the global config on to our object
-    for config_entry in self.config_data[0]['global'].keys():
+    for config_entry in self.config_data['global'].keys():
       try:
         getattr(self, config_entry)
-        setattr(self, config_entry, self.config_data[0]['global'][config_entry])
+        setattr(self, config_entry, self.config_data['global'][config_entry])
       except:
         print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
         sys.exit(1)
@@ -145,24 +169,31 @@ class JobServer ():
         exit(1)
     if (response.json() == [] ):
       return False
-    
-    # no need to update if our status hasn't changed.
-    if(response.json()[0]['status'] == status ):
-      return False
+    # print(job_module)
+    # print(response.json())
+    updateCount = 0
+    for job in response.json():
+      # no need to update if our status hasn't changed.
+      # print("\t" + str(job['id']))
+      if(job['status'] == status ):
+        continue
 
-    # if we are in an end state, don't update.
-    if(response.json()[0]['status'] == 3) or (response.json()[0]['status'] == 4):
-      return False
+      # if we are in an end state, don't update.
+      if(job['status'] == 3) or (job['status'] == 4):
+        continue
 
-    data['id'] = response.json()[0]['id']
-    #print(data)
-    response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
+      data['id'] = job['id']
+      #print(data)
+      response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
+      updateCount += 1
 
-    if response.status_code == 400:
-      print("Oops")
-      print(response.json())
-      return False
-    return True
+      if response.status_code == 400:
+        print("Oops!, JobID: " + str(data['id']))
+        print(response.json())
+        continue
+
+    return updateCount
+    # return True
 
     #print(job_module + " " + str(status))
     pass
