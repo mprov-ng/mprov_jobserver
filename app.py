@@ -27,6 +27,7 @@ class JobServer ():
   running_threads = {}
   config_data = {}
   apikey = ""
+  sessionOk = False
   
 
 
@@ -47,7 +48,6 @@ class JobServer ():
     print("mProv Job Server authenticating.")
     if not self.startSession():
         print("Error: Unable to log into mProv Control Center.",file=sys.stderr)
-        return None
 
     # register the server.
     self.register_server()
@@ -58,15 +58,15 @@ class JobServer ():
     # load the config yaml
     if os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK):
       with open(self.configfile, "r") as yamlfile:
-        self.data = yaml.load(yamlfile, Loader=yaml.FullLoader)
+        self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
     else:
       with open(os.getcwd() + "/jobserver.conf", "r") as yamlefile:
-        self.data = yaml.load(yamlefile, Loader=yaml.FullLoader)
+        self.config_data = yaml.load(yamlefile, Loader=yaml.FullLoader)
     # map the global config on to our object
-    for config_entry in self.data[0]['global'].keys():
+    for config_entry in self.config_data[0]['global'].keys():
       try:
         getattr(self, config_entry)
-        setattr(self, config_entry, self.data[0]['global'][config_entry])
+        setattr(self, config_entry, self.config_data[0]['global'][config_entry])
       except:
         print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
         sys.exit(1)
@@ -91,35 +91,38 @@ class JobServer ():
     # this strange looking loop allows us to die quickly on SIGTERM
     counter=self.heartbeatInterval
     while(self.running):
-      if(counter == self.heartbeatInterval):
-        for mod in self.jobmodules:
-          # first check if the thread is done running.
-          if mod in self.running_threads: 
-            # check if this thread is still running
-            if not self.running_threads[mod].isAlive() :
-              #print ("Thread " + mod + " ended.")
-              # if it's done running remove it.
-              self.running_threads[mod].handled = True
-              del self.running_threads[mod]
+      if self.sessionOk is False:
+        self.startSession()
+      else:
+        if(counter == self.heartbeatInterval):
+          for mod in self.jobmodules:
+            # first check if the thread is done running.
+            if mod in self.running_threads: 
+              # check if this thread is still running
+              if not self.running_threads[mod].isAlive() :
+                #print ("Thread " + mod + " ended.")
+                # if it's done running remove it.
+                self.running_threads[mod].handled = True
+                del self.running_threads[mod]
 
-          # if a thread of this plugin is not running, start one.
-          if mod not in self.running_threads:
-            #print ("Starting mod... " + mod)
-            mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
-            mod_cls = getattr(mod_cls, mod.replace('-', '_'))
-            self.running_threads[mod] = mod_cls(self)
-            self.running_threads[mod].start()
-            
-        #print(".", sep=None)
-        self.register_server()
-        counter=0
-      counter+=1
-      time.sleep(1)
+            # if a thread of this plugin is not running, start one.
+            if mod not in self.running_threads:
+              #print ("Starting mod... " + mod)
+              mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+              mod_cls = getattr(mod_cls, mod.replace('-', '_'))
+              self.running_threads[mod] = mod_cls(self)
+              self.running_threads[mod].start()
+              
+          #print(".", sep=None)
+          self.register_server()
+          counter=0
+        counter+=1
+        time.sleep(1)
     return 0
 
 
   
-  def update_job_status(self, job_module, status):
+  def update_job_status(self, job_module, status, jobid=None):
     data = {
       'pk': job_module,
       'status': status,
@@ -131,7 +134,12 @@ class JobServer ():
     elif(status == 3) or (status == 4) :
       # job failed
       data['end_time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    response = self.session.get(self.mprovURL + 'jobs/?search=' + job_module, )
+    if jobid is not None:
+      # get the specific job status
+      queryURL = self.mprovURL + 'jobs/' + jobid + '/'
+    else:
+      queryURL = self.mprovURL + 'jobs/?search=' + job_module
+    response = self.session.get( queryURL )
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
         exit(1)
@@ -172,7 +180,14 @@ class JobServer ():
     }
     #print(data)
     # post the response (maybe should be put?) to the server.
-    response = self.session.post(self.mprovURL + 'jobservers/', data=json.dumps(data), )
+    try: 
+      response = self.session.post(self.mprovURL + 'jobservers/', data=json.dumps(data), )
+      
+    except:
+      self.sessionOk = False
+      self.startSession()
+      return
+    
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
         exit(1)
@@ -188,7 +203,14 @@ class JobServer ():
       })
 
     # test connectivity
-    response = self.session.get(self.mprovURL, stream=True)
+    try:
+      response = self.session.get(self.mprovURL, stream=True)
+    except:
+      print("Error: Communication error to the server.  Retrying.", file=sys.stderr)
+      self.sessionOk = False
+      time.sleep(10)
+      return
+    self.sessionOk = True
     # get the sock from the session
     s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
     # get the address from the socket

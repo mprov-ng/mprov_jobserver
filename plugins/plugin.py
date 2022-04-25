@@ -8,12 +8,15 @@ class JobServerPlugin(threading.Thread):
 
 
   def set_job_running(self):
+    # This function can be overridden, especially if you are processing specific jobID's.
     return self.js.update_job_status(self.jobModule, 2) # RUNNING = 2
   
   def set_job_success(self):
+    # This function can be overridden, especially if you are processing specific jobID's.
     return self.js.update_job_status(self.jobModule, 4) # SUCCESS = 4
 
   def set_job_failure(self):
+    # This function can be overridden, especially if you are processing specific jobID's.
     return self.js.update_job_status(self.jobModule, 3) # FAILURE = 3
 
   def __init__(self, js):
@@ -23,7 +26,18 @@ class JobServerPlugin(threading.Thread):
     pass
 
   def run(self):
+    self.load_config()
     self.handle_jobs()
+
+  def load_config(self):
+    # NOTE: Override with your config loading routine if needed. 
+    # Access to js.config_data to parse the config file.
+    # for information on how to parse the config_data structure, 
+    # see https://pyyaml.org/wiki/PyYAMLDocumentation 
+    # 
+    # This data structure is loaded by the JobServer class at 
+    # startup
+    pass
 
   def handle_jobs(self):
     # NOTE:
@@ -54,4 +68,3 @@ class JobServerPlugin(threading.Thread):
     self.set_job_success()
 
 
-# jobserver class gets passed to handle_jobs.   Provides methods to update jobs to RUNNING SUCCESS or FAILURE
