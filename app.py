@@ -178,8 +178,12 @@ class JobServer ():
     # print(job_module)
     # print(response.json())
     updateCount = 0
-    for job in response.json():
-      # print(job)
+    jobs = response.json()
+    # single objects still need to be in a list.
+    if type(jobs) != list:
+      jobs = [jobs]
+    for job in jobs:
+
       # no need to update if our status hasn't changed.
       # print("\t" + str(job['id']))
       if(job['status'] == status ):
