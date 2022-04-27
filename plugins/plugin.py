@@ -43,9 +43,10 @@ class JobServerPlugin(threading.Thread):
     # This template config loader should work for all modules.  Make sure 
     # you put your module config in the plugins/ dir in the same location
     # as the main jobserver.yaml file.  
-    
+    #print(self.js.config_data)
     if self.jobModule not in self.js.config_data:
-      print("Error: Configuration issue for plugin " + self.jobModule, file=sys.stderr)
+      # This is not necessarily an error, maybe one day print a warning?
+      print("Warn: No config found for " + self.jobModule + " hope that's ok..")
       return False  
     for config_entry in self.js.config_data[self.jobModule].keys():
         try:
