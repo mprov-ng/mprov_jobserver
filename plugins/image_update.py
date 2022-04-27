@@ -131,4 +131,4 @@ class image_update(JobServerPlugin):
         response = self.js.session.patch(self.js.mprovURL + 'images/' + str(data['slug']) + '/update', data=json.dumps(data))
 
     # Update our jobs with success or failure
-    self.set_job_success()
+    self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
