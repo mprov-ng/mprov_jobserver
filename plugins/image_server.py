@@ -21,7 +21,7 @@ class HTTPImageServer(BaseHTTPRequestHandler):
 
       imageName = os.path.splitext(self.path)[0]
       filename = self.imageDir + '/' + imageName + self.path
-      print(filename)
+      # print(filename)
       size = os.path.getsize(filename)
       self.send_header("Content-Length", size)
       self.end_headers()
