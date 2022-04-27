@@ -1,3 +1,4 @@
+import time
 from .plugin import JobServerPlugin
 from time import sleep
 import os
@@ -109,10 +110,14 @@ class image_update(JobServerPlugin):
 
         # package the filesystem into an initramfs
         # print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
-        # if os.system('find .  -depth -print| cpio -oD ' + imgDir + ' | gzip -9 > ' + imageDetails['slug'] + '.img'):
-        #   print("Error: unable to create initramfs")
-        #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-        #   return
+        startTime=time.time()
+        if os.system('find .  -depth -print| cpio -oD ' + imgDir + ' | gzip > ' + imageDetails['slug'] + '.img'):
+          print("Error: unable to create initramfs")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        endTime = time.time()
+        lapsed = endTime - startTime
+        print("Image generated in " + str(lapsed) + " seconds.")
         print("Image saved to "+ os.getcwd() + "/" + imageDetails['slug'] + '.img')
         
         # update the 'jobservers' field to be us, so that the 
