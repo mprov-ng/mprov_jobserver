@@ -31,6 +31,7 @@ class JobServer ():
   config_data = {}
   apikey = ""
   sessionOk = False
+  id = -1
   
 
 
@@ -146,7 +147,7 @@ class JobServer ():
 
 
   
-  def update_job_status(self, job_module, status, jobid=None):
+  def update_job_status(self, job_module, status, jobid=None,jobquery=""):
     data = {
       'pk': job_module,
       'status': status,
@@ -160,7 +161,9 @@ class JobServer ():
       data['end_time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     if jobid is not None:
       # get the specific job status
-      queryURL = self.mprovURL + 'jobs/' + jobid + '/'
+      queryURL = self.mprovURL + 'jobs/' + str(jobid) + '/'
+    elif jobquery is not "":
+      queryURL = self.mprovURL + 'jobs/?' + jobquery
     else:
       queryURL = self.mprovURL + 'jobs/?search=' + job_module
     response = self.session.get( queryURL )
@@ -173,6 +176,7 @@ class JobServer ():
     # print(response.json())
     updateCount = 0
     for job in response.json():
+      # print(job)
       # no need to update if our status hasn't changed.
       # print("\t" + str(job['id']))
       if(job['status'] == status ):
@@ -183,6 +187,7 @@ class JobServer ():
         continue
 
       data['id'] = job['id']
+      data['jobserver'] = self.id
       #print(data)
       response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
       updateCount += 1
@@ -222,7 +227,15 @@ class JobServer ():
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
         exit(1)
-    #print(response)
+    # pp = pprint.PrettyPrinter(indent=2,width=100,)
+    # pp.pprint(vars(response))
+    # # print(response.text)
+    #print(response.json())
+    result = json.loads(response.json())
+    self.id = result['pk']
+    # grab our id from the MPCC
+
+
     print("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
 
