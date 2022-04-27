@@ -43,8 +43,6 @@ class image_server(JobServerPlugin):
     ReqHandler.imageDir = self.imageDir
     serverInstance = HTTPServer((self.hostName, self.serverPort), ReqHandler)
     
-    try:
-      serverInstance.serve_forever()
-    except Exit:
-        pass
-    serverInstance.server_close()
+    serverInstance.serve_forever()
+    
+    
