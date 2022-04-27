@@ -11,7 +11,7 @@
       # - dns-delete
       - image-update
       - image-server
-      # - image-delete
+      - image-delete
       # - pxe-update
       # - pxe-delete
       # - image-sync
