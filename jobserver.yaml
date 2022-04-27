@@ -10,6 +10,7 @@
       # - dns-update
       # - dns-delete
       - image-update
+      - image-server
       # - image-delete
       # - pxe-update
       # - pxe-delete
