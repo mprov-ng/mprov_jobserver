@@ -17,6 +17,7 @@ import pprint
 import glob
 
 
+
 class JobServer ():
   mprovURL = "http://127.0.0.1:8080/"
   running = True
@@ -63,9 +64,11 @@ class JobServer ():
     file_name = os.path.join(os.path.dirname(loader.name), node.value)
     
     # we have a glob, so we will iterate.
+    result = {}
     for file in glob.glob(file_name):
       with open(file) as inputfile:
-          return yaml.load(inputfile, Loader=yaml.FullLoader)[0]
+        result.update(yaml.load(inputfile, Loader=yaml.FullLoader)[0])
+    return result
 
 
 
@@ -125,14 +128,14 @@ class JobServer ():
             if mod in self.running_threads: 
               # check if this thread is still running
               if not self.running_threads[mod].isAlive() :
-                #print ("Thread " + mod + " ended.")
+                print ("Thread " + mod + " ended.")
                 # if it's done running remove it.
                 self.running_threads[mod].handled = True
                 del self.running_threads[mod]
 
             # if a thread of this plugin is not running, start one.
             if mod not in self.running_threads:
-              #print ("Starting mod... " + mod)
+              print ("Starting mod... " + mod)
               mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
               mod_cls = getattr(mod_cls, mod.replace('-', '_'))
               self.running_threads[mod] = mod_cls(self)
@@ -232,9 +235,9 @@ class JobServer ():
     # # print(response.text)
     #print(response.json())
     result = json.loads(response.json())
-    self.id = result['pk']
+    
     # grab our id from the MPCC
-
+    self.id = result['pk']
 
     print("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
