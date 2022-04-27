@@ -7,6 +7,7 @@ jobServer = None
 def exitHandler(signum, frame):
     if jobServer is not None:
         jobServer.stop()
+        raise KeyboardInterrupt;
     else:
         print("jobServer is None?")
 
