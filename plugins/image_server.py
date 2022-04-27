@@ -1,8 +1,6 @@
 import os
 from .plugin import JobServerPlugin
-from time import sleep
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from mprov.common.exceptions import Exit
 
 class HTTPImageServer(BaseHTTPRequestHandler):
   imageDir = ""
