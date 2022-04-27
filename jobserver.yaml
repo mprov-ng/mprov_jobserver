@@ -12,8 +12,8 @@
       - image-update
       - image-server
       - image-delete
+      - image-sync
       # - pxe-update
       # - pxe-delete
-      # - image-sync
-
+      
 - !include plugins/*.yaml

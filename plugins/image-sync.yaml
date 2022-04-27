@@ -1,0 +1,3 @@
+- image-sync:
+    imageDir: '/export/images_synced'
+    imageList: null
