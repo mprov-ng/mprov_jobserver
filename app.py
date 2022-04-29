@@ -30,19 +30,26 @@ class JobServer ():
   apikey = ""
   sessionOk = False
   id = -1
+  runonce = False
   
 
 
   def __init__(self, **kwargs):
     print("mProv Job Server Starting.")
 
+
     # if we get passed in a config file, let's use that
     if 'configfile' in kwargs:
       self.configfile = kwargs['configfile']
-
+    
     # load our config
     self.load_config()
     
+    
+    # set runonce if someone sent it to us.
+    if 'runonce' in kwargs:
+      self.runonce = True
+      
     # Load Plugins. (plugins register job modules.)
     self.load_plugins()
 
@@ -125,14 +132,14 @@ class JobServer ():
             if mod in self.running_threads: 
               # check if this thread is still running
               if not self.running_threads[mod].isAlive() :
-                print ("Thread " + mod + " ended.")
+                # print ("Thread " + mod + " ended.")
                 # if it's done running remove it.
                 self.running_threads[mod].handled = True
                 del self.running_threads[mod]
 
             # if a thread of this plugin is not running, start one.
             if mod not in self.running_threads:
-              print ("Starting mod... " + mod)
+              # print ("Starting mod... " + mod)
               mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
               mod_cls = getattr(mod_cls, mod.replace('-', '_'))
               self.running_threads[mod] = mod_cls(self)
@@ -143,6 +150,17 @@ class JobServer ():
           counter=0
         counter+=1
         time.sleep(1)
+        if self.runonce:
+          self.running = False
+           
+        # wait for any jobmodules to complete.
+        for mod in self.jobmodules:
+            # first check if the thread is done running.
+            if mod in self.running_threads: 
+              # check if this thread is still running
+              self.running_threads[mod].join()
+          
+
     return 0
 
 

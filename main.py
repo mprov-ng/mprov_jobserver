@@ -1,5 +1,7 @@
+#!/usr/bin/python
 import signal
 from mprov.mprov_jobserver.app import JobServer
+import sys
 
 jobServer = None
 
@@ -16,7 +18,15 @@ signal.signal(signal.SIGINT, exitHandler)
 
 def main():
     global jobServer
-    jobServer = JobServer()
+    runonce=False
+
+    if '-r' in set(sys.argv):
+        runonce = True
+
+    if runonce:
+        jobServer = JobServer(runonce=True)
+    else:
+        jobServer = JobServer()
 
     if jobServer is not None:
         # Start the main loop and run the plugin handling routines.
