@@ -98,20 +98,22 @@ class image_sync(JobServerPlugin):
           vfile.write(json.dumps(imgVersions))
 
         # tell the MPCC we can host this file
-        currJobServers.append(self.js.id)
+        jobservers = []
+        for jobserver in currJobServers:
+          jobservers.append(jobserver['id'])
+        # now append our id
+        jobservers.append(self.js.id)
         data = {
           'slug': image,
           'needs_rebuild': False,
-          'jobservers':[
-            currJobServers,
-          ]
+          'jobservers': jobservers,
         }
         response = self.js.session.patch(self.js.mprovURL + 'images/' + str(data['slug']) + '/update', data=json.dumps(data))
 
     # Clean up any directories that are not in our imageList.
     # print("Scanning for haning images... " + self.imageDir)
     for entry in os.listdir(self.imageDir):
-      print(entry)
+      # print(entry)
       if os.path.isdir(self.imageDir + '/' + entry):
         # see if this entry is in our image list
         if not os.path.basename(entry) in self.imageList:
