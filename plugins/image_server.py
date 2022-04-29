@@ -31,7 +31,7 @@ class HTTPImageServer(BaseHTTPRequestHandler):
 
 class image_server(JobServerPlugin):
   jobModule = 'image-server'
-  hostName = "localhost"
+  hostName = "0.0.0.0"
   serverPort = 80
   serverInstance = None
   imageDir = ""
