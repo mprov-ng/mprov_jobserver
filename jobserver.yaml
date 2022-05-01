@@ -1,7 +1,8 @@
 - global:
-    mprovURL: "http://localhost:8080/"
+    mprovURL: "http://10.1.2.80:8080/"
     apikey: 'loIow87q.UyOPe0sYHVuMHiXT4ffa7oy6yxTanOsN'
     heartbeatInterval: 10
+    # runonce: True # uncomment to run the jobserver once and exit.
     jobmodules:
       # - repo-delete
       # - repo-update
@@ -9,11 +10,12 @@
       # - dhcp-delete
       # - dns-update
       # - dns-delete
-      - image-update
-      - image-server
-      - image-delete
-      - image-sync
+      #- image-update
+      #- image-server
+      #- image-delete
+      #- image-sync
       # - pxe-update
       # - pxe-delete
+      - dnsmasq
       
 - !include plugins/*.yaml
