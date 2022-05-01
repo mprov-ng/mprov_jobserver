@@ -3,5 +3,5 @@
 
 # dhcp-host=[<hwaddr>][,id:<client_id>|*][,set:<tag>][tag:<tag>][,<ipaddr>][,<hostname>][,<lease_time>][,ignore]
 {% for host in hosts %}
-dhcp-host={{host.mac}},{{host.ipaddress}},{{host.name}}
+dhcp-host={{host.mac}},{{host.ipaddress}},{{host.hostname}}
 {% endfor %}

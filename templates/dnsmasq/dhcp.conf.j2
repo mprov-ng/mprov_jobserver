@@ -3,14 +3,16 @@
 {% if enableDHCP %}
 # dhcp ranges which have been set and enabled in MPCC
 {% for network in networks %}
+# Network: {{network.slug}}
 dhcp-range={{network.dhcpstart}},{{network.dhcpend}}
 {% endfor %}
 
 # the place to look for dhcp host entries
 dhcp-hostsdir=/var/lib/mprov/dhcp/
 
-{% if enableTFP %}
+{% if enableTFTP %}
 # enable the tftp server
 enable-tftp
+tftp-root={{ tftproot }}
 {% endif %}
 {% endif %}

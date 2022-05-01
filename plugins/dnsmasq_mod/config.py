@@ -7,11 +7,15 @@ jenv = Environment(
 )
 
 class DnsmasqConfig(JobServerPlugin):
-    
+    dnsmasqConfDir=''
+    mprovDnsmasqDir=''
+    def load_config(self):
+        return True
     def handle_jobs(self):
         # Generates some general configuration stuff 
         data={
-            'mpcc_host': '10.1.2.80',
+            'mprov_url': self.js.mprovURL,
             'enableDHCP': True,
         }
-        print(jenv.get_template('dnsmasq/ipxe.conf.j2').render(data))
+        with open(self.dnsmasqConfDir + 'ipxe.conf', 'w') as conf:
+            conf.write(jenv.get_template('dnsmasq/ipxe.conf.j2').render(data))

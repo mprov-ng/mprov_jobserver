@@ -7,6 +7,7 @@ jenv = Environment(
 )
 
 class DnsmasqDNSConfig(JobServerPlugin):
-    
+    def load_config(self):
+        return True
     def handle_jobs(self):
         pass

@@ -1,6 +1,7 @@
 - dnsmasq:
-  enableDNS: False
-  enableDHCP: False
-  enableTFTP: False
-  dnsmasqConfDir: '/etc/dnsmasq.d/'
-  mprovDnsmasqDir: '/var/lib/mprov/'
+    enableDNS: False
+    enableDHCP: True
+    enableTFTP: True
+    dnsmasqConfDir: '/etc/dnsmasq.d/'
+    mprovDnsmasqDir: '/var/lib/mprov/'
+    tftproot: '/tftproot'

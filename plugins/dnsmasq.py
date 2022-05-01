@@ -18,26 +18,34 @@ class dnsmasq(JobServerPlugin):
   enableDNS=False
   enableDHCP=False
   enableTFTP=False
-  dnsmasqConfDir='/etc/dnsmasq.d/'
-  mprovDnsmasqDir='/var/lib/mprov/'
+  dnsmasqConfDir=''
+  mprovDnsmasqDir=''
+  tftproot=''
   threads = []
   def handle_jobs(self):
     # Based on our settings, let's start up the submodules for dnsmasq.
     if(self.enableDNS or self.enableDHCP):
       # DNS or DHCP is on, so let's run the config module
       confThread = DnsmasqConfig(self.js)
+      confThread.dnsmasqConfDir=self.dnsmasqConfDir
+      confThread.mprovDnsmasqDir = self.mprovDnsmasqDir
       confThread.start()
       self.threads.append(confThread)
 
     # we can also run the DNS thread
     if self.enableDNS:
       dnsThread = DnsmasqDNSConfig(self.js)
+      
       dnsThread.start()
       self.threads.append(dnsThread)
 
     # and finally the DHCP thread
     if self.enableDHCP:
       dhcpThread = DnsmasqDHCPConfig(self.js)
+      dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
+      dhcpThread.mprovDnsmasqDir = self.mprovDnsmasqDir
+      dhcpThread.tftproot=self.tftproot
+      
       dhcpThread.enableTFTP = self.enableTFTP
       dhcpThread.start()
       self.threads.append(dhcpThread)
