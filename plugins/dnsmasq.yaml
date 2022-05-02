@@ -1,5 +1,5 @@
 - dnsmasq:
-    enableDNS: False
+    enableDNS: True
     enableDHCP: True
     enableTFTP: True
     dnsmasqConfDir: '/etc/dnsmasq.d/'

@@ -2,7 +2,7 @@
 # Please modify the mProv template.
 
 # host-record=<name>[,<name>....],[<IPv4-address>],[<IPv6-address>][,<TTL>]
-{% for host in dnshosts %}
-host-record={{host.name}},{{host.name}}.{{host.domain}},{{host.ipaddress}}
+{% for host in hosts %}
+host-record={{host.hostname}},{{host.hostname}}.{{host.domain}},{{host.ipaddress}}
 {% endfor %}
 

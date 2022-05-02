@@ -14,7 +14,7 @@ local-service
 domain-needed
 
 # add in our domains here
-{% for domain in domains %}
-auth-zone={{domain.name}},{{domain.address}}/{{domain.prefix}}
+{% for network in networks %}
+auth-zone={{network.domain}},{{network.subnet}}/{{network.mask}}
 {% endfor %}
 {% endif %}

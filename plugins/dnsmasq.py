@@ -23,33 +23,48 @@ class dnsmasq(JobServerPlugin):
   tftproot=''
   threads = []
   def handle_jobs(self):
+    # we can also run the DNS thread
+    if self.enableDNS:
+      # grab any DNS jobs.
+      # See if we have any image-delete jobs, and take 'em if we do, else just exit
+      jobquery = "&module=[\"dns-update\",\"dns-delete\"]"
+      print(jobquery)
+      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
+        pass # no jobs.
+      else:
+        dnsThread = DnsmasqDNSConfig(self.js)
+        dnsThread.dnsmasqConfDir = self.dnsmasqConfDir
+        dnsThread.mprovDnsmasqDir = self.mprovDnsmasqDir
+        dnsThread.start()
+        self.threads.append(dnsThread)
+
+    # and finally the DHCP thread
+    if self.enableDHCP:
+      # grab any DHCP/PXE jobs.
+      # See if we have any image-delete jobs, and take 'em if we do, else just exit
+      jobquery = "&module=[\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
+      print(jobquery)
+      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
+        pass # no jobs.
+      else:
+        dhcpThread = DnsmasqDHCPConfig(self.js)
+        dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
+        dhcpThread.mprovDnsmasqDir = self.mprovDnsmasqDir
+        dhcpThread.tftproot=self.tftproot
+        
+        dhcpThread.enableTFTP = self.enableTFTP
+        dhcpThread.start()
+        self.threads.append(dhcpThread)
     # Based on our settings, let's start up the submodules for dnsmasq.
     if(self.enableDNS or self.enableDHCP):
+      
       # DNS or DHCP is on, so let's run the config module
       confThread = DnsmasqConfig(self.js)
       confThread.dnsmasqConfDir=self.dnsmasqConfDir
       confThread.mprovDnsmasqDir = self.mprovDnsmasqDir
       confThread.start()
-      self.threads.append(confThread)
+      self.threads.append(confThread)    
 
-    # we can also run the DNS thread
-    if self.enableDNS:
-      dnsThread = DnsmasqDNSConfig(self.js)
-      
-      dnsThread.start()
-      self.threads.append(dnsThread)
-
-    # and finally the DHCP thread
-    if self.enableDHCP:
-      dhcpThread = DnsmasqDHCPConfig(self.js)
-      dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
-      dhcpThread.mprovDnsmasqDir = self.mprovDnsmasqDir
-      dhcpThread.tftproot=self.tftproot
-      
-      dhcpThread.enableTFTP = self.enableTFTP
-      dhcpThread.start()
-      self.threads.append(dhcpThread)
-      
     for thread in self.threads:
       thread.join()
       

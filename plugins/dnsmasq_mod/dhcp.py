@@ -16,7 +16,6 @@ class DnsmasqDHCPConfig(JobServerPlugin):
         return True
     def handle_jobs(self):
         # get the network informatioin
-        # no imageList in config, grab it from MPCC
         response = self.js.session.get( self.js.mprovURL + 'networks/?isdhcp=True')
         print(self.enableTFTP)
         data = {
@@ -29,7 +28,7 @@ class DnsmasqDHCPConfig(JobServerPlugin):
             conf.write(jenv.get_template('dnsmasq/dhcp.conf.j2').render(data))
 
         # make sure the mprov hosts dir exists
-        os.makedirs(self.mprovDnsmasqDir, exist_ok=True)
+        os.makedirs(self.mprovDnsmasqDir + '/dhcp/', exist_ok=True)
         # now the interfaces
         for network in data['networks']: 
         
@@ -52,6 +51,6 @@ class DnsmasqDHCPConfig(JobServerPlugin):
                 if 'mgmt_ip' in host:
                     data_hosts['hosts'][idx]['ipaddress'] = host['mgmt_ip']
 
-            with open(self.mprovDnsmasqDir + network['slug'] + '.conf', 'w') as conf:
+            with open(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts))
 
