@@ -1,0 +1,109 @@
+#!ipxe
+set menu-timeout 5000
+set submenu-timeout ${menu-timeout}
+isset ${menu-default} || set menu-default mprov
+
+# Figure out if client is 64-bit capable
+cpuid --ext 29 && set arch x64 || set arch x86
+cpuid --ext 29 && set archl amd64 || set archl i386+
+
+
+:start
+menu mProv iPXE boot menu
+item --gap --             -------------------------------- mProv -----------------------------------
+item --key m mprov        Boot mProv image
+item --gap --             ------------------------- Tools and utilities ----------------------------
+item --key p pxelinux     Load PXELinux menu
+item --key d menu-diag    Diagnostics tools...
+item --gap --             ------------------------- Advanced options -------------------------------
+item shell                Drop to iPXE shell
+item reboot               Reboot computer
+item
+item --key x exit         Exit iPXE and continue BIOS boot
+choose --timeout ${menu-timeout} --default ${menu-default} selected || goto cancel
+set menu-timeout 0
+goto ${selected}
+
+:cancel
+echo You cancelled the menu, dropping you to a shell
+
+:shell
+echo Type 'exit' to get the back to the menu
+shell
+set menu-timeout 0
+set submenu-timeout 0
+goto start
+
+:failed
+echo Booting failed, dropping to shell
+goto shell
+
+:reboot
+reboot
+
+:exit
+exit
+
+:mprov
+chain --replace --autofree {{ mprov_url }}ipxe/ ||
+goto exit
+
+:pxelinux
+set 210:string tftp://${next-server}/
+chain ${210:string}pxelinux.0 || goto failed
+goto start
+
+###################### DIAGNOSTICS MENU #############################
+
+:menu-diag
+menu Diagnostic tools
+item memtest       Memtest86+ 4.20
+item memtest-ipxe  Memtest86+ 4.20 (iPXE)
+item breakin       Breakin 3.71
+item dban          Darik's Boot and Nuke 2.2.7
+item
+item --key 0x08 back Back to top menu...
+iseq ${menu-default} menu-diag && isset ${submenu-default} && goto menu-diag-timed ||
+choose selected && goto ${selected} || goto start
+:menu-diag-timed
+choose --timeout ${submenu-timeout} --default ${submenu-default} selected && goto ${selected} || goto start
+
+:memtest
+# TODO: Fix the URI parser to make the + sign work
+#chain memtest86+-4.20.elf.img - || goto failed
+chain memtest86plus-4.20.elf.img - || goto failed
+goto start
+
+:memtest-ipxe
+chain memtest.0 passes=1 && set memtest GOOD || set memtest BAD
+set memtest_errno:uint8 ${errno}
+iseq ${memtest} GOOD && goto memtest-info ||
+iseq ${memtest_errno} 0x1 && set memtest BAD || set memtest UNKNOWN
+:memtest-info
+menu Your memory seems to be ${memtest}
+item memtest-report   Report memtest result to web service
+item --key 0x08 menu-diag Back to diagnostics menu...
+choose --default menu-diag selected && goto ${selected} || goto start
+
+:memtest-report
+chain ${memtest-report-url}?result=${memtest}&mac=${mac}&uuid=${uuid}&hostname=${hostname} ||
+goto menu-diag
+
+:breakin
+# Stress-testing and diagnostics utility
+# http://www.advancedclustering.com/software/breakin.html
+# Set sshpasswd=yourpassword for remote access
+# Set startup= to 'cloner' or 'rescue' for more features
+# When startup=cloner, server= and image= can also be set
+# http://www.advancedclustering.com/software/cloner.html
+kernel breakin-3.71/kernel-3.71
+initrd breakin-3.71/initrd-3.71.cpio.lzma
+imgargs kernel-3.71 startup=breakin
+boot || goto failed
+goto start
+
+:dban
+kernel dban-2.2.7/DBAN.BZI
+imgargs DBAN.BZI nuke="dwipe --method gutmann --rounds 2 --verify last" silent vga=785
+boot || goto failed
+goto start

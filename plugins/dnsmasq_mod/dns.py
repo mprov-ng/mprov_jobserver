@@ -47,7 +47,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
                 if 'mgmt_ip' in host:
                     data_hosts['hosts'][idx]['ipaddress'] = host['mgmt_ip']
                 data_hosts['hosts'][idx]['domain'] = network['domain']
-                print(data_hosts['hosts'][idx])
+                # print(data_hosts['hosts'][idx])
 
             with open(self.mprovDnsmasqDir + '/dns/' + network['slug'] + '-dns.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dns_host.conf.j2').render(data_hosts))

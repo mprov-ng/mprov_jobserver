@@ -21,6 +21,8 @@ class dnsmasq(JobServerPlugin):
   dnsmasqConfDir=''
   mprovDnsmasqDir=''
   tftproot=''
+  undionlyImg = ''
+  dnsmasqUser=''
   threads = []
   def handle_jobs(self):
     # we can also run the DNS thread
@@ -28,9 +30,10 @@ class dnsmasq(JobServerPlugin):
       # grab any DNS jobs.
       # See if we have any image-delete jobs, and take 'em if we do, else just exit
       jobquery = "&module=[\"dns-update\",\"dns-delete\"]"
-      print(jobquery)
+      # print(jobquery)
       if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
         pass # no jobs.
+        self.enableDNS = False
       else:
         dnsThread = DnsmasqDNSConfig(self.js)
         dnsThread.dnsmasqConfDir = self.dnsmasqConfDir
@@ -43,9 +46,10 @@ class dnsmasq(JobServerPlugin):
       # grab any DHCP/PXE jobs.
       # See if we have any image-delete jobs, and take 'em if we do, else just exit
       jobquery = "&module=[\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
-      print(jobquery)
+      # print(jobquery)
       if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
         pass # no jobs.
+        self.enableDHCP = False
       else:
         dhcpThread = DnsmasqDHCPConfig(self.js)
         dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
@@ -62,6 +66,9 @@ class dnsmasq(JobServerPlugin):
       confThread = DnsmasqConfig(self.js)
       confThread.dnsmasqConfDir=self.dnsmasqConfDir
       confThread.mprovDnsmasqDir = self.mprovDnsmasqDir
+      confThread.tftproot = self.tftproot
+      confThread.undionlyImg = self.undionlyImg
+      confThread.dnsmasqUser = self.dnsmasqUser
       confThread.start()
       self.threads.append(confThread)    
 

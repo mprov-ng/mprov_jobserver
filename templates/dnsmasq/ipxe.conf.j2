@@ -25,9 +25,9 @@ dhcp-boot=tag:!ipxe,undionly.kpxe
 
 # undionly.kpxe issues a second DHCP request and we then serve bootstrap.ipxe over http
 # using Robin Smidsrød's bootstrap method provided at https://gist.github.com/2234639
-dhcp-boot={{ mprov_url }}ipxe/
+# dhcp-boot={{ mprov_url }}ipxe/
 
 
 # Or, simply load your own menu
-# dhcp-boot=menu.ipxe
+dhcp-boot=menu.ipxe
 {% endif %}

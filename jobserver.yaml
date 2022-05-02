@@ -10,13 +10,13 @@
       # - dhcp-delete
       # - dns-update
       # - dns-delete
-      # - image-update
-      # - image-server
-      # - image-delete
-      # - image-sync
       # - pxe-update
       # - pxe-delete
-      # - dnsmasq
-      - script-runner
+      - image-update
+      - image-server
+      - image-delete
+      - image-sync
+      - dnsmasq
+      # - script-runner
       
 - !include plugins/*.yaml

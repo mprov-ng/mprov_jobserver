@@ -17,7 +17,7 @@ class DnsmasqDHCPConfig(JobServerPlugin):
     def handle_jobs(self):
         # get the network informatioin
         response = self.js.session.get( self.js.mprovURL + 'networks/?isdhcp=True')
-        print(self.enableTFTP)
+        # print(self.enableTFTP)
         data = {
             'networks': response.json(),
             'enableDHCP': True,

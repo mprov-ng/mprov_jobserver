@@ -3,6 +3,6 @@
 
 # host-record=<name>[,<name>....],[<IPv4-address>],[<IPv6-address>][,<TTL>]
 {% for host in hosts %}
-host-record={{host.hostname}},{{host.hostname}}.{{host.domain}},{{host.ipaddress}}
+{{host.ipaddress}} {{host.hostname}} {{host.hostname}}.{{host.domain}}
 {% endfor %}
 
