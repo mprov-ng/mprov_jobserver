@@ -151,14 +151,15 @@ class JobServer ():
         counter+=1
         time.sleep(1)
         if self.runonce:
+          print("Job Server in 'runonce' mode.  Exiting...")
           self.running = False
            
-        # wait for any jobmodules to complete.
-        for mod in self.jobmodules:
-            # first check if the thread is done running.
-            if mod in self.running_threads: 
-              # check if this thread is still running
-              self.running_threads[mod].join()
+    # wait for any jobmodules to complete.
+    for mod in self.jobmodules:
+        # first check if the thread is done running.
+        if mod in self.running_threads: 
+          # check if this thread is still running
+          self.running_threads[mod].join()
           
 
     return 0
