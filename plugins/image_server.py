@@ -1,6 +1,7 @@
+from http import server
 import os
 from .plugin import JobServerPlugin
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class HTTPImageServer(BaseHTTPRequestHandler):
   imageDir = ""
@@ -8,7 +9,10 @@ class HTTPImageServer(BaseHTTPRequestHandler):
     pass
 
   def __call__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
+    try: 
+      super().__init__(*args, **kwargs)
+    except:
+      pass
 
   def do_GET(self):
       self.send_response(200)
@@ -41,8 +45,13 @@ class image_server(JobServerPlugin):
     print("Starting Image Server...")
     ReqHandler = HTTPImageServer()
     ReqHandler.imageDir = self.imageDir
-    serverInstance = HTTPServer((self.hostName, self.serverPort), ReqHandler)
+    serverInstance = ThreadingHTTPServer((self.hostName, self.serverPort), ReqHandler)
+    serverInstance.timeout=0.5
+    # this should allow us to exit out ok.
+    while(self.js.running):
+      serverInstance.handle_request()
     
-    serverInstance.serve_forever()
+    print("Stopping Image Server.")
+    #serverInstance.serve_forever()
     
     

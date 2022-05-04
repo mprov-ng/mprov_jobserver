@@ -9,12 +9,13 @@ jobServer = None
 def exitHandler(signum, frame):
     if jobServer is not None:
         jobServer.stop()
-        raise KeyboardInterrupt;
+        
     else:
         print("jobServer is None?")
+        sys.exit(1)
 
 signal.signal(signal.SIGINT, exitHandler)
-#signal.signal(signal.SIGKILL, exitHandler)
+signal.signal(signal.SIGTERM, exitHandler)
 
 def main():
     global jobServer

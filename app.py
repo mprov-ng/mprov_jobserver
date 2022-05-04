@@ -151,17 +151,18 @@ class JobServer ():
         counter+=1
         time.sleep(1)
         if self.runonce:
-          print("Job Server in 'runonce' mode.  Exiting...")
+          print("Job Server in 'runonce' mode.")
           self.running = False
-           
+    print("\nJob Server Exiting...")
     # wait for any jobmodules to complete.
     for mod in self.jobmodules:
         # first check if the thread is done running.
         if mod in self.running_threads: 
           # check if this thread is still running
+          # print("\tWaiting on thread " + mod)
           self.running_threads[mod].join()
           
-
+    
     return 0
 
 
@@ -181,7 +182,7 @@ class JobServer ():
     if jobid is not None:
       # get the specific job status
       queryURL = self.mprovURL + 'jobs/' + str(jobid) + '/'
-    elif jobquery is not "":
+    elif jobquery != "":
       queryURL = self.mprovURL + 'jobs/?' + jobquery
     else:
       queryURL = self.mprovURL + 'jobs/?search=' + job_module
