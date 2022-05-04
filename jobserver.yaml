@@ -1,5 +1,5 @@
 - global:
-    mprovURL: "http://10.1.2.80:8080/"
+    mprovURL: "http://172.16.1.1:8080/"
     apikey: 'loIow87q.UyOPe0sYHVuMHiXT4ffa7oy6yxTanOsN'
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.

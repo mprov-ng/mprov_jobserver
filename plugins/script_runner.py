@@ -74,11 +74,12 @@ class script_runner(JobServerPlugin):
     return result
 
   def handle_jobs(self):
+    
     # see if we are being called from a runonce command
     if not self.js.runonce:
       print("Error: script-runner must be run in a 'runonce' jobserver session.")
       return False
-    
+    print("Jobserver Running script-runner...")
     sysimage=False
     system=False
     scriptMode='image-gen' # should be img-gen or post-boot, def: img-gen
@@ -120,7 +121,7 @@ class script_runner(JobServerPlugin):
       query="images/" + entityId + "/details"
     else:
       query="systems/?hostname=" + entityId 
-    print(self.js.mprovURL + query)
+    # print(self.js.mprovURL + query)
     response = self.js.session.get( self.js.mprovURL + query)
     # merge the scripts from distro -> system_groups -> entity
     entity = response.json()
@@ -190,7 +191,7 @@ class script_runner(JobServerPlugin):
         # wait for the threads in this step to finish.
       for t  in threads:
         t.join()
-
+    print("script-runner complete.")
 
   def runScript(self, filename):
     # grab the file
@@ -198,7 +199,7 @@ class script_runner(JobServerPlugin):
 
     # run the file
     subprocess.run(local_file)
-    pass
+    
 
   def download_file(self, url):
     local_filename = url.split('/')[-1]

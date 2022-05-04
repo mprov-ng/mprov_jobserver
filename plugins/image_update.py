@@ -5,6 +5,14 @@ import os
 import sys
 import json
 from urllib.parse import urlparse
+import yaml
+from jinja2 import Environment, PackageLoader, select_autoescape
+
+jenv = Environment(
+    loader=PackageLoader("mprov.mprov_jobserver"),
+    autoescape=select_autoescape()
+)
+
 
 
 class image_update(JobServerPlugin):
@@ -109,7 +117,7 @@ class image_update(JobServerPlugin):
           return
 
         # install and copy the kernel image to the image root
-        if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel'):
+        if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel python38 python38-pyyaml python38-requests python38-jinja2.noarch'):
           print("Error uanble to install kernel into image filesystem")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
@@ -136,6 +144,41 @@ class image_update(JobServerPlugin):
           
         
         # TODO: run image-gen scripts.
+        
+        import pathlib
+        scriptDir = pathlib.Path(__file__).parent.resolve()
+
+        # copy ourself into /root/mprov/ in the image.
+        # check if the imagDir + /root/mprov exists and create it if not
+        os.makedirs(imgDir + '/root/mprov/', exist_ok=True)
+        
+        if os.system('rsync -ar ' + str(scriptDir) + '/../../mprov_jobserver ' + imgDir + '/root/mprov/'):
+          print("Error: Unable to copy a jobserver to the image.")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        
+        # create a config file for our script-runner instance.
+        localConfig = [dict()]
+        localConfig[0]['global'] = self.js.config_data['global']
+        print(localConfig[0]['global']['jobmodules'])
+        localConfig[0]['global']['jobmodules'] = ['script-runner']
+        localConfig[0]['global']['runonce'] = True
+        print(imgDir + '/root/mprov/mprov_jobserver/jobserver.yaml')
+        with open(imgDir + '/root/mprov/mprov_jobserver/jobserver.yaml',"w") as confFile:
+          yaml.dump(localConfig, confFile)
+          confFile.write("\n- !include plugins/*.yaml")
+
+        data = {
+          'imgDir': imgDir,
+          'image': image,
+        }
+        # now let's run our script-runner shell script.
+        with open(os.open(imgDir + '/root/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
+            conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
+
+        if os.system(imgDir + '/root/mprov/script-runner.sh'):
+          print("Error while running image-gen scripts via job server..")
+        
 
         # package the filesystem into an initramfs
         # print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')

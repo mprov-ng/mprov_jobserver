@@ -43,7 +43,7 @@ class DnsmasqDHCPConfig(JobServerPlugin):
             # merge in the switches
             response = self.js.session.get( self.js.mprovURL + 'switches/?network=' + network['slug'])
             data_hosts['hosts'] = data_hosts['hosts'] + (response.json())
-            print(data_hosts)
+            # print(data_hosts)
             for idx, host in enumerate(data_hosts['hosts']):
                 # print(host)
                 if 'mgmt_mac' in host:

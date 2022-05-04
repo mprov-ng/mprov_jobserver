@@ -146,7 +146,8 @@ class JobServer ():
               self.running_threads[mod].start()
               
           #print(".", sep=None)
-          self.register_server()
+          if not self.runonce:
+            self.register_server()
           counter=0
         counter+=1
         time.sleep(1)
@@ -228,6 +229,8 @@ class JobServer ():
     pass
 
   def register_server(self):
+    if self.runonce:
+      return
     # get my hostname from platform
     myHostname = platform.node()
 
