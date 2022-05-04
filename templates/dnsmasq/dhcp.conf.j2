@@ -4,7 +4,11 @@
 # dhcp ranges which have been set and enabled in MPCC
 {% for network in networks %}
 # Network: {{network.slug}}
-dhcp-range={{network.dhcpstart}},{{network.dhcpend}}
+dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}}
+dhcp-option=tag:{{network.slug}},option:router,{{network.gateway}}
+dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
+dhcp-option=tag:{{network.slug}},option:dns-server,{{network.nameserver1}}
+
 {% endfor %}
 
 # the place to look for dhcp host entries

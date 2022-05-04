@@ -90,7 +90,23 @@ class image_sync(JobServerPlugin):
           with open(self.imageDir + '/' + image + '/' + image + '.img', 'wb') as localFile:
             for chunk in remoteImage.iter_content(chunk_size=8192):
               localFile.write(chunk)
+
+          # grab the initramfs
+          with self.js.session.get(self.js.mprovURL + 'images/' + image + '.initramfs', stream=True) as remoteImage:
+            remoteImage.raise_for_status()
+            os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+            with open(self.imageDir + '/' + image + '/' + image + '.initramfs', 'wb') as localFile:
+              for chunk in remoteImage.iter_content(chunk_size=8192):
+                localFile.write(chunk)
         
+          # grab the kernel
+          with self.js.session.get(self.js.mprovURL + 'kernels/' + image + '.vmlinuz', stream=True) as remoteImage:
+            remoteImage.raise_for_status()
+            os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+            with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
+              for chunk in remoteImage.iter_content(chunk_size=8192):
+                localFile.write(chunk)
+                
         # file download complete.  Update our version
         imgVersions[image] = mpccVersion
         ourVersion = mpccVersion

@@ -108,10 +108,40 @@ class image_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
 
+        # install and copy the kernel image to the image root
+        if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel'):
+          print("Error uanble to install kernel into image filesystem")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+
+        if os.system('ls -t ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | head -n1 | xargs -I{} cp {} ' + imgDir + '/' + image + '.vmlinuz'): 
+          print("Error: unable to copy kernel image.")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+
+        if os.system('ls -t ' + imgDir + '/boot/initramfs-* | grep -v rescue | head -n1 | xargs -I{} cp {} ' + imgDir + '/' + image + '.initramfs'): 
+          print("Error: unable to copy initramfs.")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+
+        if os.system('rm -f ' + imgDir + '/dev/ram0; mknod -m 600 ' + imgDir + '/dev/ram0 b 1 0'):
+          print('Error: trying to make /dev/ram0')
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        
+        if os.system('rm -f ' + imgDir + '/dev/initrd; mknod -m 400 ' + imgDir + '/dev/initrd b 1 250'):
+          print('Error: trying to make /dev/ram0')
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+          
+        
+        # TODO: run image-gen scripts.
+
         # package the filesystem into an initramfs
         # print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
         startTime=time.time()
-        if os.system('find .  -depth -print| cpio -oD ' + imgDir + ' | gzip > ' + imageDetails['slug'] + '.img'):
+        os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
+        if os.system('find .  -depth -print| cpio -H newc --quiet -oD ' + imgDir + '  | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
@@ -119,7 +149,9 @@ class image_update(JobServerPlugin):
         lapsed = endTime - startTime
         print("Image generated in " + str(lapsed) + " seconds.")
         print("Image saved to "+ os.getcwd() + "/" + imageDetails['slug'] + '.img')
-        
+        os.system('mv /tmp/' + imageDetails['slug'] + '.img ' + imgDir + '/' )
+
+
         # update the 'jobservers' field to be us, so that the 
         data = {
           'slug': imageDetails['slug'],

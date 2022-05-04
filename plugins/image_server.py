@@ -17,11 +17,13 @@ class HTTPImageServer(BaseHTTPRequestHandler):
       # sanitize self.path for directory escape characters.  Is this enough?
       self.path = "/" + os.path.relpath(os.path.normpath(os.path.join("/", self.path)), "/")
 
-      imageName = os.path.splitext(self.path)[0]
+      #imageName = self.path.split('.', 1)[0]
+      imageName = self.path.split('.', 1)[0]
       filename = self.imageDir + '/' + imageName + self.path
       # print(filename)
       size = os.path.getsize(filename)
       self.send_header("Content-Length", size)
+      self.send_header("Content-Disposition", "inline; filename=\"" + self.path + "\"")
       self.end_headers()
 
       with open(filename, "rb") as imageFile:
