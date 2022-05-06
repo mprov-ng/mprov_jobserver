@@ -31,7 +31,7 @@ class JobServer ():
   sessionOk = False
   id = -1
   runonce = False
-  
+  register = True
 
 
   def __init__(self, **kwargs):
@@ -48,8 +48,10 @@ class JobServer ():
     
     # set runonce if someone sent it to us.
     if 'runonce' in kwargs:
-      self.runonce = True
+      self.runonce = kwargs['runonce']
       
+    if '-d' in set(sys.argv):
+      self.register = False
     # Load Plugins. (plugins register job modules.)
     self.load_plugins()
 
@@ -213,7 +215,7 @@ class JobServer ():
 
       data['id'] = job['id']
       data['jobserver'] = self.id
-      #print(data)
+      # print(data)
       response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
       updateCount += 1
 
@@ -229,7 +231,7 @@ class JobServer ():
     pass
 
   def register_server(self):
-    if self.runonce:
+    if not self.register:
       return
     # get my hostname from platform
     myHostname = platform.node()

@@ -9,7 +9,7 @@ done
 
 export PYTHONPATH=/root/
 
-chroot $IMGDIR /bin/bash -c "export PYTHONPATH=/root/; cd /root/mprov/mprov_jobserver; /usr/bin/python3 main.py -r -i $IMAGE"
+chroot $IMGDIR /bin/bash -c "export PYTHONPATH=/root/; cd /root/mprov/mprov_jobserver; /usr/bin/python3 main.py -r -d -i $IMAGE"
 
 for i in `echo "dev proc run sys"`
 do

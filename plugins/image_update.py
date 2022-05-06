@@ -181,7 +181,7 @@ class image_update(JobServerPlugin):
         
 
         # package the filesystem into an initramfs
-        # print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
+        print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
         if os.system('find .  -depth -print| cpio -H newc --quiet -oD ' + imgDir + '  | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
