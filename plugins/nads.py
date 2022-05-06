@@ -1,5 +1,6 @@
 from .plugin import JobServerPlugin
-from time import time
+import time
+import json
 
 """
 Node Auto Detection System
@@ -40,6 +41,7 @@ LLDP_PROTO_ID = 0x88cc
 # LLDP TLV Type:
 LLDP_TLV_TYPE_CHASSISID = 0x01
 LLDP_TLV_TYPE_PORTID = 0x02
+LLDP_TLV_TYPE_PORTDESC = 0x04
 LLDP_TLV_DEVICE_NAME = 0x05
 LLDP_PDUEND = 0x00
 LLDP_TLV_ORGANIZATIONALLY_SPECIFIC = 0x7f
@@ -70,7 +72,7 @@ def promiscuous_mode(interface, sock, enable=False):
             with c-compatible `ifreq` struct and `SIOC[G|S]IFFLAGS` """
 
     ifr = ifreq()
-    ifr.ifr_ifrn = interface
+    ifr.ifr_ifrn = bytes(interface, 'utf-8')
     ioctl(sock.fileno(), SIOCGIFFLAGS, ifr)
 
     if enable:
@@ -157,9 +159,11 @@ class nads(JobServerPlugin):
 
     # enable promiscuous mode on the interface. 
     promiscuous_mode(self.provIntf, capture_sock, True)
-
+    print("Start at: " + str(startTime))
     # grab some traffic and process it for LLDP
-    while(time.time() < startTime + self.maxLLDPWait):
+    while(time.time() < (startTime + self.maxLLDPWait)):
+      # print("Current: " + str(time.time()))
+      # print("End at: " + str(startTime + self.maxLLDPWait))
       # grab a packet.
       packet = capture_sock.recvfrom(65565)
       packet = packet[0]
@@ -175,30 +179,38 @@ class nads(JobServerPlugin):
           tlv_header, tlv_type, tlv_data_len, tlv_oui, tlv_subtype, tlv_payload \
                                                                   = tlv_parse_rv
 
-          if tlv_type == LLDP_TLV_TYPE_PORTID:
-            self.port = re.sub(r'[\x00-\x08]', '', tlv_payload).strip()
+          if tlv_type == LLDP_TLV_TYPE_PORTDESC:
+            self.port = tlv_payload.decode('utf-8')
           elif tlv_type == LLDP_TLV_DEVICE_NAME:
-            self.switch= tlv_payload
+            self.switch= tlv_payload.decode('utf-8')
 
           # exit our loops, we have what we came for.
           if  self.port is not None and self.switch is not None:
-            continue
+            # print("Exiting for loop: '" + self.port + "' and '" + self.switch + "'")
+            break
+      #time.sleep(1)
       if  self.port is not None and self.switch is not None:
-        continue
+        # print("Exiting while loop: '" + self.port + "' and '" + self.switch + "'")
+        break
+    # print("Current: " + str(time.time()))
 
-      if self.port is None or self.switch is None:
-        # if we get here and don't have a port and a switch name,
-        # we cannot continue.
-        print("Error: Unable to detect switch and port via LLDP")
-        return False
-      # if we get here, we're all set.
-      return True
+    if self.port is None or self.switch is None:
+      # if we get here and don't have a port and a switch name,
+      # we cannot continue.
+      print("Error: Unable to detect switch and port via LLDP")
+      return False
+    # if we get here, we're all set.
+    return True
 
 
   def getMac(self):
     s = socket(AF_INET, SOCK_DGRAM)
-    info = fcntl.ioctl(s.fileno(), 0x8927,  struct.pack('256s', self.provIntf))
-    return ':'.join(['%02x' % ord(char) for char in info[18:24]])
+    info = fcntl.ioctl(s.fileno(), 0x8927,  struct.pack('256s', bytes(self.provIntf, 'utf-8')))
+    # print(info[18:24])
+    # for byte in info[18:24]:
+      
+    #   print(hex(byte))
+    return ':'.join(['%02x' % char for char in info[18:24]])
 
   def handle_jobs(self):
     # see if we are being called from a runonce command
@@ -221,3 +233,11 @@ class nads(JobServerPlugin):
       'port': self.port,
       'mac': self.mac,
     }
+    print("Attempting to register with MPCC...")
+    print(data)
+    response = self.js.session.post(self.js.mprovURL + 'systems/register', data=json.dumps(data))
+    if response.status_code == 200:
+      print("We were able to register.")
+      return True
+    print("There was a problem registering with the MPCC.")
+    return False
