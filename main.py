@@ -24,7 +24,12 @@ def main():
     if '-r' in set(sys.argv):
         runonce = True
     
-    jobServer = JobServer(runonce=runonce)
+    if '-c' in set(sys.argv):
+        configfile = sys.argv[sys.argv.index('-c') + 1]
+    else:
+        configfile = "/etc/mprov/jobserver.yaml"
+
+    jobServer = JobServer(runonce=runonce, configfile=configfile)
     
     if jobServer is not None:
         # Start the main loop and run the plugin handling routines.

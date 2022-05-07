@@ -80,11 +80,17 @@ class JobServer ():
 
   def load_config(self):
     # load the config yaml
+    # print(self.configfile)
     yaml.add_constructor("!include", self.yaml_include)
     if not(os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK)):
       self.configfile = os.getcwd() + "/jobserver.yaml"
-    
-    # YamlIncludeConstructor.add_to_loader_class(loader_class=yaml.FullLoader, base_dir=os.path.dirname(self.configfile))
+    # print(self.configfile)
+    if not(os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK)):
+      print("Error: Unable to find a working config file.")
+      print("Try passing one in with the '-c' option.")
+      sys.exit(1)
+
+
     with open(self.configfile, "r") as yamlfile:
       self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
 
@@ -107,6 +113,9 @@ class JobServer ():
     pass
 
   def load_plugins(self):
+    if self.jobmodules is None:
+      print("Error: You must specify at least 1 jobmodule!")
+      sys.exit(1)
     # Load plugins set in the config file.
     for mod in self.jobmodules:
       # self.job_module_plugins[mod] = importlib.import_module('.' + mod, 'mprov.mprov_jobserver.plugins')
