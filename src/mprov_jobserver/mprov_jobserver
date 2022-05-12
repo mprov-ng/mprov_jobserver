@@ -1,0 +1,23 @@
+#!/bin/bash
+# override this if you need to.
+pythonBinary=`which python3`
+if [ "$pythonBinary" == "" ]
+then
+  pythonBinary=`which python`
+fi
+pythonVersion=`$pythonBinary -V | awk '{print $2}'`
+
+version_greater_equal()
+{
+    printf '%s\n%s\n' "$2" "$1" | sort --check=quiet --version-sort
+}
+
+die() 
+{
+  echo $1
+  exit 1
+}
+
+version_greater_equal "${pythonVersion}" 3.8.0 ||  die "Error: need python 3.8 or above"
+
+$pythonBinary -m mprov.mprov_jobserver.main $@
