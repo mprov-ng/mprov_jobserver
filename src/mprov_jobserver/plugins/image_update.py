@@ -166,7 +166,7 @@ class image_update(JobServerPlugin):
         print(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True
-        print(imgDir + '/tmp/mprov/jobserver.yaml')
+        # print(imgDir + '/tmp/mprov/jobserver.yaml')
         with open(imgDir + '/tmp/mprov/jobserver.yaml',"w") as confFile:
           yaml.dump(localConfig, confFile)
           confFile.write("\n- !include plugins/*.yaml")
