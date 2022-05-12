@@ -252,6 +252,12 @@ class JobServer ():
         'jobmodules': self.jobmodules,
 
     }
+    # print(self.config_data)
+    if  self.config_data['image-server']:
+      if self.config_data['image-server']['serverPort']:
+        # print(self.config_data['image-server']['serverPort'])
+        data['port'] = self.config_data['image-server']['serverPort']
+    
     #print(data)
     # post the response (maybe should be put?) to the server.
     try: 
