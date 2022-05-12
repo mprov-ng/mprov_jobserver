@@ -15,6 +15,6 @@ domain-needed
 
 # add in our domains here
 {% for network in networks %}
-auth-zone={{network.domain}},{{network.subnet}}/{{network.mask}}
+auth-zone={{network.domain}},{{network.subnet}}/{{network.netmask}}
 {% endfor %}
 {% endif %}
