@@ -20,4 +20,4 @@ die()
 
 version_greater_equal "${pythonVersion}" 3.8.0 ||  die "Error: need python 3.8 or above"
 
-$pythonBinary -m mprov.mprov_jobserver.main $@
+$pythonBinary -m mprov_jobserver.main $@
