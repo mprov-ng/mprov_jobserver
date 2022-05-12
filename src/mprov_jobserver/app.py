@@ -274,7 +274,11 @@ class JobServer ():
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
     # # print(response.text)
-    #print(response.json())
+    if type(response.json()) is dict:
+      print("Error: Invalid response from mPCC")
+      print(response.json())
+      sys.exit(1)
+    # print(response.json())
     result = json.loads(response.json())
     
     # grab our id from the MPCC
