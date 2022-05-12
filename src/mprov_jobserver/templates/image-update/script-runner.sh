@@ -1,15 +1,16 @@
 #!/bin/bash
 
+# grab some params
 IMGDIR={{ imgDir }}
 IMAGE={{ image }}
+
 for i in `echo "dev proc run sys"`
 do
   mount -o bind /$i ${IMGDIR}/${i}
 done 
 
-export PYTHONPATH=/root/
-
-chroot $IMGDIR /bin/bash -c "export PYTHONPATH=/root/; cd /root/mprov/mprov_jobserver; /usr/bin/python3 main.py -r -d -i $IMAGE"
+# chroot into our IMGDIR and run the jobserver.
+chroot $IMGDIR /bin/bash -c "/usr/local/bin/mprov_jobserver -c /tmp/mprov/jobserver.yaml -r -d -i $IMAGE"
 
 for i in `echo "dev proc run sys"`
 do

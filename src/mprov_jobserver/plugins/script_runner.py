@@ -5,6 +5,7 @@ import requests
 from threading import Thread
 import json
 import subprocess
+import yaml
 
 class script_runner(JobServerPlugin):
   jobModule = 'script-runner'
@@ -126,7 +127,7 @@ class script_runner(JobServerPlugin):
     # merge the scripts from distro -> system_groups -> entity
     entity = response.json()
 
-    # we should iterables in all the scripts.  Let's process that into a dependancy tree.
+    # we should iterate in all the scripts.  Let's process that into a dependancy tree.
     scriptDeps = {}
     scripts = {}
     # osdistro scripts first
@@ -166,6 +167,45 @@ class script_runner(JobServerPlugin):
       scriptDeps[script['slug']] = deps
       scripts[script['slug']] = script
 
+    yaml_merged={}
+    # then we will flatten config_params on the host.
+    # distro first
+    
+    print(entity['osdistro']['config_params'])
+    tmpYamlDict = yaml.safe_load(entity['osdistro']['config_params'])
+    if tmpYamlDict is not None:
+      if type(tmpYamlDict) is list:
+        for dict in tmpYamlDict:
+          yaml_merged.update(dict)
+      else: 
+          yaml_merged.update(tmpYamlDict)
+    
+    print(yaml_merged)
+    # then the system groups
+    for group in entity['systemgroups']:
+      print(group['config_params'])
+      tmpYamlDict = yaml.safe_load(group['config_params'])
+      if tmpYamlDict is not None:
+        if type(tmpYamlDict) is list:
+          for dict in tmpYamlDict:
+            yaml_merged.update(dict)
+        else:
+            yaml_merged.update(tmpYamlDict)
+          
+    # and finally the system/image params
+    print(yaml_merged)
+    print(yaml.safe_load(entity['config_params']))
+    tmpYamlDict = yaml.safe_load(entity['config_params'])
+    print(tmpYamlDict)
+    if tmpYamlDict is not None:
+      if type(tmpYamlDict) is list:
+        for dict in tmpYamlDict:
+          yaml_merged.update(dict)
+      else: 
+        yaml_merged.update(tmpYamlDict)
+              
+    print(yaml_merged)
+    entity['config_params'] = yaml_merged
 
     # print(scriptDeps)
     # resolve our dependancies

@@ -117,7 +117,7 @@ class image_update(JobServerPlugin):
           return
 
         # install and copy the kernel image to the image root
-        if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel python38 python38-pyyaml python38-requests python38-jinja2.noarch'):
+        if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel python38 python38-pyyaml python38-requests python38-jinja2.noarch jq'):
           print("Error uanble to install kernel into image filesystem")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
@@ -143,28 +143,31 @@ class image_update(JobServerPlugin):
           return
           
         
-        # TODO: run image-gen scripts.
+        # run image-gen scripts.
         
-        import pathlib
-        scriptDir = pathlib.Path(__file__).parent.resolve()
+        # grab a copy of the jobserver wheel from the main mprov server
+        # TODO: Change this to a pip install mprov_jobserver command after publication
 
-        # copy ourself into /root/mprov/ in the image.
-        # check if the imagDir + /root/mprov exists and create it if not
-        os.makedirs(imgDir + '/root/mprov/', exist_ok=True)
-        
-        if os.system('rsync -ar ' + str(scriptDir) + '/../../mprov_jobserver ' + imgDir + '/root/mprov/'):
-          print("Error: Unable to copy a jobserver to the image.")
-          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        if os.system("chroot " + imgDir + " pip3 install " + self.js.mprovURL + "static/mprov_jobserver-0.0.1-py3-none-any.whl --force-reinstall"):
+          print("Error: Unable to install mprov_jobserver python module.")
           return
+
+        # check if the imagDir + /tmp/mprov exists and create it if not
+        os.makedirs(imgDir + '/tmp/mprov/plugins/', exist_ok=True)
         
-        # create a config file for our script-runner instance.
+        # if os.system('rsync -ar ' + str(scriptDir) + '/../../mprov_jobserver ' + imgDir + '/root/mprov/'):
+        #   print("Error: Unable to copy a jobserver to the image.")
+        #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        #   return
+        
+        # create a config file to /tmp for our script-runner instance.
         localConfig = [dict()]
         localConfig[0]['global'] = self.js.config_data['global']
         print(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True
-        print(imgDir + '/root/mprov/mprov_jobserver/jobserver.yaml')
-        with open(imgDir + '/root/mprov/mprov_jobserver/jobserver.yaml',"w") as confFile:
+        print(imgDir + '/tmp/mprov/jobserver.yaml')
+        with open(imgDir + '/tmp/mprov/jobserver.yaml',"w") as confFile:
           yaml.dump(localConfig, confFile)
           confFile.write("\n- !include plugins/*.yaml")
 
@@ -173,10 +176,13 @@ class image_update(JobServerPlugin):
           'image': image,
         }
         # now let's run our script-runner shell script.
-        with open(os.open(imgDir + '/root/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
+        with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
             conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
+        # now let's run our script-runner shell script.
+        with open(os.open(imgDir + '/tmp/mprov/plugins/script-runner.yaml',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
+            conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
 
-        if os.system(imgDir + '/root/mprov/script-runner.sh'):
+        if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
           print("Error while running image-gen scripts via job server..")
         
 
