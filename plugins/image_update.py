@@ -9,7 +9,7 @@ import yaml
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 jenv = Environment(
-    loader=PackageLoader("mprov.mprov_jobserver"),
+    loader=PackageLoader("mprov_jobserver"),
     autoescape=select_autoescape()
 )
 

@@ -10,7 +10,7 @@ import json
 import os
 from inspect import isclass
 from .plugins.plugin import JobServerPlugin
-import mprov.mprov_jobserver.plugins
+import mprov_jobserver.plugins
 import glob
 
 
@@ -119,7 +119,7 @@ class JobServer ():
     # Load plugins set in the config file.
     for mod in self.jobmodules:
       # self.job_module_plugins[mod] = importlib.import_module('.' + mod, 'mprov.mprov_jobserver.plugins')
-      attribute = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+      attribute = getattr(mprov_jobserver.plugins, mod.replace('-', '_'))
         # attribute = getattr(attribute, attribute_name.replace('-', '_'))
       if isclass(attribute) and issubclass(attribute, JobServerPlugin):
         globals()[mod.replace('-', '_')] = attribute
@@ -151,7 +151,7 @@ class JobServer ():
             # if a thread of this plugin is not running, start one.
             if mod not in self.running_threads:
               # print ("Starting mod... " + mod)
-              mod_cls = getattr(mprov.mprov_jobserver.plugins, mod.replace('-', '_'))
+              mod_cls = getattr(mprov_jobserver.plugins, mod.replace('-', '_'))
               mod_cls = getattr(mod_cls, mod.replace('-', '_'))
               self.running_threads[mod] = mod_cls(self)
               self.running_threads[mod].start()

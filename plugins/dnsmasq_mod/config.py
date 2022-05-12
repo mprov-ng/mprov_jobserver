@@ -1,11 +1,11 @@
 from pwd import getpwnam
 from jinja2 import Environment, PackageLoader, select_autoescape
-from mprov.mprov_jobserver.plugins.plugin import JobServerPlugin
+from mprov_jobserver.plugins.plugin import JobServerPlugin
 import os
 import shutil
 
 jenv = Environment(
-    loader=PackageLoader("mprov.mprov_jobserver"),
+    loader=PackageLoader("mprov_jobserver"),
     autoescape=select_autoescape()
 )
 

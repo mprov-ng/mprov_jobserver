@@ -1,6 +1,6 @@
 #!/usr/bin/python
 import signal
-from mprov.mprov_jobserver.app import JobServer
+from mprov_jobserver.app import JobServer
 import sys
 
 jobServer = None
