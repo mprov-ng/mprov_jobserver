@@ -253,8 +253,9 @@ class JobServer ():
 
     }
     # print(self.config_data)
-    if  self.config_data['image-server']:
-      if self.config_data['image-server']['serverPort']:
+    if 'image-server' in self.config_data:
+    # if  self.config_data['image-server']:
+      if 'serverPort' in self.config_data['image-server']:
         # print(self.config_data['image-server']['serverPort'])
         data['port'] = self.config_data['image-server']['serverPort']
     
@@ -270,6 +271,9 @@ class JobServer ():
     
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
+        exit(1)
+    if response.status_code == 500:
+        print("Error: The mPCC had an internal server error.")
         exit(1)
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
