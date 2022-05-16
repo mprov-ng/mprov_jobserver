@@ -150,6 +150,7 @@ class nads(JobServerPlugin):
   port = None
   switch = None
   mac = None
+  reboot = False
 
   def getLLDP(self):
     startTime = time.time()
@@ -179,10 +180,12 @@ class nads(JobServerPlugin):
           tlv_header, tlv_type, tlv_data_len, tlv_oui, tlv_subtype, tlv_payload \
                                                                   = tlv_parse_rv
 
-          if tlv_type == LLDP_TLV_TYPE_PORTDESC:
-            self.port = tlv_payload.decode('utf-8')
-          elif tlv_type == LLDP_TLV_DEVICE_NAME:
+          # if tlv_type == LLDP_TLV_TYPE_PORTDESC:
+          #   self.port = tlv_payload.decode('utf-8')
+          if tlv_type == LLDP_TLV_DEVICE_NAME:
             self.switch= tlv_payload.decode('utf-8')
+          elif tlv_type == LLDP_TLV_TYPE_PORTID:
+            self.port = tlv_payload.decode('utf-8')
 
           # exit our loops, we have what we came for.
           if  self.port is not None and self.switch is not None:
@@ -225,6 +228,11 @@ class nads(JobServerPlugin):
     # grab the mac of the prov interface.
     self.mac = self.getMac()
 
+    if self.port.find('/') >= 0:
+      # we need to parse the port out of the port id.
+      if self.port.rfind('/') >= 0:
+        self.port = self.port[self.port.rfind('/')+1:]
+
     # if we got LLDP, tell the MPCC who we are, or better put, send it our switch, port, and mac.
     # and let it sort it out.
     query = '/systems/register'
@@ -238,6 +246,8 @@ class nads(JobServerPlugin):
     response = self.js.session.post(self.js.mprovURL + 'systems/register', data=json.dumps(data))
     if response.status_code == 200:
       print("We were able to register.")
+      # TODO: Issue  a reboot if we are supposed to.
       return True
     print("There was a problem registering with the MPCC.")
+
     return False

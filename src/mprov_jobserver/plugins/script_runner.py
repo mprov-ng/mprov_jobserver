@@ -6,6 +6,7 @@ from threading import Thread
 import json
 import subprocess
 import yaml
+import socket
 
 class script_runner(JobServerPlugin):
   jobModule = 'script-runner'
@@ -106,7 +107,7 @@ class script_runner(JobServerPlugin):
     elif '-s' in sys.argv:
       sysimage = False
       system = True
-      entityId = sys.argv[sys.argv.index('-s')+1]
+      entityId = socket.gethostname()
     else:
       print("Error: You must specify -i or -s")
       self.printHelp()
@@ -125,7 +126,17 @@ class script_runner(JobServerPlugin):
     # print(self.js.mprovURL + query)
     response = self.js.session.get( self.js.mprovURL + query)
     # merge the scripts from distro -> system_groups -> entity
-    entity = response.json()
+    try:
+      entity = response.json()
+    except:
+      # if this response was bad, try to grab the nads image 
+      query="images/nads/details"
+      response = self.js.session.get( self.js.mprovURL + query )
+      try:
+        entity = response.json()
+      except: 
+        print("Error: Unable to get information from mPCC.")
+        exit(1)
 
     # we should iterate in all the scripts.  Let's process that into a dependancy tree.
     scriptDeps = {}
@@ -207,6 +218,12 @@ class script_runner(JobServerPlugin):
     # print(yaml_merged)
     entity['config_params'] = yaml_merged
 
+    # add the mprovURL to the entity. 
+    entity['mprovURL'] = self.js.mprovURL
+    
+    # add our apikey to the entity
+    entity['apikey'] = self.js.apikey
+
     # print(scriptDeps)
     # resolve our dependancies
     scriptDeps=self.depResolve(scriptDeps)
@@ -231,6 +248,8 @@ class script_runner(JobServerPlugin):
         # wait for the threads in this step to finish.
       for t  in threads:
         t.join()
+    # TODO: remove the entity file.
+
     print("script-runner complete.")
 
   def runScript(self, filename):
@@ -259,7 +278,7 @@ class script_runner(JobServerPlugin):
   def printHelp(self):
     print(sys.argv[0] + ":")
     print("\t-i <systemimage-ID>    - run scripts for systemimage <systemimage-ID>")
-    print("\t-s <hostname>          - run scripts for system <hostname> ")
+    print("\t-s                     - run scripts for system")
     print("\t                         (NOTE: NOT the fqdn!)")
     print("\t-b                     - run in post-boot mode, defaults to image-gen mode without this flag")
     return False

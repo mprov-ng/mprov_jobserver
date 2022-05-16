@@ -1,3 +1,4 @@
 - nads:
     provIntf: 'enp1s0'
     maxLLDPWait: 60
+    reboot: False
