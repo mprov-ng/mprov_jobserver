@@ -1,3 +1,4 @@
+import os
 from .plugin import JobServerPlugin
 import time
 import json
@@ -246,7 +247,9 @@ class nads(JobServerPlugin):
     response = self.js.session.post(self.js.mprovURL + 'systems/register', data=json.dumps(data))
     if response.status_code == 200:
       print("We were able to register.")
-      # TODO: Issue  a reboot if we are supposed to.
+      # Issue  a reboot if we are supposed to.
+      if self.reboot:
+        os.system("/sbin/reboot")
       return True
     print("There was a problem registering with the MPCC.")
 
