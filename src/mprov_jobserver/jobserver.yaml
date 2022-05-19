@@ -1,9 +1,14 @@
 - global:
-    mprovURL: "http://172.16.1.1/"
+    # this points to your mprov control center instance.
+    mprovURL: "http://localhost/"
+    # this is the api key for your mprov control center so that the 
+    # jobserver can login and do stuff.
     apikey: ''
+    # this is the interval which this jobserver will check in with the mPCC
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.
     jobmodules:
+      # set the jobmodules you want to run here.
       # - repo-delete
       # - repo-update
       # - dhcp-update
@@ -12,11 +17,12 @@
       # - dns-delete
       # - pxe-update
       # - pxe-delete
-      - image-update
-      - image-server
-      - image-delete
-      # - image-sync
-      - dnsmasq
+      #- image-update # REQUIRES image-server
+      #- image-server
+      #- image-delete
+      # - image-sync # REQUIRES image-server
+      #- dnsmasq
       # - script-runner
-      
+
+# include any plugin yamls.        
 - !include plugins/*.yaml
