@@ -148,7 +148,7 @@ class image_update(JobServerPlugin):
         # grab a copy of the jobserver wheel from the main mprov server
         # TODO: Change this to a pip install mprov_jobserver command after publication
 
-        if os.system("chroot " + imgDir + " pip3 install " + self.js.mprovURL + "static/mprov_jobserver-0.0.1-py3-none-any.whl --force-reinstall"):
+        if os.system("chroot " + imgDir + " pip3 install mprov_jobserver --force-reinstall"):
           print("Error: Unable to install mprov_jobserver python module.")
           return
 
