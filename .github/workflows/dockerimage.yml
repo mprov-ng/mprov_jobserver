@@ -1,0 +1,37 @@
+name: Docker Image CI
+on:
+  release: 
+    types: [published]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        name: Checkout 
+        uses: actions/checkout@v2
+      
+      - 
+        name: Setup buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Parse the version
+        id: vars
+        run: echo ::set-output name=tag::$(echo ${GITHUB_REF:10})
+
+      - 
+        name: Login to GHCR
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.CR_USER }}
+          password: ${{ secrets.CR_PAT }}
+
+      - 
+        name: Build the mProv Jobserver Docker Image
+        uses: docker/build-push-action@v2
+        with:
+          tags: |
+            ghcr.io/mprov-ng/mprov-jobserver:${{steps.vars.outputs.tag}}
+            ghcr.io/mprov-ng/mprov-jobserver:latest
+          push: true
