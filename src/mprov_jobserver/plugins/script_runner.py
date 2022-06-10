@@ -185,11 +185,14 @@ class script_runner(JobServerPlugin):
     # print(entity['osdistro']['config_params'])
     tmpYamlDict = yaml.safe_load(entity['osdistro']['config_params'])
     if tmpYamlDict is not None:
-      if type(tmpYamlDict) is list:
-        for dict in tmpYamlDict:
-          yaml_merged.update(dict)
-      else: 
-          yaml_merged.update(tmpYamlDict)
+      try:
+        if type(tmpYamlDict) is list:
+          for dict in tmpYamlDict:
+            yaml_merged.update(dict)
+        else: 
+            yaml_merged.update(tmpYamlDict)
+      except:
+        pass
     
     # print(yaml_merged)
     # then the system groups
@@ -197,23 +200,28 @@ class script_runner(JobServerPlugin):
       # print(group['config_params'])
       tmpYamlDict = yaml.safe_load(group['config_params'])
       if tmpYamlDict is not None:
-        if type(tmpYamlDict) is list:
-          for dict in tmpYamlDict:
-            yaml_merged.update(dict)
-        else:
-            yaml_merged.update(tmpYamlDict)
-          
+        try:
+          if type(tmpYamlDict) is list:
+            for dict in tmpYamlDict:
+              yaml_merged.update(dict)
+          else:
+              yaml_merged.update(tmpYamlDict)
+        except:
+          pass  
     # and finally the system/image params
     # print(yaml_merged)
     # print(yaml.safe_load(entity['config_params']))
     tmpYamlDict = yaml.safe_load(entity['config_params'])
     # print(tmpYamlDict)
     if tmpYamlDict is not None:
-      if type(tmpYamlDict) is list:
-        for dict in tmpYamlDict:
-          yaml_merged.update(dict)
-      else: 
-        yaml_merged.update(tmpYamlDict)
+      try:
+        if type(tmpYamlDict) is list:
+          for dict in tmpYamlDict:
+            yaml_merged.update(dict)
+        else: 
+          yaml_merged.update(tmpYamlDict)
+      except:
+        pass
               
     # print(yaml_merged)
     entity['config_params'] = yaml_merged
