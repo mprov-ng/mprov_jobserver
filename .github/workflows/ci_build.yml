@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Python Module CI and Docker build.
 on:
   release: 
     types: [published]
@@ -10,6 +10,30 @@ jobs:
         name: Checkout 
         uses: actions/checkout@v2
       
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.8"
+        
+      - name: Install Dependancies
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools build
+          pip install -r requirements.txt
+      
+      - name: Parse the version
+        id: vars
+        run: echo ::set-output name=tag::$(echo ${GITHUB_REF:10})
+
+      - name: Build Package
+        run: MPJS_VERSION=${{steps.vars.outputs.tag}} python -m build
+      
+      - name: Publish Package to Pypi
+        uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
       - 
         name: Setup buildx
         id: buildx
@@ -34,4 +58,4 @@ jobs:
           tags: |
             ghcr.io/mprov-ng/mprov-jobserver:${{steps.vars.outputs.tag}}
             ghcr.io/mprov-ng/mprov-jobserver:latest
-          push: true
+          push: true    
