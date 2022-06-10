@@ -23,6 +23,7 @@ class JobServer ():
   heartbeatInterval = 10
   configfile="/etc/mprov/jobserver.yaml"
   ip_address = ""
+  myaddress = ""
   plugin_dir = os.path.dirname(os.path.realpath(__file__)) + '/plugins/'
   jobmodules = []
   running_threads = {}
@@ -307,11 +308,17 @@ class JobServer ():
       time.sleep(10)
       return
     self.sessionOk = True
-    # get the sock from the session
-    s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
-    # get the address from the socket
-    address = s.getsockname()
-    self.ip_address=address
+    if self.myaddress is not None:
+      if self.myaddress != '':
+        self.ip_address = self.myaddress
+      else:
+        print("Warning: No address set in config, attempting autodetection.  This may not work right...")
+        # get the sock from the session
+        s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+        # get the address from the socket
+        address = s.getsockname()
+        self.ip_address=address
+      
     # if we get a response.status_code == 200, we're ok.  If not,
     # our auth failed.
     return response.status_code == 200
