@@ -27,7 +27,7 @@ dnf -y install python38 python38-pip python38-pyyaml python38-requests python38-
 
 extra_pip=""
 
-pip3 install mprov_jobserver $extra_pip
+pip3 --no-cache-dir install mprov_jobserver $extra_pip
 
 
 if [ "$BUILD_DOCKER" != "1" ]
