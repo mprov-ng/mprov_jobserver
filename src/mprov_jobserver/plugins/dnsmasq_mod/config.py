@@ -23,6 +23,7 @@ class DnsmasqConfig(JobServerPlugin):
             'mprov_url': self.js.mprovURL,
             'enableDHCP': True,
         }
+        os.makedirs(self.dnsmasqConfDir, exist_ok=True)
         with open(self.dnsmasqConfDir + '/ipxe.conf', 'w') as conf:
             conf.write(jenv.get_template('dnsmasq/ipxe.conf.j2').render(data))
         jobquery = "&jobserver=" + str(self.js.id) + "&module=[\"dns-update\",\"dns-delete\",\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
