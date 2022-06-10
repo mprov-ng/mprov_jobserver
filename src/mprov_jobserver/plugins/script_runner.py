@@ -120,7 +120,7 @@ class script_runner(JobServerPlugin):
     # grab the scripts for this entity.
     query=""
     if sysimage:
-      query="images/" + entityId + "/details"
+      query="systemimages/" + entityId + "/"
     else:
       query="systems/?hostname=" + entityId 
     # print(self.js.mprovURL + query)
@@ -130,7 +130,7 @@ class script_runner(JobServerPlugin):
       entity = response.json()
     except:
       # if this response was bad, try to grab the nads image 
-      query="images/nads/details"
+      query="systemimages/nads/"
       response = self.js.session.get( self.js.mprovURL + query )
       try:
         entity = response.json()

@@ -81,7 +81,8 @@ class image_update(JobServerPlugin):
     
     # now we iterate over our imageList, and build the image(s)
     for image in self.imageList:
-      query = 'images/' + image + '/details'
+      print(f"Processing update for image {image}")
+      query = 'systemimages/' + image + '/'
       response = self.js.session.get( self.js.mprovURL + query)
       if response.status_code == 200:
         imageDetails = response.json()
@@ -209,7 +210,10 @@ class image_update(JobServerPlugin):
             self.js.id,
           ]
         }
-        response = self.js.session.patch(self.js.mprovURL + 'images/' + str(data['slug']) + '/update', data=json.dumps(data))
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
 
-    # Update our jobs with success or failure
-    self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        # Update our jobs with success or failure
+        self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      else: 
+        print(f"Error handling job for {image} server returned {response.status_code} for request {self.js.mprovURL + query}")
+        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')

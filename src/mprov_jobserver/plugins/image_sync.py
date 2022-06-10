@@ -51,7 +51,7 @@ class image_sync(JobServerPlugin):
       # grab the MPCC version for this image.
       # if MPCC 404's the image was deleted.  Remove from our imageList
       # print an error, and move on.  File deletion happens below.
-      response = self.js.session.get( self.js.mprovURL + 'images/' + image + '/details')
+      response = self.js.session.get( self.js.mprovURL + 'systemimages/' + image + '/')
       if(response.status_code == "404" ):
         # image not found in the MPCC, must have been removed, delete it locally.
         self.imageList.remove(image)
@@ -124,7 +124,7 @@ class image_sync(JobServerPlugin):
           'needs_rebuild': False,
           'jobservers': jobservers,
         }
-        response = self.js.session.patch(self.js.mprovURL + 'images/' + str(data['slug']) + '/update', data=json.dumps(data))
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
 
     # Clean up any directories that are not in our imageList.
     # print("Scanning for haning images... " + self.imageDir)
