@@ -127,3 +127,19 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+VERSION
+src/mprov_jobserver/lib64
+src/mprov_jobserver/pyvenv.cfg
+src/mprov_jobserver/bin/activate
+src/mprov_jobserver/bin/activate.csh
+src/mprov_jobserver/bin/activate.fish
+src/mprov_jobserver/bin/Activate.ps1
+src/mprov_jobserver/bin/easy_install
+src/mprov_jobserver/bin/easy_install-3.8
+src/mprov_jobserver/bin/pip
+src/mprov_jobserver/bin/pip3
+src/mprov_jobserver/bin/pip3.8
+src/mprov_jobserver/bin/pyproject-build
+src/mprov_jobserver/bin/python
+src/mprov_jobserver/bin/python3
+src/mprov_jobserver/bin/python3.8
