@@ -37,8 +37,15 @@ then
         systemctl daemon-reload
         systemctl enable mprov_jobserver
         systemctl restart mprov_jobserver
-        firewall-cmd --zone=public --add-service=http
-        firewall-cmd --zone=public --add-service=http --permanent
+	echo "Please remmeber!  You need to open ports in your firewall for your image server to be able to serve images!  By default, this is port 8080."
+	echo "If this machine is running dnsmasq, you will also want to setup the DNS, DHCP, and BOOTP stuff in your firewawll as well, if you are running one."
+	echo
+	echo
+	echo -e "\tExample Commands:"
+	echo -e "\tfirewall-cmd --zone=public --add-port=8080/tcp --runtime-to-permanent"
+	echo -e "\tfirewall-cmd --add-dhcp --runtime-to-permanent"
+	echo -e "\tfirewall-cmd --add-dns --runtime-to-permanent"
 fi
 mkdir /etc/mprov/
 mprov_jobserver -r || true
+
