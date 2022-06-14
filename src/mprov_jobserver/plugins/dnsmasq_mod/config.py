@@ -41,8 +41,7 @@ class DnsmasqConfig(JobServerPlugin):
         else:
             print("Error: Unable to copy " + self.undionlyImg + " to " + self.tftproot)
         # restart dnsmasq
-        os.system('systemctl stop dnsmasq')
-        os.system('systemctl start dnsmasq')
+        os.system('systemctl restart dnsmasq')
         # copy in our ipxe.menu file.
         
         with open(self.tftproot + '/menu.ipxe', 'w') as conf:

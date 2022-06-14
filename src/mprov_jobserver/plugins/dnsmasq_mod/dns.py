@@ -51,4 +51,6 @@ class DnsmasqDNSConfig(JobServerPlugin):
 
             with open(self.mprovDnsmasqDir + '/dns/' + network['slug'] + '-dns.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dns_host.conf.j2').render(data_hosts))
+        # restart dnsmasq
+        os.system('systemctl restart dnsmasq')
 

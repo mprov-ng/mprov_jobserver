@@ -42,9 +42,10 @@ then
 	echo
 	echo
 	echo -e "\tExample Commands:"
-	echo -e "\tfirewall-cmd --zone=public --add-port=8080/tcp --runtime-to-permanent"
-	echo -e "\tfirewall-cmd --add-dhcp --runtime-to-permanent"
-	echo -e "\tfirewall-cmd --add-dns --runtime-to-permanent"
+	echo -e "\tfirewall-cmd --zone=public --add-port=8080/tcp --permanent"
+	echo -e "\tfirewall-cmd --add-dhcp --permanent"
+	echo -e "\tfirewall-cmd --add-dns --permanent"
+        echo -e "\tfirewall-cmd --reload"
 fi
 mkdir /etc/mprov/
 mprov_jobserver -r || true

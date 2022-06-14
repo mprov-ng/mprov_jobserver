@@ -53,4 +53,6 @@ class DnsmasqDHCPConfig(JobServerPlugin):
                 data_hosts['hosts'][idx]['network'] = network['slug']
             with open(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts))
+        # restart dnsmasq
+        os.system('systemctl restart dnsmasq')
 

@@ -127,7 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-VERSION
 src/mprov_jobserver/lib64
 src/mprov_jobserver/pyvenv.cfg
 src/mprov_jobserver/bin/activate
