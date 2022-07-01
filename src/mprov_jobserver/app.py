@@ -251,7 +251,7 @@ class JobServer ():
         'name': myHostname,
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
-
+        'one_minute_load': os.getloadavg()[0]
     }
     # print(self.config_data)
     if 'image-server' in self.config_data:
