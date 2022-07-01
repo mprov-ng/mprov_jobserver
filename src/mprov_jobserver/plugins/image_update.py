@@ -106,7 +106,7 @@ class image_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
 
-
+        ver= str(imageDetails['osdistro']['version'])
         # build the filesystem.
         if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\''):
           print("Error: unable to genergate image filesystem.")
@@ -118,6 +118,19 @@ class image_update(JobServerPlugin):
           print("Error uanble to install kernel into image filesystem")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
+
+        # install the extra repository packages on the system image
+        print("Installing extra repos...")
+        repostr = ""
+        if len(imageDetails['osrepos']) > 0:
+          for repo in imageDetails['osrepos']:
+            repostr += repo['repo_package_url']
+        if len(imageDetails['osdistro']['osrepos']) > 0:
+          for repo in imageDetails['osdistro']['osrepos']:
+            repostr += repo['repo_package_url']
+          
+        if os.system(f'dnf -y --installroot={imgDir} --releasever={ver} install {repostr}'):
+            print("Warn error installing extra repos")
 
         if os.path.exists(imgDir + '/' + image + '.vmlinuz'):
           try:
