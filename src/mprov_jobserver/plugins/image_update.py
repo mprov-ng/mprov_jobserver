@@ -20,10 +20,6 @@ class image_update(JobServerPlugin):
   imageDir = ""
   imageList = None
 
-
-# rpm2cpio < rocky-repos-8.5-3.el8.noarch.rpm | cpio -D /mnt/tmproot/ -id
-# dnf -y --installroot=/mnt/tmproot/ --releasever=8 groupinstall 'Minimal Install'
-
   # override default load config because we have to check that image-server is also enabled.
   def load_config(self):
     if 'image-server' not in self.js.jobmodules:
@@ -123,12 +119,24 @@ class image_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
 
-        if os.system('ls -t ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | head -n1 | xargs -I{} cp {} ' + imgDir + '/' + image + '.vmlinuz'): 
+        if os.path.exists(imgDir + '/' + image + '.vmlinuz'):
+          try:
+            os.remove(imgDir + '/' + image + '.vmlinuz')
+          except:
+            pass
+        
+        if os.path.exists(imgDir + '/' + image + '.initramfs'):
+          try:
+            os.remove(imgDir + '/' + image + '.initramfs')
+          except:
+            pass
+
+        if os.system('ls -t ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + image + '.vmlinuz'): 
           print("Error: unable to copy kernel image.")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
 
-        if os.system('ls -t ' + imgDir + '/boot/initramfs-* | grep -v rescue | head -n1 | xargs -I{} cp {} ' + imgDir + '/' + image + '.initramfs'): 
+        if os.system('ls -t ' + imgDir + '/boot/initramfs-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + image + '.initramfs'): 
           print("Error: unable to copy initramfs.")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
