@@ -142,3 +142,4 @@ src/mprov_jobserver/bin/pyproject-build
 src/mprov_jobserver/bin/python
 src/mprov_jobserver/bin/python3
 src/mprov_jobserver/bin/python3.8
+src/mprov_jobserver/bin/normalizer
