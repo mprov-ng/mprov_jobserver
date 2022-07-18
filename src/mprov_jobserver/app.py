@@ -1,5 +1,6 @@
 
 from datetime import datetime
+import importlib
 import yaml
 import time
 import requests
@@ -152,6 +153,13 @@ class JobServer ():
             # if a thread of this plugin is not running, start one.
             if mod not in self.running_threads:
               # print ("Starting mod... " + mod)
+              # attempt to reload the module, just in case
+              #print(f"Starting {mod.replace('-', '_')}")
+              if f"mprov_jobserver.plugins.{mod.replace('-', '_')}" in sys.modules:
+                #reload
+                #print(f"Reload mprov_jobserver.plugins.{mod.replace('-', '_')}")
+                importlib.reload(sys.modules[f"mprov_jobserver.plugins.{mod.replace('-', '_')}"])
+
               mod_cls = getattr(mprov_jobserver.plugins, mod.replace('-', '_'))
               mod_cls = getattr(mod_cls, mod.replace('-', '_'))
               self.running_threads[mod] = mod_cls(self)
