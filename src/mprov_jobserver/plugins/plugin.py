@@ -50,7 +50,7 @@ class JobServerPlugin(threading.Thread):
     if self.jobModule not in self.js.config_data:
       # This is not necessarily an error, maybe one day print a warning?
       print("Warn: No config found for " + self.jobModule + " hope that's ok..")
-      return False
+      return True
     if self.js.config_data[self.jobModule] is None:
           print("Found empty module config?")
           return False
