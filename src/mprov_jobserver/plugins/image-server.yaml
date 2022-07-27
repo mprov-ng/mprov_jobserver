@@ -1,3 +1,0 @@
-- image-server:
-    imageDir: '/export/images'
-    serverPort: 8080

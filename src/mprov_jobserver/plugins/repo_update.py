@@ -12,8 +12,8 @@ class repo_update(JobServerPlugin):
 
 
   def load_config(self):
-    # if 'repo-server' not in self.js.jobmodules:
-    #   print("Configuration Error: you MUST run repo-server on repo-upate/repo-delete nodes!")
+    # if 'mprov-webserver' not in self.js.jobmodules:
+    #   print("Configuration Error: you MUST run mprov-webserver on repo-upate/repo-delete nodes!")
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
