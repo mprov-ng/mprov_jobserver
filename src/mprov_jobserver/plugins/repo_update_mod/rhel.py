@@ -3,6 +3,8 @@
 import os
 from urllib.parse import urlparse
 from mprov_jobserver.plugins.plugin import JobServerPlugin
+import json
+
 
 class UpdateRepo(JobServerPlugin):
   repo = None
@@ -38,5 +40,15 @@ class UpdateRepo(JobServerPlugin):
       print("Error: unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
+    # update the 'jobservers' field to be us, so that the 
+    data = {
+      'id': self.repo['id'],
+      'hosted_by':[
+        self.js.id,
+      ],
+      'update': False,
+    }
+    print(json.dumps(data))
+    response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
   
     return 

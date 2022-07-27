@@ -10,10 +10,10 @@ class image_update(JobServerPlugin):
   imageDir = ""
   imageList = None
 
-  # override default load config because we have to check that image-server is also enabled.
+  # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
-    if 'image-server' not in self.js.jobmodules:
-      print("Configuration Error: you MUST run image-server on image-upate/image-delete nodes!")
+    if 'mprov-webserver' not in self.js.jobmodules:
+      print("Configuration Error: you MUST run mprov-webserver on image-upate/image-delete nodes!")
       print("                   : image-update/delete nodes are SOURCE nodes for images!")
       print("                   : and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)

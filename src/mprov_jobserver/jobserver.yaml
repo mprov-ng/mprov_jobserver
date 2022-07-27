@@ -18,10 +18,10 @@
       # - dns-delete
       # - pxe-update
       # - pxe-delete
-      #- image-update # REQUIRES image-server
-      #- image-server
+      #- image-update # REQUIRES mprov-webserver
+      #- mprov-webserver
       #- image-delete
-      # - image-sync # REQUIRES image-server
+      # - image-sync # REQUIRES mprov-webserver
       #- dnsmasq
       # - script-runner
 
