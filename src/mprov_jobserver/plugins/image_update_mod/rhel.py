@@ -1,23 +1,16 @@
 # This sub-module of the image-update job module
-import json
 import os
-import time
 from urllib.parse import urlparse
-
-from jinja2 import Environment, PackageLoader, select_autoescape
-
-jenv = Environment(
-    loader=PackageLoader("mprov_jobserver"),
-    autoescape=select_autoescape()
-)
+from slugify import slugify
 
 
-import yaml
+
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 
 class UpdateImage(JobServerPlugin):
   imageDetails = None
   imageDir = ""
+  error = True # true by default, set to False if no errors in the run
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
     # if 'repo-server' not in self.js.jobmodules:
@@ -71,14 +64,44 @@ class UpdateImage(JobServerPlugin):
     # install the extra repository packages on the system image
     print("Installing extra repos...")
     repostr = ""
+    repos = []
+
     if len(imageDetails['osrepos']) > 0:
       for repo in imageDetails['osrepos']:
-        repostr += repo['repo_package_url']
+        if type(repo) is dict:
+          repos.append(repo)
     if len(imageDetails['osdistro']['osrepos']) > 0:
       for repo in imageDetails['osdistro']['osrepos']:
-        repostr += repo['repo_package_url']
-      
-    if os.system(f'dnf -y --installroot={imgDir} --releasever={ver} install {repostr}'):
+        if type(repo) is dict:
+          repos.append(repo)
+
+    if type(imageDetails['osdistro']['baserepo']) is dict:
+      repos.append(imageDetails['osdistro']['baserepo']) 
+
+    # now let's loop through the repos, if it's not managed, it should be a repo URL
+    # if it is managed, create the yum.conf for it in /etc/yum.repos.d/
+    for repo in repos:
+      if type(repo) is not dict:
+        continue
+      print(repo)
+      print("\nx")
+      print(repo['name'])
+      if repo['managed'] :
+        # we have a managed repo, so let's create a file in /etc/yum.repos.d/
+        repoid = slugify(repo['name'])
+        os.makedirs(f"{imgDir}/etc/yum.repos.d", exist_ok=True)
+        with open(os.open(f"{imgDir}/etc/yum.repos.d/{repoid}.repo", os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as repofile:
+            repofile.write(f"[{repoid}]\n")
+            repofile.write(f"name={repo['name']}\n")
+            repofile.write(f"baseurl=\"{self.js.mprovURL}/osrepos/{repo['id']}/\"\n")
+            repofile.write(f"enabled=0\n")
+        pass
+      else:
+        # not managed, should be a repo package URL, add it to repostr.
+        repostr += f" {repo['repo_package_url']}"
+
+    if repostr != "":
+      if os.system(f'dnf -y --installroot={imgDir} --releasever={ver} install {repostr}'):
         print("Warn error installing extra repos")
 
     if os.path.exists(imgDir + '/' + imageDetails['slug'] + '.vmlinuz'):
@@ -113,75 +136,3 @@ class UpdateImage(JobServerPlugin):
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
       
-    
-    # run image-gen scripts.
-    
-    # grab a copy of the jobserver wheel from the main mprov server
-    # TODO: Change this to a pip install mprov_jobserver command after publication
-
-    if os.system("chroot " + imgDir + " pip3 --no-cache-dir install mprov_jobserver --force-reinstall"):
-      print("Error: Unable to install mprov_jobserver python module.")
-      return
-
-    # check if the imagDir + /tmp/mprov exists and create it if not
-    os.makedirs(imgDir + '/tmp/mprov/plugins/', exist_ok=True)
-    
-    # if os.system('rsync -ar ' + str(scriptDir) + '/../../mprov_jobserver ' + imgDir + '/root/mprov/'):
-    #   print("Error: Unable to copy a jobserver to the image.")
-    #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-    #   return
-    
-    # create a config file to /tmp for our script-runner instance.
-    localConfig = [dict()]
-    localConfig[0]['global'] = self.js.config_data['global']
-    print(localConfig[0]['global']['jobmodules'])
-    localConfig[0]['global']['jobmodules'] = ['script-runner']
-    localConfig[0]['global']['runonce'] = True
-    # print(imgDir + '/tmp/mprov/jobserver.yaml')
-    with open(imgDir + '/tmp/mprov/jobserver.yaml',"w") as confFile:
-      yaml.dump(localConfig, confFile)
-      confFile.write("\n- !include plugins/*.yaml")
-
-    data = {
-      'imgDir': imgDir,
-      'image': imageDetails['slug'],
-    }
-    # now let's run our script-runner shell script.
-    with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
-        conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
-    # now let's run our script-runner shell script.
-    with open(os.open(imgDir + '/tmp/mprov/plugins/script-runner.yaml',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
-        conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
-
-    if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
-      print("Error while running image-gen scripts via job server..")
-    
-
-    # package the filesystem into an initramfs
-    print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
-    startTime=time.time()
-    os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-    if os.system('find .  -depth -print| cpio -H newc --quiet -oD ' + imgDir + '  | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
-      print("Error: unable to create initramfs")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      return
-    endTime = time.time()
-    lapsed = endTime - startTime
-    print("Image generated in " + str(lapsed) + " seconds.")
-    print("Image saved to "+ os.getcwd() + "/" + imageDetails['slug'] + '.img')
-    os.system('mv /tmp/' + imageDetails['slug'] + '.img ' + imgDir + '/' )
-
-
-    # update the 'jobservers' field to be us, so that the 
-    data = {
-      'slug': imageDetails['slug'],
-      'needs_rebuild': False,
-      'jobservers':[
-        self.js.id,
-      ]
-    }
-    response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
-
-    # Update our jobs with success or failure
-    self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-  
