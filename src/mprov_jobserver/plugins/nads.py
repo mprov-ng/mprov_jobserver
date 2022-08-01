@@ -22,6 +22,8 @@ from socket import gaierror
 
 from struct import pack, unpack
 
+from dmidecode import DMIDecode
+
 ## Magic constants from `/usr/include/linux/if_ether.h`:
 ETH_P_ALL = 0x0003
 ETH_ALEN = 6
@@ -237,14 +239,19 @@ class nads(JobServerPlugin):
     # if we got LLDP, tell the MPCC who we are, or better put, send it our switch, port, and mac.
     # and let it sort it out.
     query = '/systems/register'
+
+    # grab our DMIDecode information
+    dmi = DMIDecode()
     data = {
       'switch': self.switch,
       'port': self.port,
+      'vendor': dmi.manufacturer(),
+      'model': dmi.model(),
       'mac': self.mac,
     }
     print("Attempting to register with MPCC...")
     print(data)
-    response = self.js.session.post(self.js.mprovURL + 'systems/register', data=json.dumps(data))
+    response = self.js.session.post(f"{self.js.mprovURL}{query}", data=json.dumps(data))
     if response.status_code == 200:
       print("We were able to register.")
       # Issue  a reboot if we are supposed to.
