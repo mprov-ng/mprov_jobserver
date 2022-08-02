@@ -105,7 +105,7 @@ class image_update(JobServerPlugin):
         image_update.imageDir = self.imageDir
         image_update.start()
 
-
+        image_update.join()
         # run image-gen scripts.
     
         # grab a copy of the jobserver wheel from the main mprov server
