@@ -234,7 +234,7 @@ class script_runner(JobServerPlugin):
     # nads images are public, so don't sync the api key.
     if entityId == "nads" and sysimage:
       entity['apikey'] = ""
-    else
+    else:
       # add our apikey to the entity
       entity['apikey'] = self.js.apikey
 
