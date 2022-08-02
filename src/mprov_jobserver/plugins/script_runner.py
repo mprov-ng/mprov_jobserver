@@ -229,8 +229,14 @@ class script_runner(JobServerPlugin):
     # add the mprovURL to the entity. 
     entity['mprovURL'] = self.js.mprovURL
     
-    # add our apikey to the entity
-    entity['apikey'] = self.js.apikey
+    # only add the API key for images that will be sync'ed 
+    # to registered machines only.
+    # nads images are public, so don't sync the api key.
+    if entityId == "nads" and sysimage:
+      entity['apikey'] = ""
+    else
+      # add our apikey to the entity
+      entity['apikey'] = self.js.apikey
 
     # print(scriptDeps)
     # resolve our dependancies
