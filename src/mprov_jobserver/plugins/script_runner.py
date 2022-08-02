@@ -112,32 +112,44 @@ class script_runner(JobServerPlugin):
       print("Error: You must specify -i or -s")
       self.printHelp()
       return False
-
+    entity = None
     if '-b' in sys.argv:
       # someone is asking for post-boot scripts
       scriptMode = 'post-boot'
-    
-    # grab the scripts for this entity.
-    query=""
-    if sysimage:
-      query="systemimages/" + entityId + "/"
+      if not os.path.exists("/tmp/mprov/entity.json"):
+        print("Error: Unable to load /tmp/mprov/entity.json.  Cannot run postboot")
+        sys.exit(1)
+      
+      with open("/tmp/mprov/entity.json", 'r') as entityJSON:
+        entity = json.load(entityJSON)
     else:
-      query="systems/?hostname=" + entityId 
-    # print(self.js.mprovURL + query)
-    response = self.js.session.get( self.js.mprovURL + query)
-    # merge the scripts from distro -> system_groups -> entity
-    try:
-      entity = response.json()
-    except:
-      # if this response was bad, try to grab the nads image 
-      query="systemimages/nads/"
-      response = self.js.session.get( self.js.mprovURL + query )
+      # grab the scripts for this entity.
+      query=""
+      if sysimage:
+        query="systemimages/" + entityId + "/"
+      else:
+        query="systems/?hostname=" + entityId 
+      # print(self.js.mprovURL + query)
+      response = self.js.session.get( self.js.mprovURL + query)
+      # merge the scripts from distro -> system_groups -> entity
       try:
         entity = response.json()
-      except: 
-        print("Error: Unable to get information from mPCC.")
-        exit(1)
+      except:
+        # if this response was bad, try to grab the nads image 
+        query="systemimages/nads/"
+        response = self.js.session.get( self.js.mprovURL + query )
+        try:
+          entity = response.json()
+        except: 
+          print("Error: Unable to get information from mPCC.")
+          exit(1)
 
+    if entity == None:
+      print("Error: Entity Not loaded.")
+      exit(1)
+    if "name" not in entity:
+      print("Error: Corrupted entity found, cannot continue.")
+      exit(1)
     # we should iterate in all the scripts.  Let's process that into a dependancy tree.
     scriptDeps = {}
     scripts = {}
@@ -187,8 +199,8 @@ class script_runner(JobServerPlugin):
     if tmpYamlDict is not None:
       try:
         if type(tmpYamlDict) is list:
-          for dict in tmpYamlDict:
-            yaml_merged.update(dict)
+          for dict_entry in tmpYamlDict:
+            yaml_merged.update(dict_entry)
         else: 
             yaml_merged.update(tmpYamlDict)
       except:
@@ -202,8 +214,8 @@ class script_runner(JobServerPlugin):
       if tmpYamlDict is not None:
         try:
           if type(tmpYamlDict) is list:
-            for dict in tmpYamlDict:
-              yaml_merged.update(dict)
+            for dict_entry in tmpYamlDict:
+              yaml_merged.update(dict_entry)
           else:
               yaml_merged.update(tmpYamlDict)
         except:
@@ -211,13 +223,16 @@ class script_runner(JobServerPlugin):
     # and finally the system/image params
     # print(yaml_merged)
     # print(yaml.safe_load(entity['config_params']))
-    tmpYamlDict = yaml.safe_load(entity['config_params'])
+    if type(entity['config_params']) is dict:
+      tmpYamlDict = entity['config_params']
+    else:
+      tmpYamlDict = yaml.safe_load(entity['config_params'])
     # print(tmpYamlDict)
     if tmpYamlDict is not None:
       try:
         if type(tmpYamlDict) is list:
-          for dict in tmpYamlDict:
-            yaml_merged.update(dict)
+          for dict_entry in tmpYamlDict:
+            yaml_merged.update(dict_entry)
         else: 
           yaml_merged.update(tmpYamlDict)
       except:
