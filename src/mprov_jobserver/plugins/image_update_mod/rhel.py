@@ -56,7 +56,7 @@ class UpdateImage(JobServerPlugin):
       return
 
     # install and copy the kernel image to the image root
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' install kernel python38 python38-pyyaml python38-requests python38-jinja2.noarch jq'):
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enable-repo=powertools install kernel python38 python38-pyyaml python38-requests python38-jinja2.noarch jq parted-devel'):
       print("Error uanble to install kernel into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return

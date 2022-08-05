@@ -3,3 +3,5 @@ jinja2 # https://pypi.org/project/Jinja2/ - 3 Clause BSD
 requests
 python-slugify
 py-dmidecode
+netifaces
+parted

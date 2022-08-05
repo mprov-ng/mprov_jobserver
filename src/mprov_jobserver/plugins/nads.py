@@ -1,3 +1,5 @@
+from ipaddress import IPv4Network
+import ipaddress
 import os
 from .plugin import JobServerPlugin
 import time
@@ -9,9 +11,7 @@ Node Auto Detection System
 Parts for LLDP parsing are borrowed from https://github.com/GoozeyX/lldp.discovery
 
 """
-import re
-import sys
-import signal
+import netifaces
 import fcntl, struct
 
 from ctypes import c_char, c_short, Structure
@@ -218,11 +218,35 @@ class nads(JobServerPlugin):
     #   print(hex(byte))
     return ':'.join(['%02x' % char for char in info[18:24]])
 
+  def detect_provIntf(self):
+    # try to detect our provisioning interface.
+
+    # get a list of interfaces on this system.
+    for iface in netifaces.interfaces():
+      if iface == 'lo':
+        continue
+      iface_details = netifaces.ifaddresses(iface)
+      if netifaces.AF_INET in iface_details:
+        iface_addr = iface_details[netifaces.AF_INET]
+        #print(iface_addr)
+        mask = IPv4Network(f"0.0.0.0/{iface_addr[0]['netmask']}").prefixlen
+        #print(mask)
+        iface_ip = ipaddress.ip_address(iface_addr[0]['addr'])
+        iface_net = ipaddress.ip_network(f"{iface_ip}/{mask}", strict=False)
+        if iface_ip in iface_net:
+          return iface
+    return None
+
   def handle_jobs(self):
     # see if we are being called from a runonce command
     if not self.js.runonce:
       print("Error: script-runner must be run in a 'runonce' jobserver session.")
       return False
+    
+    # attempt to get our provision interface.
+    self.provIntf = self.detect_provIntf()
+    if self.provIntf is None:
+      print("Error: Unable to detect what interface we should provision over.")
     
     # if we cannot get LLDP then exit.
     if self.getLLDP() == False:
