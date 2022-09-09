@@ -7,6 +7,7 @@ import json
 import subprocess
 import yaml
 import socket
+# import pprint
 
 class script_runner(JobServerPlugin):
   jobModule = 'script-runner'
@@ -116,38 +117,49 @@ class script_runner(JobServerPlugin):
     if '-b' in sys.argv:
       # someone is asking for post-boot scripts
       scriptMode = 'post-boot'
-      if not os.path.exists("/tmp/mprov/entity.json"):
-        print("Error: Unable to load /tmp/mprov/entity.json.  Cannot run postboot")
-        sys.exit(1)
+    #   if not os.path.exists("/tmp/mprov/entity.json"):
+    #     print("Error: Unable to load /tmp/mprov/entity.json.  Cannot run postboot")
+    #     sys.exit(1)
       
-      with open("/tmp/mprov/entity.json", 'r') as entityJSON:
-        entity = json.load(entityJSON)
+    #   with open("/tmp/mprov/entity.json", 'r') as entityJSON:
+    #     entity = json.load(entityJSON)
+    # else:
+    # grab the scripts for this entity.
+    query=""
+    if sysimage:
+      query="systemimages/" + entityId + "/"
     else:
-      # grab the scripts for this entity.
-      query=""
-      if sysimage:
-        query="systemimages/" + entityId + "/"
-      else:
-        query="systems/?hostname=" + entityId 
-      # print(self.js.mprovURL + query)
-      response = self.js.session.get( self.js.mprovURL + query)
-      # merge the scripts from distro -> system_groups -> entity
+      query="systems/?self" #?hostname=" + entityId
+    print(self.js.mprovURL + query)
+    response = self.js.session.get( self.js.mprovURL + query)
+    # merge the scripts from distro -> system_groups -> entity
+    try:
+      entity = response.json()
+    except:
+      # if this response was bad, try to grab the nads image 
+      query="systemimages/nads/"
+      print(self.js.mprovURL + query)
+    
+      response = self.js.session.get( self.js.mprovURL + query )
       try:
         entity = response.json()
-      except:
-        # if this response was bad, try to grab the nads image 
-        query="systemimages/nads/"
-        response = self.js.session.get( self.js.mprovURL + query )
-        try:
-          entity = response.json()
-        except: 
-          print("Error: Unable to get information from mPCC.")
-          exit(1)
+      except: 
+        print("Error: Unable to get information from mPCC.")
+        exit(1)
 
     if entity == None:
       print("Error: Entity Not loaded.")
       exit(1)
-    if "name" not in entity:
+
+    # some clean up of the entity
+    if type(entity) == list:
+      if len(entity) == 1:
+        entity = entity[0]
+    if system :
+      entity['osdistro'] = entity['systemimage']['osdistro']
+    # pprint.pprint(entity)
+
+    if "name" not in entity and "hostname" not in entity:
       print("Error: Corrupted entity found, cannot continue.")
       exit(1)
     # we should iterate in all the scripts.  Let's process that into a dependancy tree.
@@ -269,7 +281,7 @@ class script_runner(JobServerPlugin):
       threads = []
       for script in step:
         # download the script and thread it out within this step.
-        # print(scripts[script]['filename'])
+        print(f"Running {scripts[script]['filename']}")
         t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
         t.start()
         threads.append(t)
@@ -277,8 +289,8 @@ class script_runner(JobServerPlugin):
         # wait for the threads in this step to finish.
       for t  in threads:
         t.join()
-    # TODO: remove the entity file.
-
+    # remove the entity file.
+    os.unlink(self.scriptTmpDir + "/entity.json")
     print("script-runner complete.")
 
   def runScript(self, filename):
