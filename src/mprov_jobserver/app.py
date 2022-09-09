@@ -47,13 +47,24 @@ class JobServer ():
     # load our config
     self.load_config()
     
-    
     # set runonce if someone sent it to us.
     if 'runonce' in kwargs:
       self.runonce = kwargs['runonce']
       
+      
     if '-d' in set(sys.argv):
       self.register = False
+
+
+    if '-m' in set(sys.argv):
+      # -m overrides whatever is in the config.
+      # so we will re-write the self.jobmodules list
+      self.jobmodules= sys.argv[sys.argv.index('-m')+1].split(',')
+      # we are also going to specify runonce
+      self.runonce=True
+      # we also don't want to register with mPCC
+      self.register = False
+
     # Load Plugins. (plugins register job modules.)
     self.load_plugins()
 
