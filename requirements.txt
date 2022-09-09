@@ -4,4 +4,4 @@ requests
 python-slugify
 py-dmidecode
 netifaces
-parted
+pyparted==3.11.7
