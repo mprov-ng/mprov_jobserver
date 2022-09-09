@@ -11,7 +11,7 @@ cpuid --ext 29 && set archl amd64 || set archl i386+
 :start
 menu mProv iPXE boot menu
 item --gap --             -------------------------------- mProv -----------------------------------
-item --key m mprov        Boot mProv image
+item --key m mprov        Load mProv Network Based Loader
 item --gap --             ------------------------- Tools and utilities ----------------------------
 item --key p pxelinux     Load PXELinux menu
 item --key d menu-diag    Diagnostics tools...
