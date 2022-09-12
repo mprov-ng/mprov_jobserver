@@ -24,6 +24,7 @@ extra_pkgs=""
 # make sure epel is installed before we try to do anything else.
 dnf -y install epel-release
 dnf -y install python38 python38-pip python38-pyyaml python38-requests python38-jinja2.noarch git wget iproute dnsmasq ipxe-bootimgs tcpdump ipmitool which $extra_pkgs
+dnf -y --enablerepo=powertools install parted-devel
 
 extra_pip=""
 
