@@ -2,7 +2,7 @@
 import os
 from urllib.parse import urlparse
 from slugify import slugify
-
+import json
 
 
 from mprov_jobserver.plugins.plugin import JobServerPlugin
@@ -18,8 +18,15 @@ class UpdateImage(JobServerPlugin):
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
-    return super().load_config()
-
+    res = super().load_config()
+    # Register our OS Type with the mPCC. ? Or should this be a fixture?
+    ostypeurl = f"{self.js.url}/ostypes/"
+    data = { "slug": "rhel", "name": "Yum/DNF Based Linux" }
+    response = self.session.post(ostypeurl, data=json.dumps(data))
+    if response.status_code != 200:
+      print("Error: Error updating OS Type for module.")
+    return res
+    
   def handle_jobs(self):
 
     imageDetails = self.imageDetails
