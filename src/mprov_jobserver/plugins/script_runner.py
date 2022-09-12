@@ -135,6 +135,8 @@ class script_runner(JobServerPlugin):
     # merge the scripts from distro -> system_groups -> entity
     try:
       entity = response.json()
+      if response.status_code != 200:
+        raise Exception()
     except:
       # if this response was bad, try to grab the nads image 
       query="systemimages/nads/"
