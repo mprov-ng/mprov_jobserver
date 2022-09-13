@@ -45,7 +45,7 @@ class repo_update(JobServerPlugin):
 
   def handle_jobs(self):
     #print("repo-update~")
-    # TODO: Get the job from 
+    # Get the job from 
     if not self.js.update_job_status(self.jobModule, 2):
       return # no jobs
     # grab the list of repos to update.
@@ -71,7 +71,7 @@ class repo_update(JobServerPlugin):
         os.makedirs(self.repoDir, exist_ok=True)
       except:
         print("Error: unable to make repodir:" + self.repoDir)
-        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + self(self.js.id) + "&status=2")
+        self.js.update_job_status(self.module, 3, jobquery='jobserver=' + self(self.js.id) + "&status=2")
     
     for repo in self.repoList:
       # grab the repo from the mPCC
@@ -96,7 +96,7 @@ class repo_update(JobServerPlugin):
           print("Error: Unable to import OS Repo Module.")
           print(f"Exception: {err=}, {type(err)=}")
           continue
-
+        
         try:
           repo_update = update_klass(self.js)
         except:
