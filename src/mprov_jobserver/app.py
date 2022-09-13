@@ -65,13 +65,14 @@ class JobServer ():
       # we also don't want to register with mPCC
       self.register = False
 
-    # Load Plugins. (plugins register job modules.)
-    self.load_plugins()
-
     # Authenticat to the Control Center and start a session
     print("mProv Job Server authenticating.")
     if not self.startSession():
         print("Error: Unable to log into mProv Control Center.",file=sys.stderr)
+
+
+    # Load Plugins. (plugins register job modules.)
+    self.load_plugins()
 
     # register the server.
     self.register_server()

@@ -4,6 +4,11 @@ from urllib.parse import urlparse
 from .plugin import JobServerPlugin
 import sys
 import os
+
+
+from os.path import dirname, basename, isfile, join
+import glob
+
 class repo_update(JobServerPlugin):
   jobModule = 'repo-update'
   repoDir = ""
@@ -17,6 +22,25 @@ class repo_update(JobServerPlugin):
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
+        # run load config on each sub_module
+    modules = glob.glob(join(dirname(__file__) + "/image_update_mod", "*.py"))
+    mods = [ basename(f)[:-3] for f in modules if isfile(f) and not f.endswith('__init__.py')]
+    for name in mods:
+      try:
+        mod = importlib.import_module(f".image_update_mod.{name}", "mprov_jobserver.plugins")
+        update_klass = getattr(mod, 'UpdateImage')
+      except BaseException as err:
+        print(f"Error: Unable to import Image Update Module for {name}.")
+        print(f"Exception: {err=}, {type(err)=}")
+        continue
+
+      try:
+        image_update = update_klass(self.js)
+      except:
+        print(f"Error: Unable to instantiate UpdateImage class on {name}")
+        continue
+      image_update.load_config()
+
     return super().load_config()
 
   def handle_jobs(self):

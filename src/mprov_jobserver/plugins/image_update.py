@@ -8,6 +8,9 @@ import time
 import yaml
 from jinja2 import Environment, PackageLoader, select_autoescape
 
+from os.path import dirname, basename, isfile, join
+import glob
+
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
     autoescape=select_autoescape()
@@ -25,6 +28,24 @@ class image_update(JobServerPlugin):
       print("                   : image-update/delete nodes are SOURCE nodes for images!")
       print("                   : and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)
+    # run load config on each sub_module
+    modules = glob.glob(join(dirname(__file__) + "/image_update_mod", "*.py"))
+    mods = [ basename(f)[:-3] for f in modules if isfile(f) and not f.endswith('__init__.py')]
+    for name in mods:
+      try:
+        mod = importlib.import_module(f".image_update_mod.{name}", "mprov_jobserver.plugins")
+        update_klass = getattr(mod, 'UpdateImage')
+      except BaseException as err:
+        print(f"Error: Unable to import Image Update Module for {name}.")
+        print(f"Exception: {err=}, {type(err)=}")
+        continue
+
+      try:
+        image_update = update_klass(self.js)
+      except:
+        print(f"Error: Unable to instantiate UpdateImage class on {name}")
+        continue
+      image_update.load_config()
     return super().load_config()
 
   def handle_jobs(self):
