@@ -1,5 +1,6 @@
 #!/bin/bash
 # override this if you need to.
+export PYTHONUNBUFFERED=1
 pythonBinary=`which python3`
 if [ "$pythonBinary" == "" ]
 then
