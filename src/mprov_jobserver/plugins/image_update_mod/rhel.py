@@ -25,7 +25,7 @@ class UpdateImage(JobServerPlugin):
     response = self.js.session.post(ostypeurl, data=json.dumps(data))
     if response.status_code != 200:
       print("Error: Error updating OS Type for module.")
-    # return res
+    return True
     
   def handle_jobs(self):
 
