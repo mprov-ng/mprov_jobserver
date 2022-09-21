@@ -58,5 +58,5 @@ class UpdateRepo(JobServerPlugin):
     }
     print(json.dumps(data))
     response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
-  
+    self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
     return 
