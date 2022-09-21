@@ -23,23 +23,23 @@ class repo_update(JobServerPlugin):
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
         # run load config on each sub_module
-    modules = glob.glob(join(dirname(__file__) + "/image_update_mod", "*.py"))
+    modules = glob.glob(join(dirname(__file__) + "/repo_update_mod", "*.py"))
     mods = [ basename(f)[:-3] for f in modules if isfile(f) and not f.endswith('__init__.py')]
     for name in mods:
       try:
-        mod = importlib.import_module(f".image_update_mod.{name}", "mprov_jobserver.plugins")
-        update_klass = getattr(mod, 'UpdateImage')
+        mod = importlib.import_module(f".repo_update_mod.{name}", "mprov_jobserver.plugins")
+        update_klass = getattr(mod, 'UpdateRepo')
       except BaseException as err:
-        print(f"Error: Unable to import Image Update Module for {name}.")
+        print(f"Error: Unable to import Repo Update Module for {name}.")
         print(f"Exception: {err=}, {type(err)=}")
         continue
 
       try:
-        image_update = update_klass(self.js)
+        repo_update = update_klass(self.js)
       except:
-        print(f"Error: Unable to instantiate UpdateImage class on {name}")
+        print(f"Error: Unable to instantiate UpdateRepo class on {name}")
         continue
-      image_update.load_config()
+      repo_update.load_config()
 
     return super().load_config()
 
@@ -89,8 +89,8 @@ class repo_update(JobServerPlugin):
           continue
         
         try:
-          print(f".repo_update_mod.{repo['ostype']['slug']}")
-          mod = importlib.import_module(f".repo_update_mod.{repo['ostype']['slug']}", "mprov_jobserver.plugins")
+          print(f".repo_update_mod.{repo['ostype']}")
+          mod = importlib.import_module(f".repo_update_mod.{repo['ostype']}", "mprov_jobserver.plugins")
           update_klass = getattr(mod, 'UpdateRepo')
         except BaseException as err:
           print("Error: Unable to import OS Repo Module.")
@@ -100,7 +100,7 @@ class repo_update(JobServerPlugin):
         try:
           repo_update = update_klass(self.js)
         except:
-          print(f"Error: Unable to instantiate UpdateRepo class on {repo['ostype']['slug']}")
+          print(f"Error: Unable to instantiate UpdateRepo class on {repo['ostype']}")
           continue
         repo_update.repo = repo
         repo_update.repoDir = self.repoDir
