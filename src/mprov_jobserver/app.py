@@ -279,6 +279,8 @@ class JobServer ():
       if 'serverPort' in self.config_data['image-server']:
         # print(self.config_data['image-server']['serverPort'])
         data['port'] = self.config_data['image-server']['serverPort']
+      else: 
+        data['port'] = 8080
     
     #print(data)
     # post the response (maybe should be put?) to the server.

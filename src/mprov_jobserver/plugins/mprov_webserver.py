@@ -16,7 +16,7 @@ class mProvHTTPServer(ThreadingHTTPServer):
 class mprov_webserver(JobServerPlugin):
   jobModule = 'mprov-webserver'
   hostName = "0.0.0.0"
-  serverPort = 80
+  serverPort = 8080
   serverInstance = None
   rootDir = ""
   def handle_jobs(self):
