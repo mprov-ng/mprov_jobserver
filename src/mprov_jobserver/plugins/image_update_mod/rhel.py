@@ -41,30 +41,49 @@ class UpdateImage(JobServerPlugin):
     # grab the repo rpm
     url = urlparse(baseURL)
     file = os.path.basename(url.path)
-    print("Grabbing os repo package: " + baseURL)
-    if os.system('wget -O ' + file + ' ' + baseURL ):
-      print("Error: unable to get repo package: " + baseURL)
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      return
+    print()
+    if imageDetails['osdistro']['baserepo']['managed']:
+      # locally managed repo, let's just generate a repo file and point it.
+      repofileContents=f"""
+[baseos]
+name=Rocky Linux $releasever - BaseOS - mProv
+baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
+gpgcheck=1
+enabled=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
 
-    # force the RPM to unpack to our image dir.
-    print("Unpacking RPM to " + imgDir)
-    
-    if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
-      print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      return
+      """
+
+      os.makedirs(f"{imgDir}/etc/yum.repos.d/", exist_ok=True)
+      with open(f"{imgDir}/etc/yum.repos.d/Rocky-BaseOS.repo", "w") as repofile:
+        repofile.write(repofileContents)
+    else:
+      print("Grabbing os repo package: " + baseURL)
+      if os.system('wget -O ' + file + ' ' + baseURL ):
+        print("Error: unable to get repo package: " + baseURL)
+        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        return
+
+      # force the RPM to unpack to our image dir.
+      print("Unpacking RPM to " + imgDir)
+      
+      if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
+        print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
+        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        return
 
     ver= str(imageDetails['osdistro']['version'])
     # build the filesystem.
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\'')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\''):
       print("Error: unable to genergate image filesystem.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
 
     # install and copy the kernel image to the image root
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools'):
-      print("Error uanble to install kernel into image filesystem")
+      print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
 
