@@ -274,11 +274,11 @@ class JobServer ():
         'one_minute_load': os.getloadavg()[0]
     }
     # print(self.config_data)
-    if 'image-server' in self.config_data:
-    # if  self.config_data['image-server']:
-      if 'serverPort' in self.config_data['image-server']:
-        # print(self.config_data['image-server']['serverPort'])
-        data['port'] = self.config_data['image-server']['serverPort']
+    if 'mprov-server' in self.config_data:
+    # if  self.config_data['mprov-server']:
+      if 'serverPort' in self.config_data['mprov-server']:
+        # print(self.config_data['mprov-server']['serverPort'])
+        data['port'] = self.config_data['mprov-server']['serverPort']
       else: 
         data['port'] = 8080
     
