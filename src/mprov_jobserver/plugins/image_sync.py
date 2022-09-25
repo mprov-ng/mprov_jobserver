@@ -47,10 +47,12 @@ class image_sync(JobServerPlugin):
     
     # so here we should have either a hard coded config list of images, 
     # or a list of all images grabbed from the server.
+    print(self.imageList)
     for image in self.imageList: 
       # grab the MPCC version for this image.
       # if MPCC 404's the image was deleted.  Remove from our imageList
       # print an error, and move on.  File deletion happens below.
+      print(f"Syncing images for {image}")
       response = self.js.session.get( self.js.mprovURL + 'systemimages/' + image + '/')
       if(response.status_code == "404" ):
         # image not found in the MPCC, must have been removed, delete it locally.
@@ -106,7 +108,7 @@ class image_sync(JobServerPlugin):
             with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
               for chunk in remoteImage.iter_content(chunk_size=8192):
                 localFile.write(chunk)
-                
+        print(f"Image {image} download complete. Updating versions")        
         # file download complete.  Update our version
         imgVersions[image] = mpccVersion
         ourVersion = mpccVersion
@@ -114,9 +116,10 @@ class image_sync(JobServerPlugin):
           vfile.write(json.dumps(imgVersions))
 
         # tell the MPCC we can host this file
+        print(f"Adding ourself to mPCC for image {image}")
         jobservers = []
         for jobserver in currJobServers:
-          jobservers.append(jobserver['id'])
+          jobservers.append(jobserver)
         # now append our id
         jobservers.append(self.js.id)
         data = {
@@ -125,9 +128,12 @@ class image_sync(JobServerPlugin):
           'jobservers': jobservers,
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        print(f"Image {image} updated.")
+      else:
+        print(f"Image {image} up to date.")
 
     # Clean up any directories that are not in our imageList.
-    # print("Scanning for haning images... " + self.imageDir)
+    print("Scanning for haning images... " + self.imageDir)
     for entry in os.listdir(self.imageDir):
       # print(entry)
       if os.path.isdir(self.imageDir + '/' + entry):
