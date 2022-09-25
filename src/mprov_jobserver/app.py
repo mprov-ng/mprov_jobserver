@@ -220,10 +220,16 @@ class JobServer ():
     else:
       queryURL = self.mprovURL + 'jobs/?search=' + job_module
     response = self.session.get( queryURL )
-    if response.status_code == 400:
-        print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
+    if response.status_code <= 199 or response.status_code >=300:
+
+        print(f"Error: Server returned error {response.status_code}. ",file=sys.stderr)
         exit(1)
-    if (response.json() == [] ):
+    try:
+      if (response.json() == [] ):
+        return False
+    except:
+      print(f"There was an error parsing output from the mPCC.  Output: ")
+      print(f"{response.text}")
       return False
     # print(job_module)
     # print(response.json())
