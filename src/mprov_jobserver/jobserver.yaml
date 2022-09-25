@@ -12,12 +12,6 @@
       # set the jobmodules you want to run here.
       # - repo-delete
       # - repo-update
-      # - dhcp-update
-      # - dhcp-delete
-      # - dns-update
-      # - dns-delete
-      # - pxe-update
-      # - pxe-delete
       #- image-update # REQUIRES mprov-webserver
       #- mprov-webserver
       #- image-delete
