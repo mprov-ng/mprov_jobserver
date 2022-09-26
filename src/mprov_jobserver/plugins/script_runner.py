@@ -100,6 +100,7 @@ class script_runner(JobServerPlugin):
       self.printHelp()
       return False
 
+
     # look for a s
     if '-i' in sys.argv:
       sysimage = True
@@ -117,14 +118,8 @@ class script_runner(JobServerPlugin):
     if '-b' in sys.argv:
       # someone is asking for post-boot scripts
       scriptMode = 'post-boot'
-    #   if not os.path.exists("/tmp/mprov/entity.json"):
-    #     print("Error: Unable to load /tmp/mprov/entity.json.  Cannot run postboot")
-    #     sys.exit(1)
-      
-    #   with open("/tmp/mprov/entity.json", 'r') as entityJSON:
-    #     entity = json.load(entityJSON)
-    # else:
-    # grab the scripts for this entity.
+
+    # XXX: Can this be better optimized?
     query=""
     if sysimage:
       query="systemimages/" + entityId + "/"
@@ -132,7 +127,6 @@ class script_runner(JobServerPlugin):
       query="systems/?self" #?hostname=" + entityId
     print(self.js.mprovURL + query)
     response = self.js.session.get( self.js.mprovURL + query)
-    # merge the scripts from distro -> system_groups -> entity
     try:
       entity = response.json()
       if response.status_code != 200:
@@ -164,6 +158,9 @@ class script_runner(JobServerPlugin):
     if "name" not in entity and "hostname" not in entity:
       print("Error: Corrupted entity found, cannot continue.")
       exit(1)
+
+    # merge the scripts from distro -> system_groups -> entity
+
     # we should iterate in all the scripts.  Let's process that into a dependancy tree.
     scriptDeps = {}
     scripts = {}
