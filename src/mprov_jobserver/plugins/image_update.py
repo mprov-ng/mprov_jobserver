@@ -48,7 +48,133 @@ class image_update(JobServerPlugin):
       image_update.load_config()
     return super().load_config()
 
+  def updateImageJobservers(self):
+
+    # if we don't have an ~image path, make one.
+    os.makedirs(self.imageDir, exist_ok=True)
+
+    # see if we have a image-versions file
+    if not os.path.exists(self.imageDir + '/image-versions'):
+      # no versions file.  Create a blank one right quick
+      with open(self.imageDir + '/image-versions', "w") as vfile:
+        vfile.write(json.dumps({}))
+    imgVersions = {}
+    with open(self.imageDir + '/image-versions', "r") as vfile:
+      # grab the version info into a var
+      try:
+        imgVersions = json.loads(vfile.read())
+      except:
+        pass
+        
+
+    # TODO: cycle through the images we should be serving and 
+    # check our version(s) against the mPCC.
+    imageList = []
+    if self.imageList is None:
+      imageList = []
+      # no config for image list, so grab all of them from the mPCC
+      response = self.js.session.get(f"{self.js.mprovURL}images/")
+      #if we don't get a good reply, error out of this function only. We'll try again
+      # on the next iteration
+      if response.status_code <=199 or response.status_code >=300:
+        print("Error: Unable to get a list of images from the mPCC.")
+        return
+      try: 
+        for image in response.json():
+          imageList.append(image['slug'])
+      except:
+        print("Error: Unable to get a list of images from the mPCC")
+
+        return
+
+    # here we should have some sort of an image list.  So let's begin.
+    for image in imageList:
+      response = self.js.session.get(f"{self.js.mprovURL}systemimages/{image}/")
+      if response.status_code <= 199 or response.status_code >= 300:
+        print(f"Error: Unable to retrieve data for image {image}")
+        continue
+      try:
+        imageData = response.json()
+      except:
+        imageData = None
+        print(response.text)
+      if imageData is None:
+        print(f"Error: Error trying to retrieve data for image {image}")
+        continue
+      # print(imageData)
+      # print(self.js.id)
+      if self.js.id in imageData['jobservers']:
+        # we are already in here.  
+        continue
+      #print(imgVersions)
+      if image not in imgVersions:
+        # we have no record of this image version, shim with 0
+        imgVersions[image] = 0
+      if imgVersions[image] == imageData['version']:
+        # our image version matches, tell the mPCC about us.
+        jobservers = []
+        for jobserver in imageData['jobservers']:
+          jobservers.append(jobserver)
+        # now append our id
+        jobservers.append(self.js.id)
+        data = {
+          'slug': image,
+          'needs_rebuild': False,
+          'jobservers': jobservers,
+        }
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        if response.status_code <= 199 or response.status_code >= 300:
+          print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
+        continue
+      # check our version against the mPCC version
+      if imgVersions[image] != imageData['version']:
+        if len(imageData['jobservers']) > 0:
+          # if our version doesn't match, and there are job servers available, pull the image from someone else.
+          with self.js.session.get(self.js.mprovURL + 'images/' + image, stream=True) as remoteImage:
+            remoteImage.raise_for_status()
+            os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+            with open(self.imageDir + '/' + image + '/' + image + '.img', 'wb') as localFile:
+              for chunk in remoteImage.iter_content(chunk_size=8192):
+                localFile.write(chunk)
+
+            # grab the initramfs
+            with self.js.session.get(self.js.mprovURL + 'images/' + image + '.initramfs', stream=True) as remoteImage:
+              remoteImage.raise_for_status()
+              os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+              with open(self.imageDir + '/' + image + '/' + image + '.initramfs', 'wb') as localFile:
+                for chunk in remoteImage.iter_content(chunk_size=8192):
+                  localFile.write(chunk)
+          
+            # grab the kernel
+            with self.js.session.get(self.js.mprovURL + 'kernels/' + image + '.vmlinuz', stream=True) as remoteImage:
+              remoteImage.raise_for_status()
+              os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+              with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
+                for chunk in remoteImage.iter_content(chunk_size=8192):
+                  localFile.write(chunk)
+            with open(self.imageDir + '/image-versions', "w") as vfile:
+              vfile.write(json.dumps(imgVersions))
+        else:
+          # if our version doesn't match, and there are no jobservers, submit an image-update job to the mPCC
+          data = {
+            "params": { "imageId" : imageData['slug'] },
+            "name": "Image Update",
+            "module": "image-update",
+            "status": 1,
+            "jobserver": self.js.id,
+          }
+          #print(json.dumps(data))
+          response = self.js.session.post(f"{self.js.mprovURL}jobs/",data=json.dumps(data))
+          if response.status_code <= 199 or response.status_code >= 300:
+            print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
+
   def handle_jobs(self):
+    # try:
+    self.updateImageJobservers()
+    # except Exception as e:
+    #   print("Error: There was an error updating Jobservers for Images.")
+    #   print(f"{e=}")
+
     if self.imageList is None:
       # grab all the image-update jobs.
       if not self.js.update_job_status(self.jobModule, 2):
@@ -133,7 +259,7 @@ class image_update(JobServerPlugin):
         # TODO: Change this to a pip install mprov_jobserver command after publication
         imgDir = self.imageDir + '/' + imageDetails['slug']
 
-        if os.system("chroot " + imgDir + " pip3 --no-cache-dir install mprov_jobserver"):
+        if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           return
 
@@ -190,6 +316,18 @@ class image_update(JobServerPlugin):
           ]
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        with open(self.imageDir + '/image-versions', "r") as vfile:
+          # grab the version info into a var
+          try:
+            imgVersions = json.loads(vfile.read())
+          except:
+            # if we have an error loading the version data, 
+            # init it with no version data, we'll rebuild it 
+            # in a moment.
+            imgVersions = {}
+        with open(self.imageDir + '/image-versions', "w") as vfile:
+          imgVersions[imageDetails['slug']] = imageDetails['version']
+          vfile.write(json.dumps(imgVersions))
 
         # Update our jobs with success or failure
         self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
