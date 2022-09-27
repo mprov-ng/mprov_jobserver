@@ -9,6 +9,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     self.directory = self.server.rootDir
     return super().do_GET()    
 
+  def do_HEAD(self):
+    self.directory = self.server.rootDir
+    return super().do_HEAD()
 
 class mProvHTTPServer(ThreadingHTTPServer):
   rootDir = ""      
