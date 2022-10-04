@@ -15,20 +15,20 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     path = self.translate_path(self.path)
     if not os.path.isdir(path):
       if path.endswith("/"):
-        self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+        self.send_error(HTTPStatus.NOT_FOUND, "File not found, filename invalid")
         return False
     f=None
     try:
       f = open(path, 'rb')
     except OSError:
-      self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+      self.send_error(HTTPStatus.NOT_FOUND, "File not found, unable to open")
       return False
     try:
       fs = os.fstat(f.fileno())
       if fs[6] >= mProvHTTPReqestHandler.maxConnFileSize:
         if mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn:
           # 404 will result in a retry from the mPCC/client hopefully to another server.
-          self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+          self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
           return False
     except:
       f.close()
@@ -37,12 +37,15 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     return True
 
   def do_GET(self):
+    print(mProvHTTPReqestHandler.connCount)
     retVal = None
     if self.checkFileSize():
       # we are ok to serve.
       mProvHTTPReqestHandler.connCount += 1
-      retVal = super().do_GET()
-      mProvHTTPReqestHandler.connCount -= 1
+      try:
+        retVal = super().do_GET()
+      finally:
+        mProvHTTPReqestHandler.connCount -= 1
     else:
       print("Error: checkFileSize failed.")
 

@@ -67,7 +67,7 @@ class image_update(JobServerPlugin):
         pass
         
 
-    # TODO: cycle through the images we should be serving and 
+    # cycle through the images we should be serving and 
     # check our version(s) against the mPCC.
     imageList = []
     if self.imageList is None:
