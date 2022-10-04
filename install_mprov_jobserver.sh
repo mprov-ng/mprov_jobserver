@@ -48,6 +48,8 @@ then
 	echo -e "\tfirewall-cmd --add-service=dns --permanent"
 	echo -e "\tfirewall-cmd --add-service=tftp --permanent"
         echo -e "\tfirewall-cmd --reload"
+        echo -e "If you are using IPv6 you will want something like:"
+        echo -e "\tfirewall-cmd --add-service=dhcpv6 --permanent && firewall-cmd --reload"
 fi
 mkdir /etc/mprov/
 mprov_jobserver -r || true

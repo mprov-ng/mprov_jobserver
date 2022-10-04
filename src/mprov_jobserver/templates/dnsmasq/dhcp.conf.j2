@@ -4,10 +4,23 @@
 # dhcp ranges which have been set and enabled in MPCC
 {% for network in networks %}
 # Network: {{network.slug}}
+{% if ":" in network.dhcpstart %}
+dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}},slaac
+{% else %}
 dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}}
+{% endif %}
+
+{% if ":" in network.gateway %}
+{% else %}
 dhcp-option=tag:{{network.slug}},option:router,{{network.gateway}}
+{% endif %}
 dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
+
+{% if ":" in network.nameserver1 %}
+dhcp-option=tag:{{network.slug}},option6:dns-server,{{network.nameserver1}}
+{% else %}
 dhcp-option=tag:{{network.slug}},option:dns-server,{{network.nameserver1}}
+{% endif %}
 
 {% endfor %}
 
