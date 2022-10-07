@@ -223,7 +223,7 @@ class JobServer ():
     if response.status_code <= 199 or response.status_code >=300:
 
         print(f"Error: Server returned error {response.status_code}. ",file=sys.stderr)
-        exit(1)
+        return False
     try:
       if (response.json() == [] ):
         return False
@@ -300,17 +300,17 @@ class JobServer ():
     
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
-        exit(1)
+        return
     if response.status_code == 500:
         print("Error: The mPCC had an internal server error.")
-        exit(1)
+        return
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
     # # print(response.text)
     if type(response.json()) is dict:
       print("Error: Invalid response from mPCC")
       print(response.json())
-      sys.exit(1)
+      return
     # print(response.json())
     result = json.loads(response.json())
     
