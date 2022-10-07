@@ -60,11 +60,7 @@ class image_sync(JobServerPlugin):
         print("Error: Image '" + image + "' was not found on the MPCC, removing locally." )
         print("Error: Consider removing it from your config.")
         continue
-      if(response.json()['jobservers'] == []):
-        self.imageList.remove(image)
-        print("Warn: No jobservers available yet for image: " + image)
-        print("Warn: Not syncing image: " + image)
-        continue
+
       mpccVersion = response.json()['version']
       currJobServers = response.json()['jobservers']
 
