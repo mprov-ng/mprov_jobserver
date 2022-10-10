@@ -311,7 +311,7 @@ class JobServer ():
     # # print(response.text)
     try: 
       # check if we are actually json
-      _ = response.js()
+      _ = response.json()
     except:
       print("Error: mPCC gave us an invalid reply.")
       print(response.text)

@@ -130,6 +130,7 @@ class script_runner(JobServerPlugin):
     try:
       entity = response.json()
       if response.status_code != 200:
+        print(f"code: {response.status_code}")
         raise Exception()
     except:
       # if this response was bad, try to grab the nads image 
