@@ -11,7 +11,7 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   maxConn=10
   maxConnFileSize=0 
   def checkFileSize(self):
-    self.maxConnFileSize = self.server.maxConnSize
+    self.maxConnFileSize = self.server.maxConnFileSize
     self.directory = self.server.rootDir
     path = self.translate_path(self.path)
     if not os.path.isdir(path):
@@ -52,14 +52,11 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
         if mProvHTTPReqestHandler.connCount < mProvHTTPReqestHandler.maxConn:
           if self.server.js is not None:
             self.server.js.register = True
-    else:
-      print("Error: checkFileSize failed.")
 
     return retVal
 
   def do_HEAD(self):
     if not self.checkFileSize():
-      print("Error: checkFileSize failed.")
       return None
     return super().do_HEAD()
 
