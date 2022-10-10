@@ -300,13 +300,23 @@ class JobServer ():
     
     if response.status_code == 400:
         print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
+        self.sessionOk = False
         return
     if response.status_code == 500:
         print("Error: The mPCC had an internal server error.")
+        self.sessionOk = False
         return
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
     # # print(response.text)
+    try: 
+      # check if we are actually json
+      _ = response.js()
+    except:
+      print("Error: mPCC gave us an invalid reply.")
+      print(response.text)
+      return
+    
     if type(response.json()) is dict:
       print("Error: Invalid response from mPCC")
       print(response.json())
