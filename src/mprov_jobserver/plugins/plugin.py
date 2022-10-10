@@ -45,14 +45,11 @@ class JobServerPlugin(threading.Thread):
     # as the main jobserver.yaml file.  
     #print(self.js.config_data)
     if self.js.config_data is None:
-          print("Conf is empty? ")
           return False
     if self.jobModule not in self.js.config_data:
       # This is not necessarily an error, maybe one day print a warning?
-      print("Warn: No config found for " + self.jobModule + " hope that's ok..")
       return True
     if self.js.config_data[self.jobModule] is None:
-          print("Found empty module config?")
           return False
     for config_entry in self.js.config_data[self.jobModule].keys():
         try:
