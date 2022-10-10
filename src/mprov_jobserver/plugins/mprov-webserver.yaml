@@ -1,3 +1,4 @@
 - mprov-webserver:
     rootDir: '/export/'
     serverPort: 8080
+    maxConnFileSize: 0 # all files by default, set this in bytes to only apply to files of this size or bigger for connection limiting.

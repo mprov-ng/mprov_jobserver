@@ -9,8 +9,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   # the config yaml.
   connCount=0
   maxConn=10
-  maxConnFileSize=104857600 #100MB
+  maxConnFileSize=0 
   def checkFileSize(self):
+    self.maxConnFileSize = self.server.maxConnSize
     self.directory = self.server.rootDir
     path = self.translate_path(self.path)
     if not os.path.isdir(path):
@@ -29,6 +30,8 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
         if mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn:
           # 404 will result in a retry from the mPCC/client hopefully to another server.
           self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
+          if self.server.js is not None:
+            self.server.js.register = False
           return False
     except:
       f.close()
@@ -46,6 +49,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
         retVal = super().do_GET()
       finally:
         mProvHTTPReqestHandler.connCount -= 1
+        if mProvHTTPReqestHandler.connCount < mProvHTTPReqestHandler.maxConn:
+          if self.server.js is not None:
+            self.server.js.register = True
     else:
       print("Error: checkFileSize failed.")
 
@@ -58,7 +64,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     return super().do_HEAD()
 
 class mProvHTTPServer(ThreadingHTTPServer):
-  rootDir = ""      
+  rootDir = ""  
+  maxConnFileSize = 0
+  js = None    
 
 class mprov_webserver(JobServerPlugin):
   jobModule = 'mprov-webserver'
@@ -66,12 +74,16 @@ class mprov_webserver(JobServerPlugin):
   serverPort = 8080
   serverInstance = None
   rootDir = ""
+  maxConnFileSize = 0 
+
   def handle_jobs(self):
     print(f"Starting mProv Webserver on port {self.serverPort}...")
 
     serverInstance = mProvHTTPServer((self.hostName, self.serverPort), mProvHTTPReqestHandler)
     serverInstance.rootDir = self.rootDir
     serverInstance.timeout=0.5
+    serverInstance.js = self.js
+    serverInstance.maxConnFileSize = self.maxConnFileSize
     # this should allow us to exit out ok.
     while(self.js.running):
       serverInstance.handle_request()
