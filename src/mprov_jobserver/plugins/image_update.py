@@ -122,7 +122,7 @@ class image_update(JobServerPlugin):
           'needs_rebuild': False,
           'jobservers': jobservers,
         }
-        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
         if response.status_code <= 199 or response.status_code >= 300:
           print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
         continue
@@ -315,7 +315,7 @@ class image_update(JobServerPlugin):
             self.js.id,
           ]
         }
-        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
         with open(self.imageDir + '/image-versions', "r") as vfile:
           # grab the version info into a var
           try:
