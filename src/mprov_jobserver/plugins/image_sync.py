@@ -123,7 +123,7 @@ class image_sync(JobServerPlugin):
           'needs_rebuild': False,
           'jobservers': jobservers,
         }
-        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/', data=json.dumps(data))
+        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
         print(f"Image {image} updated.")
       
 
