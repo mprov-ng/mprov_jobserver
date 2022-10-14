@@ -3,6 +3,7 @@ import os
 from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
+import multiprocessing
 
 class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   # TODO: make maxConn and maxConnFileSize configurable through
@@ -41,6 +42,12 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
 
   def do_GET(self):
     print(mProvHTTPReqestHandler.connCount)
+      
+    if os.getloadavg()[0] >= multiprocessing.cpu_count():
+      print("Not Registering, high load.")
+      self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
+      return False
+      
     retVal = None
     if self.checkFileSize():
       # we are ok to serve.

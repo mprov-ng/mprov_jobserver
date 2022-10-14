@@ -13,7 +13,7 @@ from inspect import isclass
 from .plugins.plugin import JobServerPlugin
 import mprov_jobserver.plugins
 import glob
-
+import multiprocessing
 
 
 class JobServer ():
@@ -279,6 +279,9 @@ class JobServer ():
         'jobmodules': self.jobmodules,
         'one_minute_load': os.getloadavg()[0]
     }
+    if data['one_minute_load'] >= multiprocessing.cpu_count():
+      print("Not Registering, high load.")
+      return
     # print(self.config_data)
     if 'mprov-webserver' in self.config_data:
     # if  self.config_data['mprov-webserver']:
