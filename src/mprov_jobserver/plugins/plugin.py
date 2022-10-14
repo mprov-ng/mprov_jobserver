@@ -25,6 +25,11 @@ class JobServerPlugin(threading.Thread):
     self.name = self.__class__
     self.js = js
     pass
+  def checkHTTPStatus(self, status):
+    # return True if  199 < status < 300
+    if 199 < status < 300: 
+      return True
+    return False
 
   def run(self):
     if self.load_config():
