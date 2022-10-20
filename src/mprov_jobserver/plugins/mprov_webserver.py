@@ -19,6 +19,8 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
       if path.endswith("/"):
         self.send_error(HTTPStatus.NOT_FOUND, "File not found, filename invalid")
         return False
+    else:
+      return True
     f=None
     try:
       f = open(path, 'rb')
