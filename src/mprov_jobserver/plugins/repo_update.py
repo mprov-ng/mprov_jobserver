@@ -72,7 +72,9 @@ class repo_update(JobServerPlugin):
       except:
         print("Error: unable to make repodir:" + self.repoDir)
         self.js.update_job_status(self.module, 3, jobquery='jobserver=' + self(self.js.id) + "&status=2")
-    
+    # create an empty robots.txt file.
+    with open(f'{self.repoDir}/robots.txt', 'w') as fp:
+      pass
     for repo in self.repoList:
       # grab the repo from the mPCC
         

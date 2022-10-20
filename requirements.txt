@@ -5,3 +5,4 @@ python-slugify
 py-dmidecode
 netifaces
 pyparted==3.11.7
+sh
