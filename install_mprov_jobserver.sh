@@ -28,7 +28,7 @@ dnf -y --enablerepo=powertools install parted-devel
 
 extra_pip=""
 
-pip3 --no-cache-dir install mprov_jobserver $extra_pip
+pip3.8 --no-cache-dir install mprov_jobserver $extra_pip
 
 
 if [ "$BUILD_DOCKER" != "1" ]
@@ -51,6 +51,6 @@ then
         echo -e "If you are using IPv6 you will want something like:"
         echo -e "\tfirewall-cmd --add-service=dhcpv6 --permanent && firewall-cmd --reload"
 fi
-mkdir /etc/mprov/
+mkdir -p /etc/mprov/
 mprov_jobserver -r || true
 
