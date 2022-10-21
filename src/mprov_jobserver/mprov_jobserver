@@ -1,7 +1,7 @@
 #!/bin/bash
 # override this if you need to.
 export PYTHONUNBUFFERED=1
-pythonBinary=`which python3`
+pythonBinary=`which python3.8`
 if [ "$pythonBinary" == "" ]
 then
   pythonBinary=`which python`
