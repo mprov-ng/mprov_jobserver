@@ -230,7 +230,7 @@ class nads(JobServerPlugin):
     ifceCmdFiles = glob("/sys/kernel/debug/i40e/*/command" )
     for ifaceCmdFile in ifceCmdFiles:
       try:
-        with open(ifceCmdFiles, 'w') as ifile:
+        with open(ifaceCmdFile, 'w') as ifile:
           ifile.write("lldp stop\n")
       except:
         # ignore all errors here because we really don't care.
@@ -254,7 +254,7 @@ class nads(JobServerPlugin):
     # and now, we are supposed to turn it backon again.....
     for ifaceCmdFile in ifceCmdFiles:
       try:
-        with open(ifceCmdFiles, 'w') as ifile:
+        with open(ifaceCmdFile, 'w') as ifile:
           ifile.write("lldp start\n")
       except:
         # ignore all errors here because we really don't care.
