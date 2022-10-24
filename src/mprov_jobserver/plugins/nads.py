@@ -4,6 +4,7 @@ import os
 from .plugin import JobServerPlugin
 import time
 import json
+from glob import glob
 
 """
 Node Auto Detection System
@@ -218,38 +219,49 @@ class nads(JobServerPlugin):
     #   print(hex(byte))
     return ':'.join(['%02x' % char for char in info[18:24]])
 
-  def detect_provIntf(self):
-    # try to detect our provisioning interface.
-
-    # get a list of interfaces on this system.
-    for iface in netifaces.interfaces():
-      if iface == 'lo':
-        continue
-      iface_details = netifaces.ifaddresses(iface)
-      if netifaces.AF_INET in iface_details:
-        iface_addr = iface_details[netifaces.AF_INET]
-        #print(iface_addr)
-        mask = IPv4Network(f"0.0.0.0/{iface_addr[0]['netmask']}").prefixlen
-        #print(mask)
-        iface_ip = ipaddress.ip_address(iface_addr[0]['addr'])
-        iface_net = ipaddress.ip_network(f"{iface_ip}/{mask}", strict=False)
-        if iface_ip in iface_net:
-          return iface
-    return None
-
+  
   def handle_jobs(self):
     # see if we are being called from a runonce command
     if not self.js.runonce:
       print("Error: script-runner must be run in a 'runonce' jobserver session.")
       return False
     
-    # attempt to get our provision interface.
-    self.provIntf = self.detect_provIntf()
-    if self.provIntf is None:
-      print("Error: Unable to detect what interface we should provision over.")
+    # Because Intel.... turn off the card intercepting LLDP packets, if i40e is used.
+    ifceCmdFiles = glob("/sys/kernel/debug/i40e/*/command" )
+    for ifaceCmdFile in ifceCmdFiles:
+      try:
+        with open(ifceCmdFiles, 'w') as ifile:
+          ifile.write("lldp stop\n")
+      except:
+        # ignore all errors here because we really don't care.
+        pass
+    lldpRes = False
+    # Try all the interfaces, first one to give us an LLDP packet is our winner.
+    # TODO: Maybe allow for  trying multiple interfaces even if an LLDP is detected
+    # but registration fails?
+    for iface in netifaces.interfaces():
+      if iface == 'lo':
+        continue
+      print(f"Attempting LLDP Capture on {iface}")
+      self.provIntf = iface
+      try:
+        lldpRes = self.getLLDP()
+      except Exception as e:
+        print(f"{e}")
+        lldpRes = False
+      if lldpRes:
+        break
+    # and now, we are supposed to turn it backon again.....
+    for ifaceCmdFile in ifceCmdFiles:
+      try:
+        with open(ifceCmdFiles, 'w') as ifile:
+          ifile.write("lldp start\n")
+      except:
+        # ignore all errors here because we really don't care.
+        pass
     
-    # if we cannot get LLDP then exit.
-    if self.getLLDP() == False:
+    if lldpRes == False:
+
       return False
 
     # grab the mac of the prov interface.
