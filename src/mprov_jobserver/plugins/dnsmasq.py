@@ -1,7 +1,9 @@
+from distutils.command.build import build
 from .dnsmasq_mod.config import DnsmasqConfig
 from .dnsmasq_mod.dns import DnsmasqDNSConfig
 from .dnsmasq_mod.dhcp import DnsmasqDHCPConfig
 from .plugin import JobServerPlugin
+import sh, os, sys
 
 # class to handle dnsmaq generation.
 # This class can job modules:
@@ -24,6 +26,56 @@ class dnsmasq(JobServerPlugin):
   undionlyImg = ''
   dnsmasqUser=''
   threads = []
+  ipxe_files = ['undionly.kpxe', 'snponly.efi']
+  
+# dnf -y install mkisofs
+# cd /tmp
+# git clone https://github.com/ipxe/ipxe
+# cd ipxe/src
+# make
+# /bin/cp -f bin/undionly.kpxe /tftpboot 
+# make bin-x86_64-efi/snponly.efi
+# /bin/cp -f bin-x86_64-efi/snponly.efi /tftpboot/snponly.efi
+
+  def load_config(self):
+    result =  super().load_config()
+    if result:
+      # Check for the ipxe files in the tftproot, and build it from 
+      # git source if not there.
+      buildIpxe=False
+      for file in self.ipxe_files:
+        if not os.path.exists(f"{self.tftproot}/{file}"):
+          buildIpxe = True
+
+      if buildIpxe:
+        sh.dnf(['-y', 'install', 'mkisofs'])
+        oldCwd = os.getcwd()
+        os.chdir('/tmp')
+        try:
+          sh.rm('-rf', '/tmp/ipxe')
+          sh.git(['clone', 'https://github.com/ipxe/ipxe'])
+        except:
+          print("Error: unable to fetch ipxe source.  You may need to copy some files yourself.")
+          return result
+        
+        
+        os.chdir('ipxe/src')
+        try:
+          sh.make(['bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
+        except:
+            print("Error: iPXE make command failed.")
+            return result
+        try:
+          sh.cp(['-f','bin/undionly.kpxe', f"{self.tftproot}"])
+        except:
+          print(f"Error: Unable to copy bin/undionly.kpxe -> {self.tftproot}")
+        try:
+           sh.cp(['-f','bin-x86_64-efi/snponly.efi', f"{self.tftproot}"])
+        except:
+          print(f"Error: Unable to copy bin-x86_64-efi/snponly.efi -> {self.tftproot}")
+        os.chdir(oldCwd)
+      pass
+    return result
   def handle_jobs(self):
     # we can also run the DNS thread
     if self.enableDNS:
@@ -67,7 +119,6 @@ class dnsmasq(JobServerPlugin):
       confThread.dnsmasqConfDir=self.dnsmasqConfDir
       confThread.mprovDnsmasqDir = self.mprovDnsmasqDir
       confThread.tftproot = self.tftproot
-      confThread.undionlyImg = self.undionlyImg
       confThread.dnsmasqUser = self.dnsmasqUser
       confThread.start()
       self.threads.append(confThread)    

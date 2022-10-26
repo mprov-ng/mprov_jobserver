@@ -13,7 +13,6 @@ class DnsmasqConfig(JobServerPlugin):
     dnsmasqConfDir=''
     mprovDnsmasqDir=''
     tftproot=''
-    undionlyImg=''
     dnsmasqUser=''
     def load_config(self):
         return True
@@ -28,18 +27,7 @@ class DnsmasqConfig(JobServerPlugin):
         with open(self.dnsmasqConfDir + '/ipxe.conf', 'w') as conf:
             conf.write(jenv.get_template('dnsmasq/ipxe.conf.j2').render(data))
         jobquery = "&jobserver=" + str(self.js.id) + "&module=[\"dns-update\",\"dns-delete\",\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
-        # print(jobquery)
 
-        # copy the ipxe stuff in
-        if os.path.exists(self.undionlyImg):
-            shutil.copy(self.undionlyImg, self.tftproot)
-            for dirpath, dirnames, filenames in os.walk(self.tftproot):
-                shutil.chown(dirpath, self.dnsmasqUser)
-                for filename in filenames:
-                    shutil.chown(os.path.join(dirpath, filename), self.dnsmasqUser)
-                    
-        else:
-            print("Error: Unable to copy " + self.undionlyImg + " to " + self.tftproot)
         # restart dnsmasq
         os.system('systemctl restart dnsmasq')
         # copy in our ipxe.menu file.

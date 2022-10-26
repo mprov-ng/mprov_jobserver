@@ -20,7 +20,7 @@
 dhcp-match=set:ipxe,175 # iPXE sends a 175 option.
 
 
-# load undionly.kpxe for clients not tagged with 'ipxe'.
+# load undionly.kpxe for clients not tagged with 'ipxe'.  This gets us an ipxe instance running.
 dhcp-boot=tag:!ipxe,undionly.kpxe
 
 # undionly.kpxe issues a second DHCP request and we then serve bootstrap.ipxe over http
@@ -28,6 +28,16 @@ dhcp-boot=tag:!ipxe,undionly.kpxe
 # dhcp-boot={{ mprov_url }}ipxe/
 
 
-# Or, simply load your own menu
+# Or, simply load your own menu, if we have ipxe, serve up the menu
 dhcp-boot=menu.ipxe
+
+# Finally, set our boot method to EFI if booted with EFI
+dhcp-match=set:BC_EFICLI, option:client-arch, 7 #EFI x86-64
+tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
+pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
+
+# and load the ipxe EFI binary to get an ipxe instance.  This will cause us to loop
+# back to the entry above to serve up the menu.
+dhcp-boot=tag:BC_EFI,snponly.efi
+
 {% endif %}

@@ -23,12 +23,11 @@ extra_pkgs=""
 
 # make sure epel is installed before we try to do anything else.
 dnf -y install epel-release
-dnf -y install python38 python38-pip python38-pyyaml python38-requests python38-jinja2.noarch git wget iproute dnsmasq ipxe-bootimgs tcpdump ipmitool which $extra_pkgs
+dnf -y install python38 python38-pip python38-pyyaml python38-requests python38-jinja2.noarch git wget iproute dnsmasq tcpdump ipmitool which $extra_pkgs
 dnf -y --enablerepo=powertools install parted-devel
 
 extra_pip=""
-
-pip3 --no-cache-dir install mprov_jobserver $extra_pip
+pip3.8 --no-cache-dir install mprov_jobserver $extra_pip
 
 
 if [ "$BUILD_DOCKER" != "1" ]
@@ -51,6 +50,7 @@ then
         echo -e "If you are using IPv6 you will want something like:"
         echo -e "\tfirewall-cmd --add-service=dhcpv6 --permanent && firewall-cmd --reload"
 fi
-mkdir /etc/mprov/
+mkdir -p /etc/mprov/
 mprov_jobserver -r || true
+
 
