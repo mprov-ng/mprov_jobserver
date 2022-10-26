@@ -357,8 +357,8 @@ class JobServer ():
         # get the sock from the session
         s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
         # get the address from the socket
-        address, _ = s.getsockname()
-        self.ip_address=address
+        sockinfo = s.getsockname()
+        self.ip_address=sockinfo[0]
       
     # if we get a response.status_code == 200, we're ok.  If not,
     # our auth failed.
