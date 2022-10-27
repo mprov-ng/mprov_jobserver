@@ -19,7 +19,7 @@
 # Important Note: the 'set:' and 'tag:!ipxe' syntax requires dnsmasq 2.53 or above.
 dhcp-match=set:ipxe,175 # iPXE sends a 175 option.
 
-
+# the 'dhcp-boot' flags ONLY work on IPv4.  
 # load undionly.kpxe for clients not tagged with 'ipxe'.  This gets us an ipxe instance running.
 dhcp-boot=tag:!ipxe,undionly.kpxe
 
@@ -33,11 +33,23 @@ dhcp-boot=menu.ipxe
 
 # Finally, set our boot method to EFI if booted with EFI
 dhcp-match=set:BC_EFICLI, option:client-arch, 7 #EFI x86-64
-tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
-pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
 
 # and load the ipxe EFI binary to get an ipxe instance.  This will cause us to loop
 # back to the entry above to serve up the menu.
+
+
+# now for some IPv6 stuff
+# EFI via IPv6
+dhcp-match=set:BC_EFICLI,option6:61,0007
+dhcp-match=set:BC_EFICLI,option6:61,0009
+dhcp-match=set:BC_EFICLI,option6:61,0011
+dhcp-option=tag:ipxe,option6:bootfile-url,tftp://mgmt1/menu.ipxe
+
+tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
+pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
 dhcp-boot=tag:BC_EFI,snponly.efi
+dhcp-option=tag:!ipxe,tag:BC_EFI,option6:bootfile-url,tftp://mgmt1/snponly.efi
+
+
 
 {% endif %}
