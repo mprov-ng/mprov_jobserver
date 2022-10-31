@@ -24,6 +24,7 @@ from socket import gaierror
 from struct import pack, unpack
 
 from dmidecode import DMIDecode
+from pyroute2 import IPDB
 
 ## Magic constants from `/usr/include/linux/if_ether.h`:
 ETH_P_ALL = 0x0003
@@ -239,8 +240,12 @@ class nads(JobServerPlugin):
     # Try all the interfaces, first one to give us an LLDP packet is our winner.
     # TODO: Maybe allow for  trying multiple interfaces even if an LLDP is detected
     # but registration fails?
+    ipdb = IPDB()
     for iface in netifaces.interfaces():
       if iface == 'lo':
+        continue
+      # check if the interface is operationally up.
+      if ipdb.interfaces[iface].operstate != "UP":
         continue
       print(f"Attempting LLDP Capture on {iface}")
       self.provIntf = iface
@@ -251,6 +256,7 @@ class nads(JobServerPlugin):
         lldpRes = False
       if lldpRes:
         break
+    ipdb.release()
     # and now, we are supposed to turn it backon again.....
     for ifaceCmdFile in ifceCmdFiles:
       try:
