@@ -2,7 +2,7 @@ from pwd import getpwnam
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import os
-import shutil
+import shutil, socket
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -14,6 +14,12 @@ class DnsmasqConfig(JobServerPlugin):
     mprovDnsmasqDir=''
     tftproot=''
     dnsmasqUser=''
+    hostname=''
+    def __init__(self, js):
+        super().__init__(js)
+        self.hostname = socket.gethostname()
+        if '.' in self.hostname:
+            self.hostname, _ = self.hostname.split('.', 1)
     def load_config(self):
         return True
     def handle_jobs(self):
@@ -21,6 +27,7 @@ class DnsmasqConfig(JobServerPlugin):
         data={
             'mprov_url': self.js.mprovURL,
             'enableDHCP': True,
+            'bootserver': self.hostname
         }
         os.makedirs(self.dnsmasqConfDir, exist_ok=True)
         os.makedirs(self.tftproot, exist_ok=True)
