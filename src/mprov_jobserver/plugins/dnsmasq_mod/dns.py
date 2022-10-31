@@ -1,6 +1,7 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
-import os
+import os, socket, ipaddress, netifaces
+from socket import AF_INET, AF_INET6
 
 
 jenv = Environment(
@@ -11,8 +12,42 @@ jenv = Environment(
 class DnsmasqDNSConfig(JobServerPlugin):
     dnsmasqConfDir=''
     mprovDnsmasqDir=''
+    hostname=''
+    def __init__(self, js):
+        super().__init__(js)
+        self.hostname = socket.gethostname()
+        if '.' in self.hostname:
+            self.hostname, _ = self.hostname.split('.', 1)
     def load_config(self):
         return True
+    def _inmProvNet(self, ipaddr, net):
+        iface_ip = ipaddress.ip_address(ipaddr)
+        iface_net = ipaddress.ip_network(f"{net['subnet']}/{net['netmask']}", strict=False)
+        if iface_ip in iface_net:
+            return True
+        return False
+    def _addSelfToNet(self, network):
+        selfHosts = []
+        for iface in netifaces.interfaces():
+            # do not run on the local interface.
+            if iface == 'lo':
+                continue
+
+            iface_details = netifaces.ifaddresses(iface)
+            # only process IPv4 and IPv6 addresses.
+            if AF_INET in iface_details or AF_INET6 in iface_details:
+                for af in [AF_INET, AF_INET6]:
+                    for address in iface_details[af]:
+                        if "%" in address['addr']:
+                            address['addr'], _ = address['addr'].split('%', 1)
+                        if self._inmProvNet(address['addr'], network):
+                            selfHosts.append({
+                                'ipaddress': address['addr'],
+                                'hostname': self.hostname,
+                                'domain': network['domain']
+                            })
+        return selfHosts
+               
     def handle_jobs(self):
 
         # get the network informatioin
@@ -28,8 +63,9 @@ class DnsmasqDNSConfig(JobServerPlugin):
         os.makedirs(self.mprovDnsmasqDir + '/dns/', exist_ok=True)
         # now the interfaces
         for network in data['networks']: 
+            
         
-            # grab the network interface.
+            # grab the system network interfaces that are on this network.
             print(self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
             response = self.js.session.get( self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
             if not self.checkHTTPStatus(response.status_code):
@@ -39,6 +75,8 @@ class DnsmasqDNSConfig(JobServerPlugin):
                 'enableDNS': True,
                 'hosts': response.json(),
             }
+            # add ourself if we are listening on this net
+            data_hosts['hosts'].extend(self._addSelfToNet(network))
 
             # grab the bmcs that are on this network.
             print(self.js.mprovURL + f"systembmcs/?network={network['id']}&detail")
