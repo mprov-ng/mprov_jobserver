@@ -211,14 +211,15 @@ class nads(JobServerPlugin):
     return True
 
 
-  def getMac(self):
-    s = socket(AF_INET, SOCK_DGRAM)
-    info = fcntl.ioctl(s.fileno(), 0x8927,  struct.pack('256s', bytes(self.provIntf, 'utf-8')))
-    # print(info[18:24])
-    # for byte in info[18:24]:
+  # def getMac(self):
+
+    # s = socket(AF_INET, SOCK_DGRAM)
+    # info = fcntl.ioctl(s.fileno(), 0x8927,  struct.pack('256s', bytes(self.provIntf, 'utf-8')))
+    # # print(info[18:24])
+    # # for byte in info[18:24]:
       
-    #   print(hex(byte))
-    return ':'.join(['%02x' % char for char in info[18:24]])
+    # #   print(hex(byte))
+    # return ':'.join(['%02x' % char for char in info[18:24]])
 
   
   def handle_jobs(self):
@@ -255,6 +256,8 @@ class nads(JobServerPlugin):
         print(f"{e}")
         lldpRes = False
       if lldpRes:
+        # grab the mac of the prov interface.
+        self.mac = netifaces.ifaddresses(self.provIntf)[socket.AF_PACKET]['addr']
         break
     ipdb.release()
     # and now, we are supposed to turn it backon again.....
@@ -270,8 +273,7 @@ class nads(JobServerPlugin):
 
       return False
 
-    # grab the mac of the prov interface.
-    self.mac = self.getMac()
+    
 
     if self.port.find('/') >= 0:
       # we need to parse the port out of the port id.
