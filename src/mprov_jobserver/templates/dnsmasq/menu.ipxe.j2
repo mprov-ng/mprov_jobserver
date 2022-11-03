@@ -45,7 +45,7 @@ reboot
 exit
 
 :mprov
-chain --replace --autofree {{ mprov_url }}ipxe/ ||
+chain --replace --autofree http://{{ bootserver }}/ipxe/ ||
 goto exit
 
 :pxelinux

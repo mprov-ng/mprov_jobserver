@@ -14,12 +14,13 @@ dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}}
 {% else %}
 dhcp-option=tag:{{network.slug}},option:router,{{network.gateway}}
 {% endif %}
-dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
 
 {% if ":" in network.nameserver1 %}
 dhcp-option=tag:{{network.slug}},option6:dns-server,{{network.nameserver1}}
+dhcp-option=tag:{{network.slug}},option6:24,{{network.domain}}
 {% else %}
 dhcp-option=tag:{{network.slug}},option:dns-server,{{network.nameserver1}}
+dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
 {% endif %}
 
 {% endfor %}

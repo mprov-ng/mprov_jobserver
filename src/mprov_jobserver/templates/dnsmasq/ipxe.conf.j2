@@ -23,9 +23,9 @@ dhcp-match=set:ipxe,175 # iPXE sends a 175 option.
 # load undionly.kpxe for clients not tagged with 'ipxe'.  This gets us an ipxe instance running.
 dhcp-boot=tag:!ipxe,undionly.kpxe
 
-# undionly.kpxe issues a second DHCP request and we then serve bootstrap.ipxe over http
+# undionly.kpxe issues a second DHCP request and we then serve a dynamic pxe over http
 # using Robin Smidsrød's bootstrap method provided at https://gist.github.com/2234639
-# dhcp-boot={{ mprov_url }}ipxe/
+# dhcp-boot=http://{{ bootserver }}/ipxe/
 
 
 # Or, simply load your own menu, if we have ipxe, serve up the menu
@@ -46,7 +46,8 @@ dhcp-match=set:BC_EFICLI,option6:61,0011
 dhcp-option=tag:ipxe,option6:bootfile-url,tftp://{{ bootserver }}/menu.ipxe
 
 tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
-pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
+pxe-service=tag:BC_EFI,BC_EFI, ".
+Prov over x86-64 UEFI"
 dhcp-boot=tag:BC_EFI,snponly.efi
 dhcp-option=tag:!ipxe,tag:BC_EFI,option6:bootfile-url,tftp://{{ bootserver }}/snponly.efi
 
