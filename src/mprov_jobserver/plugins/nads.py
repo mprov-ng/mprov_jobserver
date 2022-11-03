@@ -257,7 +257,7 @@ class nads(JobServerPlugin):
         lldpRes = False
       if lldpRes:
         # grab the mac of the prov interface.
-        self.mac = netifaces.ifaddresses(self.provIntf)[socket.AF_PACKET]['addr']
+        self.mac = netifaces.ifaddresses(self.provIntf)[AF_PACKET][0]['addr']
         break
     ipdb.release()
     # and now, we are supposed to turn it backon again.....
