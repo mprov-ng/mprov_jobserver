@@ -43,9 +43,25 @@ class DnsmasqDNSConfig(JobServerPlugin):
                         if self._inmProvNet(address['addr'], network):
                             selfHosts.append({
                                 'ipaddress': address['addr'],
+                                'ipv6ll': '',
                                 'hostname': self.hostname,
-                                'domain': network['domain']
+                                'domain': network['domain'] + f"# {iface}"
                             })
+            # grab and add the LL ipv6 ip addresses.
+            if AF_INET6 in netifaces.ifaddresses(iface):
+                for v6ip in netifaces.ifaddresses(iface)[AF_INET6]:
+                    if v6ip['addr'].startswith("fe80:"):
+                        if "%" in v6ip['addr']:
+                            v6ip['addr'], _ = v6ip['addr'].split("%", 1)
+                        selfHosts.append({
+                            'ipaddresss': '',
+                            'ipv6ll': v6ip['addr'],
+                            'hostname': self.hostname,
+                            'domain': network['domain'] + f"# {iface}"
+                        })
+                
+
+
         return selfHosts
                
     def handle_jobs(self):
@@ -88,6 +104,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
                     for bmc in response.json():
                         tmpHost = {
                             'ipaddress': bmc['ipaddress'],
+                            'ipv6ll': "", 
                             'mac': bmc['mac'],
                             'hostname': bmc['system']['hostname'] + '-bmc',
                             'domain': network['domain']

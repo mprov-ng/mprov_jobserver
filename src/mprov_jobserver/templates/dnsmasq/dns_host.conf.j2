@@ -3,6 +3,7 @@
 
 # host-record=<name>[,<name>....],[<IPv4-address>],[<IPv6-address>][,<TTL>]
 {% for host in hosts %}
-{{host.ipaddress}} {{host.hostname}} {{host.hostname}}.{{host.domain}}
+{% if 'ipaddress' in host and host.ipaddress != "" and host.ipaddress != None %}{{host.ipaddress}} {{host.hostname}} {{host.hostname}}.{{host.domain}} {% endif %}
+{% if 'ipv6ll' in host and host.ipv6ll != "" and host.ipv6ll != None %}{{host.ipv6ll}} {{host.hostname}} {{host.hostname}}.{{host.domain}} {% endif %}
 {% endfor %}
 
