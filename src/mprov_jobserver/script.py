@@ -13,7 +13,7 @@ class MProvScript():
   mprovURL = "http://127.0.0.1:8080/"
   apikey = ""
   heartbeatInterval = 10
-  runonce = False
+  runonce = True
   sessionOk = False
   disklayout = {}
   session = requests.Session()
@@ -86,3 +86,10 @@ class MProvScript():
     # our auth failed.
     return response.status_code == 200
 
+  # OVERRIDE THIS!
+  def run(self):
+    pass
+
+  def main(self):
+    self.startSession()
+    self.run()
