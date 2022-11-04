@@ -46,8 +46,7 @@ dhcp-match=set:BC_EFICLI,option6:61,0011
 dhcp-option=tag:ipxe,option6:bootfile-url,tftp://{{ bootserver }}/menu.ipxe
 
 tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
-pxe-service=tag:BC_EFI,BC_EFI, ".
-Prov over x86-64 UEFI"
+pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
 dhcp-boot=tag:BC_EFI,snponly.efi
 dhcp-option=tag:!ipxe,tag:BC_EFI,option6:bootfile-url,tftp://{{ bootserver }}/snponly.efi
 
