@@ -4,8 +4,8 @@
 # dhcp-host=[<hwaddr>][,id:<client_id>|*][,set:<tag>][tag:<tag>][,<ipaddr>][,<hostname>][,<lease_time>][,ignore]
 {% for host in hosts %}
 {% if ':' in host.ipaddress %}
-{{host.mac}},set:{{host.network}},[{{host.ipaddress}}],{{host.hostname}}
+{{host.mac}},{{hostid}}set:{{host.network}},[{{host.ipaddress}}],{{host.hostname}}
 {% else %}
-{{host.mac}},set:{{host.network}},{{host.ipaddress}},{{host.hostname}}
+{{host.mac}},{{hostid}}set:{{host.network}},{{host.ipaddress}},{{host.hostname}}
 {% endif %}
 {% endfor %}

@@ -26,7 +26,7 @@ class dnsmasq(JobServerPlugin):
   undionlyImg = ''
   dnsmasqUser=''
   threads = []
-  ipxe_files = ['undionly.kpxe', 'snponly.efi']
+  ipxe_files = ['undionly.kpxe', 'snponly.efi', 'snponly_ipv4.efi']
   
 # dnf -y install mkisofs
 # cd /tmp
@@ -48,9 +48,11 @@ class dnsmasq(JobServerPlugin):
           buildIpxe = True
 
       if buildIpxe:
+        print("Rebuilding iPXE files, some or all are missing.")
         sh.dnf(['-y', 'install', 'mkisofs'])
         oldCwd = os.getcwd()
         os.chdir('/tmp')
+        print("\tCheck out iPXE code to /tmp/ipxe/")
         try:
           sh.rm('-rf', '/tmp/ipxe')
           sh.git(['clone', 'https://github.com/ipxe/ipxe'])
@@ -58,10 +60,10 @@ class dnsmasq(JobServerPlugin):
           print("Error: unable to fetch ipxe source.  You may need to copy some files yourself.")
           return result
         
-        
+        print("\tRunning inintial build")
         os.chdir('ipxe/src')
         try:
-          sh.make(['bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
+          sh.make(['-j15', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
         except:
             print("Error: iPXE make command failed.")
             return result
@@ -73,7 +75,31 @@ class dnsmasq(JobServerPlugin):
            sh.cp(['-f','bin-x86_64-efi/snponly.efi', f"{self.tftproot}"])
         except:
           print(f"Error: Unable to copy bin-x86_64-efi/snponly.efi -> {self.tftproot}")
+        
+        # now we will rebuild the EFI version with IPv6 support turned off
+        print("\tPatching EFI to IPv4 only...")
+        with open("config/defaults/efi.h", "r") as f:
+            lines = f.readlines()
+        with open("config/defaults/efi.h", "w") as f:
+            for line in lines:
+                if "NET_PROTO_IPV6" in line.strip("\n"):
+                    f.write(f"//{line}")
+                else:
+                  f.write(f"{line}")
+        print("\tRunning second build...")
+        try:
+          sh.make(['-j15','bin-x86_64-efi/snponly.efi'], _out=sys.stdout, _err=sys.stderr)
+        except:
+            print("Error: iPXE IPv4 only EFI make command failed.")
+            sh.touch([f"{self.tftproot}/snponly_ipv4.efi"])
+            sys.exit(1) #return result
+        try:
+           sh.cp(['-f','bin-x86_64-efi/snponly.efi', f"{self.tftproot}/snponly_ipv4.efi"])
+        except:
+          print(f"Error: Unable to copy bin-x86_64-efi/snponly.efi -> {self.tftproot}/snponly_ipv4.efi")
+        print("Build Process finished.  Errors appear above.")
         os.chdir(oldCwd)
+
       pass
     return result
   def handle_jobs(self):

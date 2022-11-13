@@ -37,28 +37,29 @@ class DnsmasqDNSConfig(JobServerPlugin):
             # only process IPv4 and IPv6 addresses.
             if AF_INET in iface_details or AF_INET6 in iface_details:
                 for af in [AF_INET, AF_INET6]:
-                    for address in iface_details[af]:
-                        if "%" in address['addr']:
-                            address['addr'], _ = address['addr'].split('%', 1)
-                        if self._inmProvNet(address['addr'], network):
-                            selfHosts.append({
-                                'ipaddress': address['addr'],
-                                'ipv6ll': '',
-                                'hostname': self.hostname,
-                                'domain': network['domain'] + f"# {iface}"
-                            })
-            # grab and add the LL ipv6 ip addresses.
-            if AF_INET6 in netifaces.ifaddresses(iface):
-                for v6ip in netifaces.ifaddresses(iface)[AF_INET6]:
-                    if v6ip['addr'].startswith("fe80:"):
-                        if "%" in v6ip['addr']:
-                            v6ip['addr'], _ = v6ip['addr'].split("%", 1)
-                        selfHosts.append({
-                            'ipaddresss': '',
-                            'ipv6ll': v6ip['addr'],
-                            'hostname': self.hostname,
-                            'domain': network['domain'] + f"# {iface}"
-                        })
+                    if af in iface_details:
+                        for address in iface_details[af]:
+                            if "%" in address['addr']:
+                                address['addr'], _ = address['addr'].split('%', 1)
+                            if self._inmProvNet(address['addr'], network):
+                                selfHosts.append({
+                                    'ipaddress': address['addr'],
+                                    'ipv6ll': '',
+                                    'hostname': self.hostname,
+                                    'domain': network['domain'] + f"# {iface}"
+                                })
+            # # grab and add the LL ipv6 ip addresses.
+            # if AF_INET6 in netifaces.ifaddresses(iface):
+            #     for v6ip in netifaces.ifaddresses(iface)[AF_INET6]:
+            #         if v6ip['addr'].startswith("fe80:"):
+            #             if "%" in v6ip['addr']:
+            #                 v6ip['addr'], _ = v6ip['addr'].split("%", 1)
+            #             selfHosts.append({
+            #                 'ipaddresss': '',
+            #                 'ipv6ll': v6ip['addr'],
+            #                 'hostname': self.hostname,
+            #                 'domain': network['domain'] + f"# {iface}"
+            #             })
                 
 
 

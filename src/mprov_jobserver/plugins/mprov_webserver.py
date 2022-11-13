@@ -3,7 +3,7 @@ import os
 from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
-import multiprocessing
+import multiprocessing, socket
 
 class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   # TODO: make maxConn and maxConnFileSize configurable through
@@ -73,10 +73,16 @@ class mProvHTTPServer(ThreadingHTTPServer):
   rootDir = ""  
   maxConnFileSize = 0
   js = None    
+  def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+    if ":" in server_address[0]:
+      # we have an IPv6 bind address
+      self.address_family = socket.AF_INET6
+    super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+    # self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
 
 class mprov_webserver(JobServerPlugin):
   jobModule = 'mprov-webserver'
-  hostName = "0.0.0.0"
+  hostName = "::"
   serverPort = 8080
   serverInstance = None
   rootDir = ""
@@ -90,9 +96,24 @@ class mprov_webserver(JobServerPlugin):
     serverInstance.timeout=0.5
     serverInstance.js = self.js
     serverInstance.maxConnFileSize = self.maxConnFileSize
+
+    # serverInstance6 = None
+    # try: 
+    #   serverInstance6 = mProvHTTPServer((self.hostName6, self.serverPort), mProvHTTPReqestHandler)
+    #   serverInstance6.rootDir = self.rootDir
+    #   serverInstance6.timeout=0.5
+    #   serverInstance6.js = self.js
+    #   serverInstance6.maxConnFileSize = self.maxConnFileSize
+      
+    # except Exception as e:
+    #   serverInstance6 = None
+    #   print(f"{e}")
+    #   pass
     # this should allow us to exit out ok.
     while(self.js.running):
       serverInstance.handle_request()
+      # if serverInstance6 is not None:
+      #   serverInstance6.handle_request()
     
     print("Stopping mProv Webserver.")
     

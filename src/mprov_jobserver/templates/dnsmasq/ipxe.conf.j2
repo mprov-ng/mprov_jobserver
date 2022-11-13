@@ -28,8 +28,8 @@ dhcp-boot=tag:!ipxe,undionly.kpxe
 # dhcp-boot=http://{{ bootserver }}/ipxe/
 
 
-# Or, simply load your own menu, if we have ipxe, serve up the menu
-dhcp-boot=menu.ipxe
+# if we are booting via IPv4, load the IPv4 config.
+dhcp-boot=ipversionrouter.ipxe
 
 # Finally, set our boot method to EFI if booted with EFI
 dhcp-match=set:BC_EFICLI, option:client-arch, 7 #EFI x86-64
@@ -43,12 +43,12 @@ dhcp-match=set:BC_EFICLI, option:client-arch, 7 #EFI x86-64
 dhcp-match=set:BC_EFICLI,option6:61,0007
 dhcp-match=set:BC_EFICLI,option6:61,0009
 dhcp-match=set:BC_EFICLI,option6:61,0011
-dhcp-option=tag:ipxe,option6:bootfile-url,tftp://{{ bootserver }}/menu.ipxe
+dhcp-option=tag:ipxe,option6:bootfile-url,tftp://{{ bootserver6 }}/ipversionrouter.ipxe
 
 tag-if=set:BC_EFI,tag:BC_EFICLI, tag:!ipxe
 pxe-service=tag:BC_EFI,BC_EFI, "mProv over x86-64 UEFI"
-dhcp-boot=tag:BC_EFI,snponly.efi
-dhcp-option=tag:!ipxe,tag:BC_EFI,option6:bootfile-url,tftp://{{ bootserver }}/snponly.efi
+dhcp-boot=tag:BC_EFI,snponly_ipv4.efi
+dhcp-option=tag:!ipxe,tag:BC_EFI,option6:bootfile-url,tftp://{{ bootserver6 }}/snponly.efi
 
 
 
