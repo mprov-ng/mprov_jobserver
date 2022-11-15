@@ -4,7 +4,6 @@ isset ${ip6} && goto ipv6 || goto ipv4
 
 :ipv4
 echo "IPv4 detected."
-prompt
 chain tftp://{{ bootserver }}/menu.ipxe
 
 :ipv6

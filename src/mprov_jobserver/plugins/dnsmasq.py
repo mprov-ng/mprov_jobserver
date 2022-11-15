@@ -63,7 +63,7 @@ class dnsmasq(JobServerPlugin):
         print("\tRunning inintial build")
         os.chdir('ipxe/src')
         try:
-          sh.make(['-j15', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
+          sh.make(['-j4', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
         except:
             print("Error: iPXE make command failed.")
             return result
@@ -88,7 +88,7 @@ class dnsmasq(JobServerPlugin):
                   f.write(f"{line}")
         print("\tRunning second build...")
         try:
-          sh.make(['-j15','bin-x86_64-efi/snponly.efi'], _out=sys.stdout, _err=sys.stderr)
+          sh.make(['-j4','bin-x86_64-efi/snponly.efi'], _out=sys.stdout, _err=sys.stderr)
         except:
             print("Error: iPXE IPv4 only EFI make command failed.")
             sh.touch([f"{self.tftproot}/snponly_ipv4.efi"])
