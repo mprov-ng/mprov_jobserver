@@ -271,6 +271,9 @@ class JobServer ():
       return
     # get my hostname from platform
     myHostname = platform.node()
+    if "." in myHostname:
+      # remove the domain if one exists
+      myHostname, _ = myHostname.split(".", 1)
 
     # setup or server info register payload
     data = {
