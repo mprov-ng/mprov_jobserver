@@ -53,6 +53,7 @@ class DnsmasqConfig(JobServerPlugin):
         jobquery = "&jobserver=" + str(self.js.id) + "&module=[\"dns-update\",\"dns-delete\",\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
 
         # restart dnsmasq
+        os.system('systemctl enable dnsmasq')
         os.system('systemctl restart dnsmasq')
         # copy in our ipxe.menu file.
         
