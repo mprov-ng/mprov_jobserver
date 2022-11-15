@@ -146,7 +146,7 @@ class image_update(JobServerPlugin):
                   localFile.write(chunk)
           
             # grab the kernel
-            with self.js.session.get(self.js.mprovURL + 'kernels/' + image + '.vmlinuz', stream=True) as remoteImage:
+            with self.js.session.get(self.js.mprovURL + 'images/' + image + '.vmlinuz', stream=True) as remoteImage:
               remoteImage.raise_for_status()
               os.makedirs(self.imageDir + '/' + image,exist_ok=True)
               with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
