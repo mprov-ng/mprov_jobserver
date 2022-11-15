@@ -255,10 +255,10 @@ class image_update(JobServerPlugin):
         image_update.join()
         # run image-gen scripts.
     
-        # grab a copy of the jobserver wheel from the main mprov server
-        # TODO: Change this to a pip install mprov_jobserver command after publication
+        
         imgDir = self.imageDir + '/' + imageDetails['slug']
-
+        # copy in the system resolv.conf
+        os.system(f"/bin/cp -f /etc/resolv.conf {imgDir}/etc/resolv.conf")
         if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           return
@@ -291,6 +291,9 @@ class image_update(JobServerPlugin):
         if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
           print("Error while running image-gen scripts via job server..")
         
+        # remove the jobserver.yaml from /tmp/mprov/
+        if os.path.exists(imgDir +"/tmp/mprov/jobserver.yaml"):
+          os.unlink(imgDir + "/tmp/mprov/jobserver.yaml")
 
         # package the filesystem into an initramfs
         print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
