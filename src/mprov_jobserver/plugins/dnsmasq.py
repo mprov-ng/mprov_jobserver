@@ -40,6 +40,7 @@ class dnsmasq(JobServerPlugin):
   def load_config(self):
     result =  super().load_config()
     if result:
+      os.makedirs(f"{self.tftproot}", exist_ok=True)
       # Check for the ipxe files in the tftproot, and build it from 
       # git source if not there.
       buildIpxe=False
