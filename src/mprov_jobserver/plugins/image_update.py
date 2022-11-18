@@ -154,19 +154,19 @@ class image_update(JobServerPlugin):
                   localFile.write(chunk)
             with open(self.imageDir + '/image-versions', "w") as vfile:
               vfile.write(json.dumps(imgVersions))
-        else:
-          # if our version doesn't match, and there are no jobservers, submit an image-update job to the mPCC
-          data = {
-            "params": { "imageId" : imageData['slug'] },
-            "name": "Image Update",
-            "module": "image-update",
-            "status": 1,
-            "jobserver": self.js.id,
-          }
-          #print(json.dumps(data))
-          response = self.js.session.post(f"{self.js.mprovURL}jobs/",data=json.dumps(data))
-          if response.status_code <= 199 or response.status_code >= 300:
-            print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
+        # else:
+        #   # if our version doesn't match, and there are no jobservers, submit an image-update job to the mPCC
+        #   data = {
+        #     "params": { "imageId" : imageData['slug'] },
+        #     "name": "Image Update",
+        #     "module": "image-update",
+        #     "status": 1,
+        #     "jobserver": self.js.id,
+        #   }
+        #   #print(json.dumps(data))
+        #   response = self.js.session.post(f"{self.js.mprovURL}jobs/",data=json.dumps(data))
+        #   if response.status_code <= 199 or response.status_code >= 300:
+        #     print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
 
   def handle_jobs(self):
     # try:
