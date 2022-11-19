@@ -18,7 +18,7 @@ class MProvScript():
   disklayout = {}
   session = requests.Session()
   ip_address = None
-  configfile = "/etc/mprov/jobserver.yaml"
+  configfile = "/etc/mprov/script-runner.yaml"
   def __init__(self, **kwargs):
     # load our config
     self.load_config()
