@@ -3,6 +3,8 @@
 The mProv Job server is the work horse behind the scenes of the mPCC.  The job server connects to the mPCC and will run jobs that are queued on the mPCC.  The job server is also responsible for serving images created through the mPCC, as well as running scripts on the images and hosts when they come up.
 
 ## Requirements
+
+MUST BE INSTALLED AS ROOT 
 The mProv Job server requires python 3.8 and above.  It also requires that the packages in the `requirements.txt` be installed.  As always, you can accomplish this with the following pip command: `pip install -r requirements.txt`
 
 ^^^^ no longer required, just pip install mprov_jobserver and it will do the software with deps
