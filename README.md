@@ -12,6 +12,8 @@ run the install mprov_jobservre script from the repo.
 ## Setup
 You will need to create an API key in the mPCC for the job server.  Once you have the api key, you will want to add that key to the `jobserver.yaml` file.  There should be an example in there already, it will not work.  You must replace it.  While you are in there, you will want to setup the `mprovURL` entry to point to your mPCC instance.  After that, you can enable/disable whatever jobmodules you want this job server to run by uncomment/commenting the lines that describe the jobmodules.
 
+do not use localhost use IP or internal name 
+
 ## Arguments
 Job server takes a few command line arguments.  Global arguments are
 
