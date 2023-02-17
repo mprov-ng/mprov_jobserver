@@ -6,6 +6,7 @@ import sys
 class JobServerPlugin(threading.Thread):
   jobModule = ""
   js = None
+  threadOk = True
 
 
   def set_job_running(self):
@@ -17,6 +18,7 @@ class JobServerPlugin(threading.Thread):
     return self.js.update_job_status(self.jobModule, 4) # SUCCESS = 4
 
   def set_job_failure(self):
+    self.threadOk = False
     # This function can be overridden, especially if you are processing specific jobID's.
     return self.js.update_job_status(self.jobModule, 3) # FAILURE = 3
 

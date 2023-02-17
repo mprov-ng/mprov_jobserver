@@ -253,6 +253,8 @@ class image_update(JobServerPlugin):
         image_update.start()
 
         image_update.join()
+        if image_update.threadOk != True:
+          return
         # run image-gen scripts.
     
         
