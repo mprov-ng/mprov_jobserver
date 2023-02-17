@@ -62,6 +62,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       if os.system('wget -O ' + file + ' ' + baseURL ):
         print("Error: unable to get repo package: " + baseURL)
         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.threadOk = False
         return
 
       # force the RPM to unpack to our image dir.
@@ -70,14 +71,27 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
         print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.threadOk = False
         return
 
     ver= str(imageDetails['osdistro']['version'])
+    # run a clean on yum
+    if os.system('dnf -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
     # build the filesystem.
     print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\'')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\''):
       print("Error: unable to genergate image filesystem.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
 
     # install and copy the kernel image to the image root
@@ -85,6 +99,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool'):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
 
 
@@ -92,6 +107,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
     if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7"):
       print("Error uanble to install pip packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
 
     # install the extra repository packages on the system image
@@ -152,20 +168,24 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
     if os.system('ls -t ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.vmlinuz'): 
       print("Error: unable to copy kernel image.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
 
     if os.system('ls -t ' + imgDir + '/boot/initramfs-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.initramfs'): 
       print("Error: unable to copy initramfs.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
 
     if os.system('rm -f ' + imgDir + '/dev/ram0; mknod -m 600 ' + imgDir + '/dev/ram0 b 1 0'):
       print('Error: trying to make /dev/ram0')
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
     
     if os.system('rm -f ' + imgDir + '/dev/initrd; mknod -m 400 ' + imgDir + '/dev/initrd b 1 250'):
       print('Error: trying to make /dev/ram0')
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
       return
       
