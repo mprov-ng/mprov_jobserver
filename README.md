@@ -1,4 +1,9 @@
 # mProv Job Server
+![Build Status](https://img.shields.io/github/actions/workflow/status/mprov-ng/mprov_jobserver/ci_build.yml?style=plastic)
+![Latest Version](https://img.shields.io/pypi/v/mprov-jobserver.svg)
+![Supported Python](https://img.shields.io/pypi/pyversions/mprov-jobserver.svg)
+![Wheel Status](https://img.shields.io/pypi/wheel/mprov-jobserver.svg)
+![License](https://img.shields.io/pypi/l/mprov-jobserver.svg)
 
 The mProv Job server is the work horse behind the scenes of the mPCC.  The job server connects to the mPCC and will run jobs that are queued on the mPCC.  The job server is also responsible for serving images created through the mPCC, as well as running scripts on the images and hosts when they come up.
 
@@ -30,8 +35,7 @@ Job server takes a few command line arguments.  Global arguments are
 Some plugins also use commandline arguments.
 
 ### script-runner args
-The `script-runner` job module will take the following arguments
-
+The `script-runner` job module will take the following arguments:
 - -i <systemimage-ID> This is the id of the system image you are going to run scripts against.  Mutually exclusive with -s
 - -s <system-hostname> The host name of the system you are running the scripts against.
 - -b     Runs scripts in post-boot mode.
