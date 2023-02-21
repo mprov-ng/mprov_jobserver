@@ -1,5 +1,5 @@
 # mProv Job Server
-https://img.shields.io/github/actions/workflow/status/mprov-ng/mprov_jobserver/ci_build.yml?style=plastic
+![Buidl Status](https://img.shields.io/github/actions/workflow/status/mprov-ng/mprov_jobserver/ci_build.yml?style=plastic)
 
 The mProv Job server is the work horse behind the scenes of the mPCC.  The job server connects to the mPCC and will run jobs that are queued on the mPCC.  The job server is also responsible for serving images created through the mPCC, as well as running scripts on the images and hosts when they come up.
 
