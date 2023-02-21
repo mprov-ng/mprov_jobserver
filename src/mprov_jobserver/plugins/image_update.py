@@ -20,6 +20,7 @@ class image_update(JobServerPlugin):
   jobModule = 'image-update'
   imageDir = ""
   imageList = None
+  depMods = [ 'repo-sync' ]
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -174,6 +175,38 @@ class image_update(JobServerPlugin):
     # except Exception as e:
     #   print("Error: There was an error updating Jobservers for Images.")
     #   print(f"{e=}")
+
+    # check to see if we have any dependancy jobs running
+    response = self.js.session.get( self.js.mprovURL + 'jobs/?&module=repo-update&status=1')
+    if response.status_code != 200:
+      self.threadOk = False
+      print(f"Error: Unable to check on dependent jobs.")
+      return
+    jobs = {}
+    try:
+      jobs = response.json()
+      if len(jobs):
+        self.threadOk = False
+        print(f"image_update.py: Dependant Jobs Present, waiting for them to finish.")
+        return
+    except:
+      print("WARN: Unable to parse reply, trying to continue anyway.")
+    
+    response = self.js.session.get( self.js.mprovURL + 'jobs/?&module=repo-update&status=2')
+    if response.status_code != 200:
+      self.threadOk = False
+      print(f"Error: Unable to check on dependent jobs.")
+      return
+    jobs = {}
+    try:
+      jobs = response.json()
+      if len(jobs):
+        self.threadOk = False
+        print(f"image_update.py: Dependant Jobs Present, waiting for them to finish.")
+        return
+    except:
+      print("WARN: Unable to parse reply, trying to continue anyway.")
+    
 
     if self.imageList is None:
       # grab all the image-update jobs.
