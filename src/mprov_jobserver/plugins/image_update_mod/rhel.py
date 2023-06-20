@@ -104,7 +104,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
 
 
     # pip install some stuff
-    if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7"):
+    if os.system(f"chroot {imgDir} pip3.8 install sh pyparted==3.11.7"):
       print("Error uanble to install pip packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
