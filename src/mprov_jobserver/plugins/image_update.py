@@ -294,7 +294,7 @@ class image_update(JobServerPlugin):
         imgDir = self.imageDir + '/' + imageDetails['slug']
         # copy in the system resolv.conf
         os.system(f"/bin/cp -f /etc/resolv.conf {imgDir}/etc/resolv.conf")
-        if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
+        if os.system("chroot " + imgDir + " pip3.8 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           return
 
