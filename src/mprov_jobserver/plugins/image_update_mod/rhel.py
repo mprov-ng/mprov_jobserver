@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 from slugify import slugify
 import json
 
-
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 
 class UpdateImage(JobServerPlugin):
@@ -95,13 +94,15 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       return
 
     # install and copy the kernel image to the image root
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool')
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-devel python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool'):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
+    os.system('alternatives --set python3 /usr/bin/python3.8')
+    os.system('alternatives --set python /usr/bin/python3.8')
 
     # pip install some stuff
     if os.system(f"chroot {imgDir} pip3.8 install sh pyparted==3.11.7"):
@@ -165,13 +166,13 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       except:
         pass
 
-    if os.system('ls -t ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.vmlinuz'): 
+    if os.system('ls -1 ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.vmlinuz'): 
       print("Error: unable to copy kernel image.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
-    if os.system('ls -t ' + imgDir + '/boot/initramfs-* | grep -v rescue | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.initramfs'): 
+    if os.system('ls -1 ' + imgDir + '/boot/initramfs-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.initramfs'): 
       print("Error: unable to copy initramfs.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
@@ -189,3 +190,11 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       self.threadOk = False
       return
       
+    print(f"Regenerating initial ramdisk... ")
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    print(cmd)
+    if os.system(cmd):
+      print("Error: Unable to dracut a new initramfs.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
