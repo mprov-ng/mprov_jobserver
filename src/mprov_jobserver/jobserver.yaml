@@ -1,6 +1,9 @@
 - global:
-    # this points to your mprov control center instance.
-    mprovURL: "http://localhost/"
+    # This points to your mprov control center instance.
+    # This URL should point to the internal IP address or hostname and include a trailing slash
+    # e.g. "http://<IP of internal interface>/"
+    
+    mprovURL: ""
     # this is the api key for your mprov control center so that the 
     # jobserver can login and do stuff.
     apikey: ''
