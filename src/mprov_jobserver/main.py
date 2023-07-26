@@ -44,6 +44,8 @@ def main():
                         with importlib.resources.open_text('mprov_jobserver', entry) as yaml_file:
                             with open('/etc/mprov/' + entry, "w") as yaml_file_out:
                                 yaml_file_out.write(yaml_file.read())
+                                os.chmod(yaml_file_out, 0o600)
+                        
                     except:
                         print("Error copying " + entry + " to /etc/mprov/")
                         sys.exit(1)
