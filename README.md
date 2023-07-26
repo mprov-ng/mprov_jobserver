@@ -40,4 +40,4 @@ The `script-runner` job module will take the following arguments:
 - -s <system-hostname> The host name of the system you are running the scripts against.
 - -b     Runs scripts in post-boot mode.
 - -r (Global Option) The script-runner must be run in `runonce` mode only.  It is probably wise to also pass -d
-- -d (Global Option) The script-runner will not register as a job server with mPCC
+- -d (Global Option) The script-runner will not register as a job server with mPCC.
