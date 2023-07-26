@@ -120,7 +120,7 @@ class JobServer ():
     for config_entry in self.config_data['global'].keys():
       try:
         getattr(self, config_entry)
-        if 'config_entry' == "mprovURL":
+        if config_entry == "mprovURL":
           # add a trailing slash if one doesn't exist.
           if self.config_data['global'][config_entry][-1] != "/":
             self.config_data['global'][config_entry] += "/"
