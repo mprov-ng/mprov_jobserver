@@ -166,20 +166,8 @@ class script_runner(JobServerPlugin):
     scriptDeps = {}
     scripts = {}
     # osdistro scripts first
-    for script in entity['osdistro']['scripts']:
-      deps=[]
-      if script['scriptType']['slug'] != scriptMode:
-        continue
-      if len(script['dependsOn']) > 0:
-        # we have deps.
-        for dep in script['dependsOn']:
-          deps.append(dep['slug'])
-      scriptDeps[script['slug']] = deps
-      scripts[script['slug']] = script
-
-    # then group scripts
-    for group in entity['systemgroups']:
-      for script in group['scripts']:
+    if entity['osdistro']['scripts'] is not None:
+      for script in entity['osdistro']['scripts']:
         deps=[]
         if script['scriptType']['slug'] != scriptMode:
           continue
@@ -190,17 +178,32 @@ class script_runner(JobServerPlugin):
         scriptDeps[script['slug']] = deps
         scripts[script['slug']] = script
 
+    # then group scripts
+    for group in entity['systemgroups']:
+      if group['scripts'] is not None:
+        for script in group['scripts']:
+          deps=[]
+          if script['scriptType']['slug'] != scriptMode:
+            continue
+          if len(script['dependsOn']) > 0:
+            # we have deps.
+            for dep in script['dependsOn']:
+              deps.append(dep['slug'])
+          scriptDeps[script['slug']] = deps
+          scripts[script['slug']] = script
+
     # finally lay over the entity scirpts.
-    for script in entity['scripts']:
-      deps=[]
-      if script['scriptType']['slug'] != scriptMode:
-        continue
-      if len(script['dependsOn']) > 0:
-        # we have deps.
-        for dep in script['dependsOn']:
-          deps.append(dep['slug'])
-      scriptDeps[script['slug']] = deps
-      scripts[script['slug']] = script
+    if entity['scripts'] is not None:
+      for script in entity['scripts']:
+        deps=[]
+        if script['scriptType']['slug'] != scriptMode:
+          continue
+        if len(script['dependsOn']) > 0:
+          # we have deps.
+          for dep in script['dependsOn']:
+            deps.append(dep['slug'])
+        scriptDeps[script['slug']] = deps
+        scripts[script['slug']] = script
 
     yaml_merged={}
     # then we will flatten config_params on the host.
