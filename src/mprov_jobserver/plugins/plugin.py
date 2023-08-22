@@ -82,7 +82,7 @@ class JobServerPlugin(threading.Thread):
     #
     # By default, this function will only test the work flow with a 15 second delay as the 'work'
 
-    # Update all pending jobs of oir module to running
+    # Update all pending jobs of our module to running
     if(not self.set_job_running()):
       # no jobs to run, just return
       return
