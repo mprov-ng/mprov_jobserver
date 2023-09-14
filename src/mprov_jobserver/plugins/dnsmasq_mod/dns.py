@@ -83,15 +83,15 @@ class DnsmasqDNSConfig(JobServerPlugin):
             
         
             # grab the system network interfaces that are on this network.
+            response = None
+            data_hosts = { 'hosts': [] }
             print(self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
             response = self.js.session.get( self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
-            if not self.checkHTTPStatus(response.status_code):
-                print(f"Error: Issue with network {network['slug']}")
-                continue
-            data_hosts = {
-                'enableDNS': True,
-                'hosts': response.json(),
-            }
+            if self.checkHTTPStatus(response.status_code):
+                data_hosts = {
+                    'enableDNS': True,
+                    'hosts': response.json(),
+                }
             # add ourself if we are listening on this net
             data_hosts['hosts'].extend(self._addSelfToNet(network))
 
@@ -107,7 +107,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
                             'ipaddress': bmc['ipaddress'],
                             'ipv6ll': "", 
                             'mac': bmc['mac'],
-                            'hostname': bmc['system']['hostname'] + '-bmc',
+                            'hostname': bmc['system']['hostname'],
                             'domain': network['domain']
                         }
                         data_hosts['hosts'].append(tmpHost)
@@ -116,6 +116,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
             # merge in the switches
             response = self.js.session.get( self.js.mprovURL + 'switches/?network=' + network['slug'])
             data_hosts['hosts'] = data_hosts['hosts'] + (response.json())
+            
             # print(data_hosts)
             for idx, host in enumerate(data_hosts['hosts']):
                 if 'mgmt_mac' in host:
