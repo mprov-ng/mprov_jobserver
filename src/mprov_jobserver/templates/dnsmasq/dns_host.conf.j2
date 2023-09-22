@@ -4,6 +4,14 @@
 # <IPv4-address>,<name> ...
 
 {% for host in hosts %}
-{% if 'ipaddress' in host and host.ipaddress != "" and host.ipaddress != None %}{{host.ipaddress}} {{host.hostname}}.{{host.domain}} {% endif %}
+{% if 'ipaddress' in host and host.ipaddress != "" and host.ipaddress != None %}{{host.ipaddress}} {{host.hostname}}.{{host.domain}}{% endif %}
+
+{% if 'hostaliases' in host and host.hostaliases != ""  and host.hostaliases != None %}
+  {% for alias in host.hostaliases.split(" ") %}
+
+    {{host.ipaddress}} {{alias}}.{{host.domain}}
+  {% endfor %}
+{%endif%}
+
 {% if 'ipv6ll' in host and host.ipv6ll != "" and host.ipv6ll != None %}{{host.ipv6ll}} {{host.hostname}}.{{host.domain}} {% endif %}
 {% endfor %}

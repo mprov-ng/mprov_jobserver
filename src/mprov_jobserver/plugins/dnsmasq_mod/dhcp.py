@@ -4,7 +4,9 @@ import os
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
-    autoescape=select_autoescape()
+    autoescape=select_autoescape(),
+    trim_blocks=True,
+    lstrip_blocks=True,
 )
 
 class DnsmasqDHCPConfig(JobServerPlugin):

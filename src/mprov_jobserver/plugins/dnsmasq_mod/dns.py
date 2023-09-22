@@ -6,7 +6,9 @@ from socket import AF_INET, AF_INET6
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
-    autoescape=select_autoescape()
+    autoescape=select_autoescape(),
+    trim_blocks=True,
+    lstrip_blocks=True,
 )
 
 class DnsmasqDNSConfig(JobServerPlugin):
@@ -46,7 +48,8 @@ class DnsmasqDNSConfig(JobServerPlugin):
                                     'ipaddress': address['addr'],
                                     'ipv6ll': '',
                                     'hostname': self.hostname,
-                                    'domain': network['domain'] + f"# {iface}"
+                                    'domain': network['domain'] + f"# {iface}",
+                                    'hostaliases': ""
                                 })
             # # grab and add the LL ipv6 ip addresses.
             # if AF_INET6 in netifaces.ifaddresses(iface):
@@ -108,7 +111,8 @@ class DnsmasqDNSConfig(JobServerPlugin):
                             'ipv6ll': "", 
                             'mac': bmc['mac'],
                             'hostname': bmc['system']['hostname'],
-                            'domain': network['domain']
+                            'domain': network['domain'],
+                            'hostaliases': ""
                         }
                         data_hosts['hosts'].append(tmpHost)
                 except:
