@@ -1,6 +1,8 @@
 name: Update website Informtion
 on:
   push:
+    branches:
+      - main
     paths:
     - 'README.md'
 jobs:
