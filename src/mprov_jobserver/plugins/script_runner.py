@@ -301,7 +301,7 @@ class script_runner(JobServerPlugin):
     local_file = self.download_file(filename)
 
     # run the file
-    subprocess.run(local_file)
+    subprocess.run(local_file, shell=True)
     
 
   def download_file(self, url):
