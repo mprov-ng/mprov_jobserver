@@ -44,15 +44,16 @@ class DnsmasqDHCPConfig(JobServerPlugin):
 
             # merge in the switches
             response = self.js.session.get( self.js.mprovURL + 'switches/?network=' + network['slug'])
-            data_hosts['hosts'] = data_hosts['hosts'] + (response.json())
-            # print(data_hosts)
-            for idx, host in enumerate(data_hosts['hosts']):
-                # print(host)
-                if 'mgmt_mac' in host:
-                    data_hosts['hosts'][idx]['mac'] = host['mgmt_mac']
-                if 'mgmt_ip' in host:
-                    data_hosts['hosts'][idx]['ipaddress'] = host['mgmt_ip']
-                data_hosts['hosts'][idx]['network'] = network['slug']
+            if not self.checkHTTPStatus(response.status_code):
+                data_hosts['hosts'] = data_hosts['hosts'] + (response.json()[0])
+                # print(data_hosts)
+                for idx, host in enumerate(data_hosts['hosts']):
+                    # print(host)
+                    if 'mgmt_mac' in host:
+                        data_hosts['hosts'][idx]['mac'] = host['mgmt_mac']
+                    if 'mgmt_ip' in host:
+                        data_hosts['hosts'][idx]['ipaddress'] = host['mgmt_ip']
+                    data_hosts['hosts'][idx]['network'] = network['slug']
             with open(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts))
         # restart dnsmasq
