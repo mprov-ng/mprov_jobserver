@@ -101,11 +101,11 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       self.threadOk = False
       return
 
-    os.system('alternatives --set python3 /usr/bin/python3.8')
-    os.system('alternatives --set python /usr/bin/python3.8')
+    os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
+    os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
 
     # pip install some stuff
-    if os.system(f"chroot {imgDir} pip3.8 install sh pyparted==3.11.7"):
+    if os.system(f"chroot {imgDir} pip3.8 install sh pyparted==3.11.7 requests"):
       print("Error uanble to install pip packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
