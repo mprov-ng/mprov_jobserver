@@ -37,9 +37,15 @@ class DnsmasqDHCPConfig(JobServerPlugin):
             # grab the network interface.
             response = self.js.session.get( self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
 
+            try:
+                addHosts = response.json()
+            except:
+                addHosts = []
+            
+
             data_hosts = {
                 'enableDHCP': True,
-                'hosts': response.json(),
+                'hosts': addHosts,
             }
 
             # merge in the switches
