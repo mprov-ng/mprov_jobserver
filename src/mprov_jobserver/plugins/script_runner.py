@@ -188,7 +188,8 @@ class script_runner(JobServerPlugin):
           if len(script['dependsOn']) > 0:
             # we have deps.
             for dep in script['dependsOn']:
-              deps.append(dep['slug'])
+              print(dep)
+              deps.append(dep)
           scriptDeps[script['slug']] = deps
           scripts[script['slug']] = script
 
