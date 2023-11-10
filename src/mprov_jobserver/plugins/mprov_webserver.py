@@ -15,6 +15,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     self.maxConnFileSize = self.server.maxConnFileSize
     self.directory = self.server.rootDir
     path = self.translate_path(self.path)
+    # only apply to images.
+    if not path.startswith("/images/") :
+      return True
     if not os.path.isdir(path):
       if path.endswith("/"):
         self.send_error(HTTPStatus.NOT_FOUND, "File not found, filename invalid")
@@ -45,8 +48,10 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   def do_GET(self):
     print(mProvHTTPReqestHandler.connCount)
       
-    if os.getloadavg()[0] >= multiprocessing.cpu_count():
-      print("Not Registering, high load.")
+    if os.getloadavg()[1] >= multiprocessing.cpu_count() \
+        and self.js.config_data['loadmon']\
+        and self.path.startswith("/images/"):
+      print("Not Serving, high load.")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
       return False
       

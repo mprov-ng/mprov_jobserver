@@ -25,6 +25,7 @@ class JobServer ():
   configfile="/etc/mprov/jobserver.yaml"
   ip_address = ""
   myaddress = ""
+  loadmon=True
   plugin_dir = os.path.dirname(os.path.realpath(__file__)) + '/plugins/'
   jobmodules = []
   running_threads = {}
@@ -284,9 +285,9 @@ class JobServer ():
         'name': myHostname,
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
-        'one_minute_load': os.getloadavg()[0]
+        'one_minute_load': os.getloadavg()[2]
     }
-    if data['one_minute_load'] >= multiprocessing.cpu_count():
+    if data['one_minute_load'] >= multiprocessing.cpu_count() and self.config_data['loadmon']:
       print("Not Registering, high load.")
       return
     # print(self.config_data)
