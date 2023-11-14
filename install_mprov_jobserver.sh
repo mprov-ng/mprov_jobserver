@@ -51,6 +51,7 @@ then
         echo -e "\tfirewall-cmd --add-service=dhcpv6 --permanent && firewall-cmd --reload"
 fi
 mkdir -p /etc/mprov/
+cp /usr/local/lib/python3.*/site-packages/mprov_jobserver/plugins/ /etc/mprov/ -R
 mprov_jobserver -r || true
 
 
