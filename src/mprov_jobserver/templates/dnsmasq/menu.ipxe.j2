@@ -12,6 +12,7 @@ cpuid --ext 29 && set archl amd64 || set archl i386+
 menu mProv iPXE boot menu
 item --gap --             -------------------------------- mProv -----------------------------------
 item --key m mprov        Load mProv Network Based Loader
+item --key r mprovres     Load mProv Image for this node in Rescue Mode.
 item --gap --             ------------------------- Tools and utilities ----------------------------
 item --key p pxelinux     Load PXELinux menu
 item --key d menu-diag    Diagnostics tools...
@@ -48,6 +49,10 @@ exit
 chain --replace --autofree http://{{ bootserver }}/ipxe/ ||
 goto exit
 
+:mprovres
+chain --replace --autofree http://{{ bootserver }}/ipxe/?rescue ||
+goto exit
+
 :pxelinux
 set 210:string tftp://${next-server}/
 chain ${210:string}pxelinux.0 || goto failed
@@ -57,10 +62,10 @@ goto start
 
 :menu-diag
 menu Diagnostic tools
-item memtest       Memtest86+ 4.20
-item memtest-ipxe  Memtest86+ 4.20 (iPXE)
-item breakin       Breakin 3.71
-item dban          Darik's Boot and Nuke 2.2.7
+item memtest       Memtest86+
+#item memtest-ipxe  Memtest86+ 4.20 (iPXE)
+#item breakin       Breakin 3.71
+#item dban          Darik's Boot and Nuke 2.2.7
 item
 item --key 0x08 back Back to top menu...
 iseq ${menu-default} menu-diag && isset ${submenu-default} && goto menu-diag-timed ||
@@ -71,39 +76,40 @@ choose --timeout ${submenu-timeout} --default ${submenu-default} selected && got
 :memtest
 # TODO: Fix the URI parser to make the + sign work
 #chain memtest86+-4.20.elf.img - || goto failed
-chain memtest86plus-4.20.elf.img - || goto failed
+#chain memtest86plus-4.20.elf.img - || goto failed
+sanboot https://memtest.org/download/v6.20/mt86plus_6.20_64.iso.zip
 goto start
 
 :memtest-ipxe
-chain memtest.0 passes=1 && set memtest GOOD || set memtest BAD
-set memtest_errno:uint8 ${errno}
-iseq ${memtest} GOOD && goto memtest-info ||
-iseq ${memtest_errno} 0x1 && set memtest BAD || set memtest UNKNOWN
-:memtest-info
-menu Your memory seems to be ${memtest}
-item memtest-report   Report memtest result to web service
-item --key 0x08 menu-diag Back to diagnostics menu...
-choose --default menu-diag selected && goto ${selected} || goto start
+#chain memtest.0 passes=1 && set memtest GOOD || set memtest BAD
+#set memtest_errno:uint8 ${errno}
+#iseq ${memtest} GOOD && goto memtest-info ||
+#iseq ${memtest_errno} 0x1 && set memtest BAD || set memtest UNKNOWN
+#:memtest-info
+#menu Your memory seems to be ${memtest}
+#item memtest-report   Report memtest result to web service
+#item --key 0x08 menu-diag Back to diagnostics menu...
+#choose --default menu-diag selected && goto ${selected} || goto start
 
 :memtest-report
-chain ${memtest-report-url}?result=${memtest}&mac=${mac}&uuid=${uuid}&hostname=${hostname} ||
-goto menu-diag
+#chain ${memtest-report-url}?result=${memtest}&mac=${mac}&uuid=${uuid}&hostname=${hostname} ||
+#goto menu-diag
 
-:breakin
+#:breakin
 # Stress-testing and diagnostics utility
 # http://www.advancedclustering.com/software/breakin.html
 # Set sshpasswd=yourpassword for remote access
 # Set startup= to 'cloner' or 'rescue' for more features
 # When startup=cloner, server= and image= can also be set
 # http://www.advancedclustering.com/software/cloner.html
-kernel breakin-3.71/kernel-3.71
-initrd breakin-3.71/initrd-3.71.cpio.lzma
-imgargs kernel-3.71 startup=breakin
-boot || goto failed
-goto start
+#kernel breakin-3.71/kernel-3.71
+#initrd breakin-3.71/initrd-3.71.cpio.lzma
+#imgargs kernel-3.71 startup=breakin
+#boot || goto failed
+#goto start
 
-:dban
-kernel dban-2.2.7/DBAN.BZI
-imgargs DBAN.BZI nuke="dwipe --method gutmann --rounds 2 --verify last" silent vga=785
-boot || goto failed
-goto start
+#:dban
+#kernel dban-2.2.7/DBAN.BZI
+#imgargs DBAN.BZI nuke="dwipe --method gutmann --rounds 2 --verify last" silent vga=785
+#boot || goto failed
+#goto start
