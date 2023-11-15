@@ -162,6 +162,7 @@ class nads(JobServerPlugin):
 
     # setup a capture socket.
     capture_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))
+    capture_sock.settimeout(1)
 
     # enable promiscuous mode on the interface. 
     promiscuous_mode(self.provIntf, capture_sock, True)
@@ -206,7 +207,6 @@ class nads(JobServerPlugin):
       # if we get here and don't have a port and a switch name,
       # we cannot continue.
       print("Error: Unable to detect switch and port via LLDP")
-      return False
     # if we get here, we're all set.
     return True
 
@@ -274,11 +274,11 @@ class nads(JobServerPlugin):
       return False
 
     
-
-    if self.port.find('/') >= 0:
-      # we need to parse the port out of the port id.
-      if self.port.rfind('/') >= 0:
-        self.port = self.port[self.port.rfind('/')+1:]
+    if self.port is not None:
+      if self.port.find('/') >= 0:
+        # we need to parse the port out of the port id.
+        if self.port.rfind('/') >= 0:
+          self.port = self.port[self.port.rfind('/')+1:]
 
     # if we got LLDP, tell the MPCC who we are, or better put, send it our switch, port, and mac.
     # and let it sort it out.
