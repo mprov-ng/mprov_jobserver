@@ -94,18 +94,26 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       return
 
     # install and copy the kernel image to the image root
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-devel python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel python38 python38-pyyaml python38-devel wget python38-requests python38-jinja2.noarch jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool'):
+    versinfo = platform.linux_distribution()
+    if versinfo[1] >= 9 :
+      pythonpkgs = "python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
+    else:
+      pythonpkgs = "python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
+
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs)
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
-    os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
-    os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
+    if versinfo[1] < 9 :
+      os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
+      os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
+      os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')
 
     # pip install some stuff
-    if os.system(f"chroot {imgDir} pip3.8 install sh pyparted==3.11.7 requests"):
+    if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7 requests"):
       print("Error uanble to install pip packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False

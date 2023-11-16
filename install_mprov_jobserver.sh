@@ -1,5 +1,24 @@
 #!/bin/bash
 
+# check your python 3 version.
+which python3 > /dev/null
+if [ "$?" != "0" ]
+then    
+    echo "Error: Either python 3 is not installed or no alternatives setup for python3 binary." >&2
+    exit 1
+fi
+
+pyvers=`python3 --version| awk '{print $2}' `
+if [ "$pyvers" != "3.8" ]
+then
+        pyvershi=`echo -e "3.8\n$pyvers" |  sort -Vr | head -n1 `
+        if [ "$pyvershi" == "3.8" ]
+        then
+                # we don't have python 3.8
+                echo "Error: You don't seem to have at least python 3.8.  Check your etc-alternaives and set them accordingly!" >&2
+                exit 1
+        fi
+fi
 
 # time for some arg parsing.
 BUILD_DOCKER=0
@@ -23,11 +42,11 @@ extra_pkgs=""
 
 # make sure epel is installed before we try to do anything else.
 dnf -y install epel-release
-dnf -y install python38 python38-pip python38-pyyaml python38-requests python38-jinja2.noarch git wget iproute dnsmasq tcpdump ipmitool which $extra_pkgs
+dnf -y install python3 python3-pip git wget iproute dnsmasq tcpdump ipmitool which $extra_pkgs
 dnf -y --enablerepo=powertools install parted-devel
 
 extra_pip=""
-pip3.8 --no-cache-dir install mprov_jobserver $extra_pip
+pip3.8 --no-cache-dir install mprov_jobserver pyyaml requests jinja2 $extra_pip
 
 
 if [ "$BUILD_DOCKER" != "1" ]
