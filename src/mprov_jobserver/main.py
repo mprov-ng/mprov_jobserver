@@ -44,10 +44,10 @@ def main():
                         with importlib.resources.open_text('mprov_jobserver', entry) as yaml_file:
                             with open('/etc/mprov/' + entry, "w") as yaml_file_out:
                                 yaml_file_out.write(yaml_file.read())
-                                os.chmod(yaml_file_out, 0o600)
+                                os.chmod('/etc/mprov/' + entry, 0o600)
                         
-                    except:
-                        print("Error copying " + entry + " to /etc/mprov/")
+                    except Exception as e:
+                        print(f"Error copying {entry} to /etc/mprov/: {e}")
                         sys.exit(1)
                     
             # that succeeded so let's grab the plugin information
