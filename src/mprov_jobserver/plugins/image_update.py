@@ -321,6 +321,20 @@ class image_update(JobServerPlugin):
           'imgDir': imgDir,
           'image': imageDetails['slug'],
         }
+
+        # copy in our root keys from the distro
+        if 'rootsshkeys' in imageDetails['osdistro']:
+          if imageDetails['osdistro']['rootsshkeys'] is not None:
+            os.makedirs("/root/.ssh", exist_ok=True)
+            with open(imgDir + '/root/.ssh/authorized_keys', mode="w") as authkeys:
+              authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
+        
+        # set the root pw to the password in the distro
+        if 'rootpw' in imageDetails['osdistro']:
+          if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
+            print("Setting root password...")
+            os.system(f"echo -e '{imageDetails['osdistro']['rootpw']}\n{imageDetails['osdistro']['rootpw']}' | chroot {imgDir} passwd root")
+
         # now let's run our script-runner shell script.
         with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
             conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
