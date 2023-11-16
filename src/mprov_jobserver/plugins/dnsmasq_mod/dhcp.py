@@ -40,13 +40,6 @@ class DnsmasqDHCPConfig(JobServerPlugin):
                 addHosts = response.json()
             except:
                 addHosts = []
-            
-
-            try:
-                addHosts = response.json()
-            except:
-                addHosts = []
-            
 
             data_hosts = {
                 'enableDHCP': True,
