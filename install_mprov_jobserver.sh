@@ -46,7 +46,7 @@ dnf -y install python3 python3-pip git wget iproute dnsmasq tcpdump ipmitool whi
 dnf -y --enablerepo=powertools install parted-devel
 
 extra_pip=""
-pip3.8 --no-cache-dir install mprov_jobserver pyyaml requests jinja2 $extra_pip
+pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2 $extra_pip
 
 
 if [ "$BUILD_DOCKER" != "1" ]
