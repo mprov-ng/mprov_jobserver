@@ -172,7 +172,10 @@ class nads(JobServerPlugin):
       # print("Current: " + str(time.time()))
       # print("End at: " + str(startTime + self.maxLLDPWait))
       # grab a packet.
-      packet = capture_sock.recvfrom(65565)
+      try:
+        packet = capture_sock.recvfrom(65565)
+      except:
+        continue
       packet = packet[0]
       eth_protocol, eth_payload = unpack_ethernet_frame(packet)[3:]
 
