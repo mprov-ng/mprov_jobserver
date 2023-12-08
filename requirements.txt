@@ -8,3 +8,4 @@ pyparted==3.11.7
 sh
 pyroute2
 dnspython
+distro

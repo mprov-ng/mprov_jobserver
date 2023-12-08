@@ -3,6 +3,7 @@ import os
 from urllib.parse import urlparse
 from slugify import slugify
 import json
+import distro
 
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 
@@ -94,11 +95,11 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       return
 
     # install and copy the kernel image to the image root
-    versinfo = platform.linux_distribution()
-    if versinfo[1] >= 9 :
-      pythonpkgs = "python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
+    versinfo = distro.version_parts()
+    if int(versinfo[0]) >= 9 :
+      pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
     else:
-      pythonpkgs = "python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
+      pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
 
     print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs)
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs):
@@ -107,7 +108,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       self.threadOk = False
       return
 
-    if versinfo[1] < 9 :
+    if int(versinfo[0]) < 9 :
       os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
       os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
       os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')

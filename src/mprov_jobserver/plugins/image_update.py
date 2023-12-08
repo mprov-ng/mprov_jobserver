@@ -108,6 +108,8 @@ class image_update(JobServerPlugin):
         # we are already in here.  
         continue
       #print(imgVersions)
+      if imageData['customIPXE'] is "" or imageData['customIPXE'] is None:
+        continue
       if image not in imgVersions:
         # we have no record of this image version, shim with 0
         imgVersions[image] = 0
@@ -299,7 +301,7 @@ class image_update(JobServerPlugin):
         imgDir = self.imageDir + '/' + imageDetails['slug']
         # copy in the system resolv.conf
         os.system(f"/bin/cp -f /etc/resolv.conf {imgDir}/etc/resolv.conf")
-        if os.system("chroot " + imgDir + " pip3.8 --no-cache-dir install --upgrade mprov_jobserver"):
+        if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           return
 
@@ -326,8 +328,11 @@ class image_update(JobServerPlugin):
         if 'rootsshkeys' in imageDetails['osdistro']:
           if imageDetails['osdistro']['rootsshkeys'] is not None:
             os.makedirs("/root/.ssh", exist_ok=True)
-            with open(imgDir + '/root/.ssh/authorized_keys', mode="w") as authkeys:
-              authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
+            try:
+              with open(imgDir + '/root/.ssh/authorized_keys', mode="w") as authkeys:
+                authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
+            except:
+              print("WARN: No authorized_keys copied, /root/.ssh/authorized_keys access error")
         
         # set the root pw to the password in the distro
         if 'rootpw' in imageDetails['osdistro']:
