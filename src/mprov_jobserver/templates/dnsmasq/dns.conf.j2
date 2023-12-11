@@ -16,8 +16,6 @@ localise-queries
 # do not forward short names upstream
 domain-needed
 
-# add in our domains here
-{% for network in networks %}
-auth-zone={{network.domain}},{{network.subnet}}/{{network.netmask}}
-{% endfor %}
+# listen on all interfaces
+interface=*
 {% endif %}

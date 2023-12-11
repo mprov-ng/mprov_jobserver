@@ -73,6 +73,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
         # get the network informatioin
         response = self.js.session.get( self.js.mprovURL + 'networks/?managedns=True')
         data = {
+            'hostname': self.hostname,
             'networks': response.json(),
             'enableDNS': True,
         }
