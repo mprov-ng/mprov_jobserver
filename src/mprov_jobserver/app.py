@@ -161,7 +161,7 @@ class JobServer ():
             # first check if the thread is done running.
             if mod in self.running_threads: 
               # check if this thread is still running
-              if not self.running_threads[mod].isAlive() :
+              if not self.running_threads[mod].is_alive() :
                 # print ("Thread " + mod + " ended.")
                 # if it's done running remove it.
                 self.running_threads[mod].handled = True

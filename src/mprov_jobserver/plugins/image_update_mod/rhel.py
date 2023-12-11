@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from slugify import slugify
 import json
 import distro
+import shutil
 
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 
@@ -98,16 +99,23 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
     versinfo = distro.version_parts()
     if int(versinfo[0]) >= 9 :
       pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
+      extra_repo = "crb"
     else:
       pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
+      extra_repo = "powertools"
 
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs)
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --enablerepo=powertools install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool' + pythonpkgs):
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
+    # set up a version lock on the kernel
+    os.system(f'chroot {imgDir} dnf -y versionlock kernel*')
+
+    shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
+    
     if int(versinfo[0]) < 9 :
       os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
       os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
