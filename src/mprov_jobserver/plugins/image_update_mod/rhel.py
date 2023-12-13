@@ -47,16 +47,17 @@ class UpdateImage(JobServerPlugin):
       # locally managed repo, let's just generate a repo file and point it.
       repofileContents=f"""
 [baseos]
-name=Rocky Linux $releasever - BaseOS - mProv
+name= {imageDetails['osdistro']['name']}- mProv
 baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
-gpgcheck=1
+gpgcheck=0
 enabled=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+
 
       """
 
       os.makedirs(f"{imgDir}/etc/yum.repos.d/", exist_ok=True)
-      with open(f"{imgDir}/etc/yum.repos.d/Rocky-BaseOS.repo", "w") as repofile:
+      nameSlug = slugify(imageDetails['osdistro']['name'])
+      with open(f"{imgDir}/etc/yum.repos.d/{nameSlug}.repo", "w") as repofile:
         repofile.write(repofileContents)
     else:
       print("Grabbing os repo package: " + baseURL)
@@ -87,17 +88,30 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
+    # install gpg keys for the distro into the installroot
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return 
+    print(f'rpm --import {imgDir}/etc/pki/rpm-gpg/*')
+    if os.system(f'rpm --import {imgDir}/etc/pki/rpm-gpg/*'):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return 
+      
     # build the filesystem.
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\'')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' groupinstall \'Minimal Install\''):
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
       print("Error: unable to genergate image filesystem.")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
     # install and copy the kernel image to the image root
-    versinfo = distro.version_parts()
-    if int(versinfo[0]) >= 9 :
+    if int(imageDetails['osdistro']['version']) >= 9 :
       pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
       extra_repo = "crb"
     else:
@@ -116,7 +130,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
 
     shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
     
-    if int(versinfo[0]) < 9 :
+    if int(imageDetails['osdistro']['version']) < 9 :
       os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
       os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
       os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')
