@@ -26,6 +26,42 @@ You will need to create an API key in the mPCC for the job server.  Once you hav
 
 do not use localhost use IP or internal name 
 
+Here is an example for a good first jobserver config:
+```
+- global:
+    # This points to your mprov control center instance.
+    # This URL should point to the internal IP address or hostname and include a trailing slash
+    # e.g. "http://<IP of internal interface>/"
+    
+    mprovURL: "http://mprov.local.cluster"
+    # this is the api key for your mprov control center so that the 
+    # jobserver can login and do stuff.
+    apikey: 'kjangknfdasjhngurwegqfdbjhn'
+    # this is the interval which this jobserver will check in with the mPCC
+    heartbeatInterval: 10
+    # runonce: True # uncomment to run the jobserver once and exit.
+    myaddress: 'mprov.local.cluster' # set this to the address of this jobserver.
+    jobmodules:
+      # set the jobmodules you want to run here.
+      - repo-delete
+      - repo-update
+      - image-update # REQUIRES mprov-webserver
+      - mprov-webserver
+      - image-delete
+      - dnsmasq
+      
+# include any plugin yamls.        
+- !include plugins/*.yaml
+```
+
+## Post Setup
+After you have setup the `/etc/mprov/jobserver.yaml` you can enable the jobserver with this command:
+```
+# systemctl enable --now mprov_jobserver
+```
+The jobserver should connect to the mPCC and start a repo sync which is required before you can update any images.
+
+
 ## Arguments
 Job server takes a few command line arguments.  Global arguments are
 
