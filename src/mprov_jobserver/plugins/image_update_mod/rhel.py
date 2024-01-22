@@ -42,106 +42,41 @@ class UpdateImage(JobServerPlugin):
     # grab the repo rpm
     url = urlparse(baseURL)
     file = os.path.basename(url.path)
-    print()
-    if imageDetails['osdistro']['baserepo']['managed']:
-      # locally managed repo, let's just generate a repo file and point it.
-      repofileContents=f"""
-[baseos]
-name= {imageDetails['osdistro']['name']}- mProv
-baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
-gpgcheck=0
-enabled=1
+#     print()
+#     if imageDetails['osdistro']['baserepo']['managed']:
+#       # locally managed repo, let's just generate a repo file and point it.
+#       repofileContents=f"""
+# [baseos]
+# name= {imageDetails['osdistro']['name']}- mProv
+# baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
+# gpgcheck=0
+# enabled=1
 
 
-      """
+#       """
 
-      os.makedirs(f"{imgDir}/etc/yum.repos.d/", exist_ok=True)
-      nameSlug = slugify(imageDetails['osdistro']['name'])
-      with open(f"{imgDir}/etc/yum.repos.d/{nameSlug}.repo", "w") as repofile:
-        repofile.write(repofileContents)
-    else:
-      print("Grabbing os repo package: " + baseURL)
-      if os.system('wget -O ' + file + ' ' + baseURL ):
-        print("Error: unable to get repo package: " + baseURL)
-        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-        self.threadOk = False
-        return
+#       os.makedirs(f"{imgDir}/etc/yum.repos.d/", exist_ok=True)
+#       nameSlug = slugify(imageDetails['osdistro']['name'])
+#       with open(f"{imgDir}/etc/yum.repos.d/{nameSlug}.repo", "w") as repofile:
+#         repofile.write(repofileContents)
+#     else:
+#       print("Grabbing os repo package: " + baseURL)
+#       if os.system('wget -O ' + file + ' ' + baseURL ):
+#         print("Error: unable to get repo package: " + baseURL)
+#         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+#         self.threadOk = False
+#         return
 
-      # force the RPM to unpack to our image dir.
-      print("Unpacking RPM to " + imgDir)
+#       # force the RPM to unpack to our image dir.
+#       print("Unpacking RPM to " + imgDir)
       
-      if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
-        print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
-        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-        self.threadOk = False
-        return
-
-    ver= str(imageDetails['osdistro']['version'])
-    # run a clean on yum
-    if os.system('dnf -y clean all'):
-      print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
-      print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-    # install gpg keys for the distro into the installroot
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
-      print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return 
-    print(f'rpm --import {imgDir}/etc/pki/rpm-gpg/*')
-    if os.system(f'rpm --import {imgDir}/etc/pki/rpm-gpg/*'):
-      print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return 
-      
-    # build the filesystem.
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
-      print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-
-    # install and copy the kernel image to the image root
-    if int(imageDetails['osdistro']['version']) >= 9 :
-      pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
-      extra_repo = "crb"
-    else:
-      pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
-      extra_repo = "powertools"
-
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
-      print("Error unable to install required packages into image filesystem")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-
-    # set up a version lock on the kernel
-    os.system(f'chroot {imgDir} dnf -y versionlock kernel*')
-
-    shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
+#       if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
+#         print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
+#         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+#         self.threadOk = False
+#         return
+    ########
     
-    if int(imageDetails['osdistro']['version']) < 9 :
-      os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
-      os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
-      os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')
-
-    # pip install some stuff
-    if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7 requests"):
-      print("Error uanble to install pip packages into image filesystem")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-
     # install the extra repository packages on the system image
     print("Installing extra repos...")
     repostr = ""
@@ -171,12 +106,11 @@ enabled=1
         # we have a managed repo, so let's create a file in /etc/yum.repos.d/
         repoid = slugify(repo['name'])
         os.makedirs(f"{imgDir}/etc/yum.repos.d", exist_ok=True)
-        with open(os.open(f"{imgDir}/etc/yum.repos.d/{repoid}.repo", os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as repofile:
-            repofile.write(f"[{repoid}]\n")
-            repofile.write(f"name={repo['name']}\n")
+        with open(os.open(f"{imgDir}/etc/yum.repos.d/{repoid}-mprov.repo", os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as repofile:
+            repofile.write(f"[{repoid}-mprov]\n")
+            repofile.write(f"name={repo['name']} - mProv\n")
             repofile.write(f"baseurl=\"{self.js.mprovURL}/osrepos/{repo['id']}/\"\n")
-            repofile.write(f"enabled=0\n")
-        pass
+            repofile.write(f"enabled=1\n")
       else:
         # not managed, should be a repo package URL, add it to repostr.
         repostr += f" {repo['repo_package_url']}"
@@ -184,6 +118,74 @@ enabled=1
     if repostr != "":
       if os.system(f'dnf -y --installroot={imgDir} --releasever={ver} install {repostr}'):
         print("Warn error installing extra repos")
+
+    ######
+
+    ver= str(imageDetails['osdistro']['version'])
+    # run a clean on yum
+    if os.system('dnf -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    # install gpg keys for the distro into the installroot
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return 
+    # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
+    # if os.system(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"'):
+    #   print("Error: unable to genergate image filesystem.")
+    #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+    #   self.threadOk = False
+    #   return 
+      
+    # build the filesystem.
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
+    # install and copy the kernel image to the image root
+    if float(imageDetails['osdistro']['version']) >= 9 :
+      pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
+      extra_repo = "crb"
+    else:
+      pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
+      extra_repo = "powertools"
+
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+      print("Error unable to install required packages into image filesystem")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
+    # set up a version lock on the kernel
+    os.system(f'chroot {imgDir} dnf -y versionlock kernel*')
+
+    shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
+    
+    if float(imageDetails['osdistro']['version']) < 9 :
+      os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
+      os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
+      os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')
+
+    # pip install some stuff
+    if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7 requests"):
+      print("Error uanble to install pip packages into image filesystem")
+      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
 
     if os.path.exists(imgDir + '/' + imageDetails['slug'] + '.vmlinuz'):
       try:
