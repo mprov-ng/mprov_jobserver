@@ -41,10 +41,11 @@ class UpdateRepo(JobServerPlugin):
     # try to make the directory for this repo.
     os.makedirs(f"{self.repoDir}/{self.repo['id']}", exist_ok=True)
 
-    os.chdir(f"{self.repoDir}/")
+    os.chdir(f"{self.repoDir}/{self.repo['id']}")
     baseURL = repoDetails['repo_package_url']
     print("Grabbing repository mirror: " + baseURL)
-    if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
+    #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
+    if os.system(f"dnf reposync --repofrompath mprovdl,{self.repo['repo_package_url']} --repo mprovdl"):
       print("Error: unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
