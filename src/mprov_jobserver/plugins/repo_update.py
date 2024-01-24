@@ -49,7 +49,7 @@ class repo_update(JobServerPlugin):
     if not self.js.update_job_status(self.jobModule, 2):
       return # no jobs
     # grab the list of repos to update.
-    self.repoList = []
+    self.repoList = {}
     response = self.js.session.get( f"{self.js.mprovURL}jobs/?jobserver={str(self.js.id)}&module={self.jobModule}&status=2")
     for job in response.json():
       # get the ostype from the repo.
@@ -61,7 +61,7 @@ class repo_update(JobServerPlugin):
         self.js.update_job_status(self.module, 3, jobid=job['id'])
         return
       try:
-        self.repoList.append(params['repo_id'])
+        self.repoList[params['repo_id']] = job['id']
       except:
         print("Error: Repo Update Job Failed, corrupted params")
         self.js.update_job_status(self.module, 3, jobid=job['id'])
@@ -75,7 +75,7 @@ class repo_update(JobServerPlugin):
     # create an empty robots.txt file.
     with open(f'{self.repoDir}/robots.txt', 'w') as fp:
       pass
-    for repo in self.repoList:
+    for repo,jid in self.repoList.items():
       # grab the repo from the mPCC
         
       
@@ -106,9 +106,10 @@ class repo_update(JobServerPlugin):
           continue
         repo_update.repo = repo
         repo_update.repoDir = self.repoDir
+        repo_update.jobid = jid
         repo_update.start()
       else: 
         print(f'Error: bad http request: {response.status_code}')
         print(self.js.mprovURL + query)
-        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         continue

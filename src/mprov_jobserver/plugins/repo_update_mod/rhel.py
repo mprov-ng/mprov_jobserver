@@ -9,6 +9,7 @@ import json
 class UpdateRepo(JobServerPlugin):
   repo = None
   repoDir = ""
+  jobid = None
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
     # if 'repo-server' not in self.js.jobmodules:
@@ -41,14 +42,15 @@ class UpdateRepo(JobServerPlugin):
     # try to make the directory for this repo.
     os.makedirs(f"{self.repoDir}/{self.repo['id']}", exist_ok=True)
 
-    os.chdir(f"{self.repoDir}/{self.repo['id']}")
+    os.chdir(f"{self.repoDir}/")
     baseURL = repoDetails['repo_package_url']
     print("Grabbing repository mirror: " + baseURL)
     #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
-    if os.system(f"dnf reposync --repofrompath mprovdl,{self.repo['repo_package_url']} --repo mprovdl"):
+    if os.system(f"dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir=./ --download-metadata"):
       print("Error: unable to get repo: " + baseURL)
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
+    
     # update the 'jobservers' field to be us, so that the 
     data = {
       'id': self.repo['id'],
@@ -59,5 +61,5 @@ class UpdateRepo(JobServerPlugin):
     }
     print(json.dumps(data))
     response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
-    self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+    self.js.update_job_status(self.jobModule, 4, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
     return 
