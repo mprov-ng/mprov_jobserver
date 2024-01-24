@@ -82,17 +82,29 @@ class UpdateImage(JobServerPlugin):
     repostr = ""
     repos = []
 
+    # pull in the repos from the image.
     if len(imageDetails['osrepos']) > 0:
       for repo in imageDetails['osrepos']:
         if type(repo) is dict:
           repos.append(repo)
+
+    # pull in the OS repos from the distro
     if len(imageDetails['osdistro']['osrepos']) > 0:
       for repo in imageDetails['osdistro']['osrepos']:
         if type(repo) is dict:
           repos.append(repo)
 
+    # pull in the BaseOS repo from the distro
     if type(imageDetails['osdistro']['baserepo']) is dict:
       repos.append(imageDetails['osdistro']['baserepo']) 
+    
+    # pull in extra repos from the distro.
+    if "extrarepos" in imageDetails['osdistro']:
+      for repo in imageDetails['osdistro']['extrarepos']:
+        if type(repo) is dict:
+          repos.append(repo)
+
+
 
     # now let's loop through the repos, if it's not managed, it should be a repo URL
     # if it is managed, create the yum.conf for it in /etc/yum.repos.d/
@@ -103,21 +115,29 @@ class UpdateImage(JobServerPlugin):
       print("\nx")
       print(repo['name'])
       if repo['managed'] :
-        # we have a managed repo, so let's create a file in /etc/yum.repos.d/
-        repoid = slugify(repo['name'])
-        os.makedirs(f"{imgDir}/etc/yum.repos.d", exist_ok=True)
-        with open(os.open(f"{imgDir}/etc/yum.repos.d/{repoid}-mprov.repo", os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as repofile:
-            repofile.write(f"[{repoid}-mprov]\n")
-            repofile.write(f"name={repo['name']} - mProv\n")
-            repofile.write(f"baseurl=\"{self.js.mprovURL}/osrepos/{repo['id']}/\"\n")
-            repofile.write(f"enabled=1\n")
+        # we are managed, so point the repo to the mPCC
+        repourl = f"{self.js.mprovURL}/osrepos/{repo['id']}/"
       else:
-        # not managed, should be a repo package URL, add it to repostr.
-        repostr += f" {repo['repo_package_url']}"
-
-    if repostr != "":
-      if os.system(f'dnf -y --installroot={imgDir} --releasever={ver} install {repostr}'):
-        print("Warn error installing extra repos")
+        # otherwise, just set the url to the url in the repo.
+        repourl = repo['repo_package_url']
+      
+      # now make the repo file
+      repoid = slugify(repo['name'])
+      os.makedirs(f"{imgDir}/etc/yum.repos.d", exist_ok=True)
+      with open(os.open(f"{imgDir}/etc/yum.repos.d/{repoid}-mprov.repo", os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as repofile:
+          repofile.write(f"[{repoid}-mprov]\n")
+          repofile.write(f"name={repo['name']} - mProv\n")
+          repofile.write(f"baseurl=\"{repourl}\"\n")
+          repofile.write(f"enabled=1\n")
+          repofile.write(f"gpgcheck=0\n")
+      
+    # here we are going to disable all the default repos, we'll do this again after the main install.
+    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
+    for drepo in disable_repos:
+      try:
+        os.system(f"dnf -y --installroot {imgDir} config-manager --disable {drepo}")
+      except:
+        pass
 
     ######
 
@@ -154,17 +174,25 @@ class UpdateImage(JobServerPlugin):
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
+    
+    # here we are going to disable all the default repos again just to make sure.
+    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
+    for drepo in disable_repos:
+      try:
+        os.system(f"chroot {imgDir} dnf -y --disable config-manager {drepo}")
+      except:
+        pass
 
     # install and copy the kernel image to the image root
     if float(imageDetails['osdistro']['version']) >= 9 :
       pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
-      extra_repo = "crb"
+      
     else:
       pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
-      extra_repo = "powertools"
+      
 
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f' --enablerepo={extra_repo} install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
