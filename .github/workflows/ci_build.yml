@@ -56,6 +56,6 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           tags: |
-            ghcr.io/mprov-ng/mprov-jobserver:${{steps.vars.outputs.tag}}
+            ghcr.io/mprov-ng/mprov-jobserver:$tag
             ghcr.io/mprov-ng/mprov-jobserver:latest
           push: true    
