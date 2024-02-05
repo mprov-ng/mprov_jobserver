@@ -25,11 +25,11 @@ jobs:
       
       - name: Parse the version
         id: vars
-        run: echo ::set-output name=tag::$(echo ${GITHUB_REF:10})
+        run: echo tag=$(echo ${GITHUB_REF:10}) >> $GITHUB_ENV
 
       - name: Build Package
         run: |
-          echo "${{steps.vars.outputs.tag}}" > VERSION
+          echo "$tag" > VERSION
           python -m build
       
       - name: Publish Package to Pypi
