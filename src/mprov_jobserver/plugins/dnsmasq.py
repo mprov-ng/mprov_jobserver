@@ -57,13 +57,14 @@ class dnsmasq(JobServerPlugin):
         try:
           sh.rm('-rf', '/tmp/ipxe')
           sh.git(['clone', 'https://github.com/ipxe/ipxe'])
-          sh.git(['checkout', '46719f2264fc63deaa712f4dc164d3b33c66e05f'])
+          os.chdir('ipxe')
+          sh.git(['checkout', 'e66552eeede19a91b1a52468a550b58fd031777b'])
         except:
           print("Error: unable to fetch ipxe source.  You may need to copy some files yourself.")
           return result
         
         print("\tRunning inintial build")
-        os.chdir('ipxe/src')
+        os.chdir('src')
         try:
           sh.make(['-j4', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
         except:
