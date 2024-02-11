@@ -11,6 +11,7 @@ from mprov_jobserver.plugins.plugin import JobServerPlugin
 class UpdateImage(JobServerPlugin):
   imageDetails = None
   imageDir = ""
+  jobid = None
   error = True # true by default, set to False if no errors in the run
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
@@ -145,19 +146,19 @@ class UpdateImage(JobServerPlugin):
     # run a clean on yum
     if os.system('dnf -y clean all'):
       print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
       print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     # install gpg keys for the distro into the installroot
     print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
       print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return 
     # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
@@ -171,7 +172,7 @@ class UpdateImage(JobServerPlugin):
     print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
       print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     
@@ -194,7 +195,7 @@ class UpdateImage(JobServerPlugin):
     print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
     if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
@@ -211,7 +212,7 @@ class UpdateImage(JobServerPlugin):
     # pip install some stuff
     if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7 requests"):
       print("Error uanble to install pip packages into image filesystem")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
@@ -229,25 +230,25 @@ class UpdateImage(JobServerPlugin):
 
     if os.system('ls -1 ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.vmlinuz'): 
       print("Error: unable to copy kernel image.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
     if os.system('ls -1 ' + imgDir + '/boot/initramfs-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.initramfs'): 
       print("Error: unable to copy initramfs.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
     if os.system('rm -f ' + imgDir + '/dev/ram0; mknod -m 600 ' + imgDir + '/dev/ram0 b 1 0'):
       print('Error: trying to make /dev/ram0')
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     
     if os.system('rm -f ' + imgDir + '/dev/initrd; mknod -m 400 ' + imgDir + '/dev/initrd b 1 250'):
       print('Error: trying to make /dev/ram0')
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
       
@@ -256,6 +257,6 @@ class UpdateImage(JobServerPlugin):
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
-      self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return

@@ -219,7 +219,7 @@ class image_update(JobServerPlugin):
       if not self.js.update_job_status(self.jobModule, 2):
         return # no jobs.
       # populate self.imageList with the list of all pending images.
-      self.imageList = []
+      self.imageList = {}
       response = self.js.session.get( self.js.mprovURL + 'jobs/?jobserver=' + str(self.js.id) + '&module=' + self.jobModule + '&status=2')
       for job in response.json():
         try:
@@ -229,7 +229,7 @@ class image_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
           return
         try:
-          self.imageList.append(params['imageId'])
+          self.imageList[params['imageId']] = job['id']
         except:
           print("Error: Image Update Job failed, corrupted params.")
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
@@ -256,11 +256,11 @@ class image_update(JobServerPlugin):
         os.makedirs(self.imageDir, exist_ok=True)
       except:
         print("Error: Unable to make imageDir: " + self.imageDir)
-        self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         return
     
     # now we iterate over our imageList, and build the image(s)
-    for image in self.imageList:
+    for image,jid in self.imageList.items():
       print(f"Processing update for image {image}")
       query = 'systemimages/' + image + '/'
       response = self.js.session.get( self.js.mprovURL + query)
@@ -294,6 +294,7 @@ class image_update(JobServerPlugin):
           continue
         image_update.imageDetails = imageDetails
         image_update.imageDir = self.imageDir
+        image_update.jobid = jid
         image_update.start()
 
         image_update.join()
@@ -396,7 +397,7 @@ class image_update(JobServerPlugin):
           vfile.write(json.dumps(imgVersions))
 
         # Update our jobs with success or failure
-        self.js.update_job_status(self.jobModule, 4, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.js.update_job_status(self.jobModule, 4, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       
       else: 
           print(f"Error handling job for {image} server returned {response.status_code} for request {self.js.mprovURL + query}")
