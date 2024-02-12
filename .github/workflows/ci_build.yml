@@ -22,6 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install setuptools build
           pip install -r requirements.txt
+          ln -s /usr/bin/python /usr/bin/python3
       
       - name: Parse the version
         id: vars
