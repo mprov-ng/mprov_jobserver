@@ -74,20 +74,29 @@ class libgenders(JobServerPlugin):
         gendersFile.write(genders_file_contents + "\n")
         for node in nodes:
           try:
-            image_name = node['systemimage']
-            # find the system image in question
-            image = [image for image in images if image.get('slug')==image_name]
-            image = image[0]
+            distStr = ""
+            imgStr = ""
+            if node['systemimage'] is not None:
+              image_name = node['systemimage']
+              # find the system image in question
+              image = [image for image in images if image.get('slug')==image_name]
+              image = image[0]
+              imgStr = f"image={image_name},"
+              # find the distro for the image
+              distro = [distro for distro in distros if distro.get('id')==image['osdistro']['id']]
+              distro = distro[0]
+              distStr = f"os={slugify(distro['name'])},"
             
-            # find the distro for the image
-            distro = [distro for distro in distros if distro.get('id')==image['osdistro']['id']]
-            distro = distro[0]
-            node_groups = ""
-            for groupId in node['systemgroups']:
-              group = [group for group in groups if group.get('id')==groupId]
-              group = group[0]
-              node_groups += group['name']
-            line = f"{node['hostname']}   os={slugify(distro['name'])},image={image_name},{node_groups},all"
+            node_groups=""
+            if len(node['systemgroups']) > 0:
+              node_groups = ""
+              for groupId in node['systemgroups']:
+                group = [group for group in groups if group.get('id')==groupId]
+                group = group[0]
+                node_groups += group['name']
+              node_groups += ","
+
+            line = f"{node['hostname']}   {distStr}{imgStr}{node_groups}all"
           except Exception as f:
             exc_type, exc_obj, exc_tb = sys.exc_info()
 
