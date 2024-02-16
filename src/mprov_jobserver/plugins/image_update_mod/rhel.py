@@ -192,8 +192,8 @@ class UpdateImage(JobServerPlugin):
       pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
       
 
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+    print(f'chroot {imgDir} dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system(f'chroot {imgDir}  dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
