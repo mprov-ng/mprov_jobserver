@@ -39,11 +39,20 @@ done
   
 
 extra_pkgs=""
-
+if [ -e /etc/redhat-release ]
+then
+        ver=`cat /etc/redhat-release | awk '{print $4}'`
+        echo -e "9\n${ver}" | sort -C -V
+        if [ "$?" != "0" ]
+        then
+		dnf config-manager --enable powertools
+        else
+  		dnf config-manager --enable crb
+        fi
+fi
 # make sure epel is installed before we try to do anything else.
 dnf -y install epel-release
-dnf -y install python3 python3-pip git wget iproute dnsmasq tcpdump ipmitool which $extra_pkgs
-dnf -y --enablerepo=powertools install parted-devel
+dnf -y install python3 python3-pip git wget iproute dnsmasq tcpdump ipmitool which $extra_pkgs parted-devel
 
 extra_pip=""
 pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2 $extra_pip
