@@ -363,7 +363,7 @@ class image_update(JobServerPlugin):
         print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-        if os.system('find .  -depth -xdev -print | cpio -H newc --quiet -oD ' + imgDir + '  | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
+        if os.system('tar  -C' + imgDir + ' -pScf - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
