@@ -359,11 +359,15 @@ class image_update(JobServerPlugin):
         if os.path.exists(imgDir +"/tmp/mprov/jobserver.yaml"):
           os.unlink(imgDir + "/tmp/mprov/jobserver.yaml")
 
+        # grab a copy of busybox to /tmp
+        os.system(f"wget -q -O /tmp/busybox https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox")
+        os.chmod("/tmp/busybox", 0o755)
+
         # package the filesystem into an initramfs
         print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-        if os.system('tar  -C' + imgDir + ' -pScf - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
+        if os.system('/tmp/busybox tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
