@@ -1,0 +1,13 @@
+services:
+  jobserver:
+    image: ghcr.io/mprov-ng/mprov-jobserver:dev
+    restart: unless-stopped
+    volumes:
+      - jobserver-data:/export
+    env_file:
+      - stack.env
+    ports:
+      - 8080
+    
+volumes:
+  jobserver-data:
