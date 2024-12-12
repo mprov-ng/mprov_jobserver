@@ -1,5 +1,5 @@
 # mProv Job Server
-![Build Status](https://img.shields.io/github/actions/workflow/status/mprov-ng/mprov_jobserver/ci_build.yml?style=plastic)
+![Build Status](https://img.shields.io/github/actions/workflow/status/mprov-ng/mprov_jobserver/dockerimage-dev.yml?style=plastic)
 ![Latest Version](https://img.shields.io/pypi/v/mprov-jobserver.svg)
 ![Supported Python](https://img.shields.io/pypi/pyversions/mprov-jobserver.svg)
 ![Wheel Status](https://img.shields.io/pypi/wheel/mprov-jobserver.svg)
