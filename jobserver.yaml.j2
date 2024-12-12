@@ -1,0 +1,21 @@
+- global:
+    # This points to your mprov control center instance.
+    # This URL should point to the internal IP address or hostname and include a trailing slash
+    # e.g. "http://<IP of internal interface>/"
+    
+    mprovURL: "{{env['MPROV_URL']}}"
+    # this is the api key for your mprov control center so that the 
+    # jobserver can login and do stuff.
+    apikey: '{{env['MPROV_APIKEY']}}'
+    # this is the interval which this jobserver will check in with the mPCC
+    heartbeatInterval: 10
+    # runonce: True # uncomment to run the jobserver once and exit.
+    myaddress: '{{env['MPROV_ADDRESS']}}' # set this to the address of this jobserver.
+    jobmodules: 
+{%- for mod in env['MPROV_MODS'].split() %}
+      - {{mod}}
+{%- endfor %}
+
+
+# include any plugin yamls.        
+- !include plugins/*.yaml
