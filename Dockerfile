@@ -28,7 +28,7 @@ RUN dnf update -y && \
     gcc
 
 # install the mprov_jobserver python module and some other useful mods
-RUN pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2
+RUN dnf -y install python3.11-pip python3.11-devel; pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \
