@@ -8,6 +8,8 @@ RUN dnf install -y epel-release
 # enable powertools repo
 RUN dnf config-manager --enable powertools
 
+# we need dev tools
+RUN dnf groupinstall -y "Development Tools"
 
 # Update system and install necessary dependencies
 RUN dnf update -y && \
