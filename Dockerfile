@@ -39,4 +39,4 @@ RUN chmod 755 /start_server.sh
 COPY jobserver.yaml.j2 /etc/mprov/
 
 
-ENTRYPOINT ["/start_server", "${MPROV_ARGS}"]
+ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
