@@ -10,6 +10,7 @@ services:
       - 8080:8080
     user: ${UID:-0}:${GID:-0}
     privileged: true
+    hostname: mprov-jobserver01
     
 volumes:
   jobserver-data:
