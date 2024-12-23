@@ -7,4 +7,4 @@ import jinja2
 sys.stdout.write(jinja2.Template(sys.stdin.read()).render(env=os.environ))
 ' <  /etc/mprov/jobserver.yaml.j2 > /etc/mprov/jobserver.yaml
 
-/usr/local/bin/mprov_jobserver ${MPROV_ARGS}
+#/usr/local/bin/mprov_jobserver ${MPROV_ARGS}
