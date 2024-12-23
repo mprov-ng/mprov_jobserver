@@ -2,15 +2,13 @@ services:
   jobserver:
     image: ghcr.io/mprov-ng/mprov-jobserver:dev
     restart: unless-stopped
+    systemd: true
+    network_mode: host
     volumes:
       - /home/export:/export
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
     env_file:
       - stack.env
-    ports:
-      - 8080:8080
     user: ${UID:-0}:${GID:-0}
     privileged: true
     hostname: mprov-jobserver01
-    
-volumes:
-  jobserver-data:
