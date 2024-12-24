@@ -62,9 +62,11 @@ VOLUME [ "/sys/fs/cgroup" ]
 
 # clean up yum/dnf
 RUN dnf -y clean all
+COPY wait-for-it.sh /
+RUN chmod 755 /wait-for-it.sh
 
 # CMD [ "/usr/sbin/init" ]
 #ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
 STOPSIGNAL SIGRTMIN+3
-ENTRYPOINT [ "/sbin/init" ] 
+CMD [ "/sbin/init" ] 
 #["/bin/bash", "-c", "exec /sbin/init --log-target=journal"]
