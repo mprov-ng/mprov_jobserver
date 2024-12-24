@@ -1,5 +1,12 @@
 #!/bin/bash
 MPROV_ARGS=${MPROV_ARGS:="-c /etc/mprov/jobserver.yaml"}
+
+# if a file exists for a generated apikey, let's source it
+# because it likely came from an mpcc container.
+if [ -e /etc/mprov/apikey ]
+then
+  . /etc/mprov/apikey
+fi
 # let's template our config out based on env vars
 python3 -c 'import os
 import sys
