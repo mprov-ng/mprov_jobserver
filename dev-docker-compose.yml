@@ -3,10 +3,13 @@ services:
     image: ghcr.io/mprov-ng/mprov-jobserver:dev
     # image: localhost/mprov-jobserver:dev
     restart: unless-stopped
+    depends_on:
+      mpcc:
     systemd: true
     network_mode: host
     tty: true
     volumes:
+      - mprov-conf:/etc/mprov/
       - /home/export:/export
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
     env_file:
@@ -14,3 +17,9 @@ services:
     user: ${UID:-0}:${GID:-0}
     privileged: true
     hostname: ${MPROV_JOBSERVER_HOSTNAME}
+    # we wait for localhost here because we are host networking and all services are running from the same stack.
+    command: sh -c '/wait-for-it.sh -t 0 localhost:80 -- /sbin/init'
+
+
+volumes:
+  mprov-conf:
