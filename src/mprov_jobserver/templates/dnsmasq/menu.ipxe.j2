@@ -77,7 +77,7 @@ choose --timeout ${submenu-timeout} --default ${submenu-default} selected && got
 # TODO: Fix the URI parser to make the + sign work
 #chain memtest86+-4.20.elf.img - || goto failed
 #chain memtest86plus-4.20.elf.img - || goto failed
-sanboot https://memtest.org/download/v6.20/mt86plus_6.20_64.iso.zip
+sanboot https://{{ bootserver }}/static/memtest86plus-nightly-64.iso.zip
 goto start
 
 :memtest-ipxe
