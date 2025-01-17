@@ -65,6 +65,15 @@ class dnsmasq(JobServerPlugin):
         
         print("\tRunning inintial build")
         os.chdir('src')
+        print("\tPatching https enable...")
+        with open("config/defaults/efi.h", "r") as f:
+            lines = f.readlines()
+        with open("config/defaults/efi.h", "w") as f:
+            for line in lines:
+                if "DOWNLOAD_PROTO_HTTPS" in line.strip("\n"):
+                    f.write(f"#define DOWNLOAD_PROTO_HTTPS    /* Secure Hypertext Transfer Protocol */")
+                else:
+                  f.write(f"{line}")
         try:
           sh.make(['-j4', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'])
         except:
