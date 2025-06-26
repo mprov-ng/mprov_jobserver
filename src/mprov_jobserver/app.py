@@ -315,8 +315,13 @@ class JobServer ():
         return
     if response.status_code == 500:
         print("Error: The mPCC had an internal server error.")
-        self.sessionOk = False
-        return
+        try:
+          result = json.loads(response.json())
+        except: 
+          print("Error: And we were unable to load json from the response.")
+          sys.exit(1)
+        print(f"Error: {result.msg}")
+        sys.exit(1)
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
     # # print(response.text)
