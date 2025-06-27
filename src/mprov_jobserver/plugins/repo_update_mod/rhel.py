@@ -46,7 +46,7 @@ class UpdateRepo(JobServerPlugin):
     baseURL = repoDetails['repo_package_url']
     print("Grabbing repository mirror: " + baseURL)
     #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
-    if os.system(f"dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir=./ --download-metadata"):
+    if os.system(f"rm -rf /var/cache/dnf/download_lock.pid; dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir=./ --download-metadata"):
       print("Error: unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
