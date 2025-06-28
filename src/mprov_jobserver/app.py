@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import datetime, timezone
 import importlib
 import yaml
 import time
@@ -129,7 +129,6 @@ class JobServer ():
       except:
         print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
         sys.exit(1)
-    pass
 
   def load_plugins(self):
     if self.jobmodules is None:
@@ -143,8 +142,6 @@ class JobServer ():
       if isclass(attribute) and issubclass(attribute, JobServerPlugin):
         globals()[mod.replace('-', '_')] = attribute
             
-    pass
-
   def stop(self):
     self.running = False
 
@@ -211,6 +208,7 @@ class JobServer ():
       'status': status,
     }
     if(status == 2) :
+      # we use UTC here because django in the mPCC will interpret that correctly.
       # setting the job to running
       data['start_time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
       data['end_time'] = None
@@ -319,8 +317,9 @@ class JobServer ():
           result = json.loads(response.json())
         except: 
           print("Error: And we were unable to load json from the response.")
+          print(f"Error: so here is the raw response: {response.text}")
           sys.exit(1)
-        print(f"Error: {result.msg}")
+        print(f"Error: The mPCCC said: \"{result['msg']}\"")
         sys.exit(1)
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(vars(response))
