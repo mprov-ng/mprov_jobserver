@@ -25,10 +25,16 @@ RUN dnf update -y && \
     ipmitool \
     which \
     parted-devel \
-    gcc
+    gcc \
+    procps
 
 # install the mprov_jobserver python module and some other useful mods
-RUN dnf -y install python3.11-pip python3.11-devel; pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2
+RUN dnf -y install python3.11-pip python3.11-devel
+# this line will pull in any built .whls to build the image, for development purposes.
+# or, if we are running in CI, pull it from pypi.
+# RUN mkdir -p /tmp/dist
+COPY dist/ /tmp/dist/
+RUN if [ -e /tmp/dist/*.whl ]; then pip3 uninstall -y mprov-jobserver; pip3 install  /tmp/dist/*.whl; else pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2; fi; 
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \
@@ -66,7 +72,7 @@ COPY wait-for-it.sh /
 RUN chmod 755 /wait-for-it.sh
 
 # CMD [ "/usr/sbin/init" ]
-#ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
-STOPSIGNAL SIGRTMIN+3
-CMD [ "/sbin/init" ] 
+ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
+#STOPSIGNAL SIGRTMIN+3
+#CMD [ "/sbin/init" ] 
 #["/bin/bash", "-c", "exec /sbin/init --log-target=journal"]

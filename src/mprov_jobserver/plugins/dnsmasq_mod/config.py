@@ -4,6 +4,10 @@ from mprov_jobserver.plugins.plugin import JobServerPlugin
 import os
 import shutil, socket
 import dns.resolver
+import subprocess
+import psutil 
+import signal
+
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -19,6 +23,7 @@ class DnsmasqConfig(JobServerPlugin):
     dnsmasqUser=''
     hostname=''
     bootserver6=''
+    dnsmasqBinary="/usr/sbin/dnsmasq"
     def __init__(self, js):
         super().__init__(js)
         self.hostname = socket.gethostname()
@@ -54,11 +59,28 @@ class DnsmasqConfig(JobServerPlugin):
             conf.write(jenv.get_template('dnsmasq/ipxe.conf.j2').render(data))
         jobquery = "&jobserver=" + str(self.js.id) + "&module=[\"dns-update\",\"dns-delete\",\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
 
-        # restart dnsmasq
-        os.system('systemctl enable dnsmasq')
-        os.system('systemctl restart dnsmasq')
+        # # restart dnsmasq
+        # os.system('systemctl enable dnsmasq')
+        # os.system('systemctl restart dnsmasq')
+
+        # look for the dnsmasq process id.
+        pid=None
+        process_name="dnsmasq"
+        for proc in psutil.process_iter():
+            if process_name in proc.name():
+              pid = proc.pid
+              break
+        if pid is None:
+            # no process, let's try to start it.
+            # NOTE: This backgrounds dnsmasq.  Killing the jobserver should not kill dnsmasq unless
+            # the jobserver is run in a container.
+            subprocess.run(["su", "-", self.dnsmasqUser, "-s", "/bin/bash", "-c", self.dnsmasqBinary])
+        else:
+            # process was found, send a HUP
+            os.kill(pid, signal.SIGHUP)
+
+
         # copy in our ipxe.menu file.
-        
         with open(self.tftproot + '/ipversionrouter.ipxe', 'w') as conf:
             conf.write(jenv.get_template('dnsmasq/ipversionrouter.ipxe.j2').render(data))
         # with open(self.tftproot + '/ipv6.ipxe', 'w') as conf:
