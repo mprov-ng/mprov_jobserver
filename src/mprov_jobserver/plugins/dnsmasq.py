@@ -25,17 +25,10 @@ class dnsmasq(JobServerPlugin):
   tftproot=''
   undionlyImg = ''
   dnsmasqUser=''
+  dnsmasqBinary="/usr/sbin/dnsmasq"
   threads = []
   ipxe_files = ['undionly.kpxe', 'snponly.efi', 'snponly_ipv4.efi']
   
-# dnf -y install mkisofs
-# cd /tmp
-# git clone https://github.com/ipxe/ipxe
-# cd ipxe/src
-# make
-# /bin/cp -f bin/undionly.kpxe /tftpboot 
-# make bin-x86_64-efi/snponly.efi
-# /bin/cp -f bin-x86_64-efi/snponly.efi /tftpboot/snponly.efi
 
   def load_config(self):
     result =  super().load_config()
@@ -123,7 +116,6 @@ class dnsmasq(JobServerPlugin):
       # print(jobquery)
       if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
         pass # no jobs.
-        self.enableDNS = False
       else:
         dnsThread = DnsmasqDNSConfig(self.js)
         dnsThread.dnsmasqConfDir = self.dnsmasqConfDir
@@ -153,6 +145,8 @@ class dnsmasq(JobServerPlugin):
     if(self.enableDNS or self.enableDHCP):
       
       # DNS or DHCP is on, so let's run the config module
+      # the config module for dnsmasq will also be responsible for
+      # maintaining the service.
       confThread = DnsmasqConfig(self.js)
       confThread.dnsmasqConfDir=self.dnsmasqConfDir
       confThread.mprovDnsmasqDir = self.mprovDnsmasqDir

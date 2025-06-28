@@ -7,3 +7,4 @@
     tftproot: '/tftpboot'
     undionlyImg: '/usr/share/ipxe/undionly.kpxe'
     dnsmasqUser: dnsmasq
+    dnsmasqBinary: /usr/sbin/dnsmasq

@@ -9,3 +9,4 @@ sh
 pyroute2
 dnspython
 distro
+psutil
