@@ -89,7 +89,9 @@ class repo_update(JobServerPlugin):
         except:
           print("Error: Unable to parse response.")
           continue
-        
+        if repo['ostype'] == None:
+          print(f"Error: Repo {repo['id']} doesn't have an OS type set.  Exiting.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         try:
           print(f".repo_update_mod.{repo['ostype']}")
           mod = importlib.import_module(f".repo_update_mod.{repo['ostype']}", "mprov_jobserver.plugins")
