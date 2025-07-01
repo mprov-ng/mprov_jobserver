@@ -4,7 +4,7 @@
     enableTFTP: True
     dnsmasqConfDir: '/etc/dnsmasq.d/'
     mprovDnsmasqDir: '/var/lib/mprov/'
-    tftproot: '/tftpboot'
+    tftproot: '/export/tftpboot'
     undionlyImg: '/usr/share/ipxe/undionly.kpxe'
     dnsmasqUser: dnsmasq
     dnsmasqBinary: /usr/sbin/dnsmasq
