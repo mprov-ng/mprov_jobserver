@@ -74,6 +74,11 @@ RUN dnf -y clean all
 COPY wait-for-it.sh /
 RUN chmod 755 /wait-for-it.sh
 
+EXPOSE 69/udp
+EXPOSE 67/udp
+EXPOSE 53/udp
+EXPOSE 8080/tcp
+
 # CMD [ "/usr/sbin/init" ]
 ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
 #STOPSIGNAL SIGRTMIN+3
