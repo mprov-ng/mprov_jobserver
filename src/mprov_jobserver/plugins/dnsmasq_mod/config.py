@@ -38,7 +38,7 @@ class DnsmasqConfig(JobServerPlugin):
                     self.bootserver6 = f"[{ipv6ip}]"
                     break
         except Exception as e:
-            print(f'Error: {e}')
+            # print(f'Error: {e}')
             pass
         if self.bootserver6 == '':
             self.bootserver6 = self.hostname
@@ -74,10 +74,8 @@ class DnsmasqConfig(JobServerPlugin):
             # no process, let's try to start it.
             # NOTE: This backgrounds dnsmasq.  Killing the jobserver should not kill dnsmasq unless
             # the jobserver is run in a container.
-            subprocess.run(["su", "-", self.dnsmasqUser, "-s", "/bin/bash", "-c", self.dnsmasqBinary])
-        else:
-            # process was found, send a HUP
-            os.kill(pid, signal.SIGHUP)
+            subprocess.run([f"{self.dnsmasqBinary}", "--log-facility=-"])
+
 
 
         # copy in our ipxe.menu file.
