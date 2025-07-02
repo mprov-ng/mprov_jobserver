@@ -2,7 +2,8 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import os, socket, ipaddress, netifaces
 from socket import AF_INET, AF_INET6
-
+import psutil
+import signal
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -133,6 +134,15 @@ class DnsmasqDNSConfig(JobServerPlugin):
 
             with open(self.mprovDnsmasqDir + '/dns/' + network['slug'] + '-dns.conf', 'w') as conf:
                 conf.write(jenv.get_template('dnsmasq/dns_host.conf.j2').render(data_hosts))
-        # restart dnsmasq
-        os.system('systemctl restart dnsmasq')
+        # # restart dnsmasq
+        # os.system('systemctl restart dnsmasq')
+                pid=None
+        process_name="dnsmasq"
+        for proc in psutil.process_iter():
+            if process_name in proc.name():
+              pid = proc.pid
+              break
+        if pid is not None:
+            # process was found, kill it and let conf restart it.
+            os.kill(pid, signal.SIGKILL)
 
