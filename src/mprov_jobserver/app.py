@@ -35,7 +35,7 @@ class JobServer ():
   id = -1
   runonce = False
   register = True
-
+  firstrun = True
 
   def __init__(self, **kwargs):
     print("mProv Job Server Starting.")
@@ -185,6 +185,7 @@ class JobServer ():
           counter=0
         counter+=1
         time.sleep(1)
+        self.firstrun = False
         if self.runonce:
           print("Job Server in 'runonce' mode.")
           self.running = False

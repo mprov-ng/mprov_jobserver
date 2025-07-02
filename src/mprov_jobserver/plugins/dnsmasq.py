@@ -28,10 +28,11 @@ class dnsmasq(JobServerPlugin):
   dnsmasqBinary="/usr/sbin/dnsmasq"
   threads = []
   ipxe_files = ['undionly.kpxe', 'snponly.efi', 'snponly_ipv4.efi']
-  
+  firstRun=True
 
   def load_config(self):
     result =  super().load_config()
+    self.firstRun = self.js.firstrun
     if result:
       os.makedirs(f"{self.tftproot}", exist_ok=True)
       # Check for the ipxe files in the tftproot, and build it from 
@@ -108,13 +109,14 @@ class dnsmasq(JobServerPlugin):
       pass
     return result
   def handle_jobs(self):
+    self.firstRun = self.js.firstrun
     # we can also run the DNS thread
     if self.enableDNS:
       # grab any DNS jobs.
       # See if we have any image-delete jobs, and take 'em if we do, else just exit
       jobquery = "&module=[\"dns-update\",\"dns-delete\"]"
       # print(jobquery)
-      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
+      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1") and not self.firstRun:
         pass # no jobs.
       else:
         dnsThread = DnsmasqDNSConfig(self.js)
@@ -129,7 +131,7 @@ class dnsmasq(JobServerPlugin):
       # See if we have any image-delete jobs, and take 'em if we do, else just exit
       jobquery = "&module=[\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
       # print(jobquery)
-      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1"):
+      if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1") and not self.firstRun:
         pass # no jobs.
         self.enableDHCP = False
       else:
@@ -141,6 +143,10 @@ class dnsmasq(JobServerPlugin):
         dhcpThread.enableTFTP = self.enableTFTP
         dhcpThread.start()
         self.threads.append(dhcpThread)
+    # wait for DNS and DHCP to finish.
+    for thread in self.threads:
+      thread.join()
+
     # Based on our settings, let's start up the submodules for dnsmasq.
     if(self.enableDNS or self.enableDHCP):
       
@@ -153,8 +159,6 @@ class dnsmasq(JobServerPlugin):
       confThread.tftproot = self.tftproot
       confThread.dnsmasqUser = self.dnsmasqUser
       confThread.start()
-      self.threads.append(confThread)    
+      confThread.join() # wait for the conf to finish.
 
-    for thread in self.threads:
-      thread.join()
       
