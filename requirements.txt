@@ -6,7 +6,7 @@ py-dmidecode
 netifaces
 pyparted==3.11.7
 sh
-pyroute2
+pyroute2==0.8.1
 dnspython
 distro
 psutil
