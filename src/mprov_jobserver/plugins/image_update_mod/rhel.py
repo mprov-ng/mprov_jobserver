@@ -253,7 +253,7 @@ class UpdateImage(JobServerPlugin):
       return
       
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --force-add sd_mod --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
