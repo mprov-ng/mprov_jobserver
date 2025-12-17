@@ -28,7 +28,18 @@ class UpdateImage(JobServerPlugin):
     if response.status_code != 200:
       print("Error: Error updating OS Type for module.")
     return True
-    
+  def updateBootFiles(self):
+    # update the dracut image one last time.
+    imgDir = self.imageDir + '/' + self.imageDetails['slug']
+    print(f"Regenerating initial ramdisk... ")
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{self.imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    print(cmd)
+    if os.system(cmd):
+      print("Error: Unable to dracut a new initramfs.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
   def handle_jobs(self):
 
     imageDetails = self.imageDetails
@@ -36,7 +47,7 @@ class UpdateImage(JobServerPlugin):
     baseURL=imageDetails['osdistro']['baserepo']['repo_package_url']
     print(baseURL)
 
-    imgDir = self.imageDir + '/' + imageDetails['slug']
+    
     # create this image's dir.  Use the image['slug']
     os.makedirs(imgDir, exist_ok=True)
     os.chdir(imgDir)
@@ -253,7 +264,7 @@ class UpdateImage(JobServerPlugin):
       return
       
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-driver sd_mod --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")

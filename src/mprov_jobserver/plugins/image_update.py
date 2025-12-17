@@ -363,8 +363,16 @@ class image_update(JobServerPlugin):
         os.system(f"wget -q -O /tmp/busybox https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox")
         os.chmod("/tmp/busybox", 0o755)
 
+        # attempt to call updateBootFiles()
+        # Check if 'updateBootFiles' exists and is callable
+        if hasattr(image_update, 'updateBootFiles') and callable(getattr(image_update, 'updateBootFiles', None)):
+          image_update.updateBootFiles() # You can call it
+        else:
+          print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
+
+
         # package the filesystem into an initramfs
-        print("Building " + os.getcwd() + "/" + imageDetails['slug'] + '.img')
+        print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
         if os.system('/tmp/busybox tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
@@ -374,7 +382,7 @@ class image_update(JobServerPlugin):
         endTime = time.time()
         lapsed = endTime - startTime
         print("Image generated in " + str(lapsed) + " seconds.")
-        print("Image saved to "+ os.getcwd() + "/" + imageDetails['slug'] + '.img')
+        print("Image saved to "+  imgDir + '/' + imageDetails['slug'] + '.img')
         os.system('mv /tmp/' + imageDetails['slug'] + '.img ' + imgDir + '/' )
 
 
