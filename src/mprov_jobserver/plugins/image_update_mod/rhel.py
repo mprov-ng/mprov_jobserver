@@ -33,50 +33,14 @@ class UpdateImage(JobServerPlugin):
 
     imageDetails = self.imageDetails
 
-    baseURL=imageDetails['osdistro']['baserepo']['repo_package_url']
-    print(baseURL)
+    baseURL=imageDetails['osdistro']['baseurl'] 
 
     imgDir = self.imageDir + '/' + imageDetails['slug']
     # create this image's dir.  Use the image['slug']
     os.makedirs(imgDir, exist_ok=True)
     os.chdir(imgDir)
-    # grab the repo rpm
+
     url = urlparse(baseURL)
-    file = os.path.basename(url.path)
-#     print()
-#     if imageDetails['osdistro']['baserepo']['managed']:
-#       # locally managed repo, let's just generate a repo file and point it.
-#       repofileContents=f"""
-# [baseos]
-# name= {imageDetails['osdistro']['name']}- mProv
-# baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
-# gpgcheck=0
-# enabled=1
-
-
-#       """
-
-#       os.makedirs(f"{imgDir}/etc/yum.repos.d/", exist_ok=True)
-#       nameSlug = slugify(imageDetails['osdistro']['name'])
-#       with open(f"{imgDir}/etc/yum.repos.d/{nameSlug}.repo", "w") as repofile:
-#         repofile.write(repofileContents)
-#     else:
-#       print("Grabbing os repo package: " + baseURL)
-#       if os.system('wget -O ' + file + ' ' + baseURL ):
-#         print("Error: unable to get repo package: " + baseURL)
-#         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-#         self.threadOk = False
-#         return
-
-#       # force the RPM to unpack to our image dir.
-#       print("Unpacking RPM to " + imgDir)
-      
-#       if os.system('rpm2cpio < ' + file + ' | cpio -D ' + imgDir + ' -id'):
-#         print("Error: unable to extract repo package: " + file + ' into ' + imgDir)
-#         self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-#         self.threadOk = False
-#         return
-    ########
     
     # install the extra repository packages on the system image
     print("Installing extra repos...")
@@ -105,8 +69,112 @@ class UpdateImage(JobServerPlugin):
         if type(repo) is dict:
           repos.append(repo)
 
+    # let's see what we have.
+    
+    # check if the last character is a slash, if so, it's a repo URL
+    if url.path[-1] == '/':
+      print("Base URL is a repo URL")
+      self.do_url_repo_install(imageDetails, imgDir, baseURL)
+      
+    elif url.path.endswith('.qcow2'):
+      print("Base URL is a qcow2 image")
+      self.do_url_image_install(imageDetails, imgDir, baseURL, 'qcow2')
+      
+    elif url.path.endswith('.img'):
+      print("Base URL is a raw image")
+      self.do_url_image_install(imageDetails, imgDir, baseURL, 'raw')
+      return
+    elif url.path.endswith('.tar.gz') or url.path.endswith('.tgz'):
+      print("Base URL is a tarball")
+      self.do_url_image_install(imageDetails, imgDir, baseURL, 'tar.gz')
+      return
+    else:
+      print("Error: Unable to determine base URL type.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    
+    self.finish_image_setup(imageDetails, imgDir,repos)
+    
+
+    ######
+  def do_url_repo_install(self, imageDetails, imgDir, baseURL):
+    ver= str(imageDetails['osdistro']['version'])
+    # run a clean on yum
+    if os.system('dnf -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
+      print("Error: unable to clear all dnf metadata.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    # install gpg keys for the distro into the installroot
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return 
+      
+    # build the filesystem.
+    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+      print("Error: unable to genergate image filesystem.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
+  def do_url_image_install(self, imageDetails, imgDir, baseURL, imagetype):
+    # download the image file
+    imgfile = imgDir + '/baseimage.' + imagetype
+    print(f"Downloading base image from {baseURL} to {imgfile}...")
+    if os.system(f"wget -c -O {imgfile} {baseURL}"):
+      print("Error: unable to download base image.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
+    # extract the image file into the imgDir
+    if imagetype == 'qcow2':
+      print(f"Extracting qcow2 image {imgfile} to {imgDir}...")
+      if os.system(f"qemu-img convert -O raw {imgfile} {imgDir}/baseimage.raw"):
+        print("Error: unable to convert qcow2 image to raw.")
+        self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.threadOk = False
+        return
+      os.remove(imgfile)
+      imgfile = imgDir + '/baseimage.raw'
+
+    if imagetype == 'tar.gz':
+      print(f"Extracting tarball image {imgfile} to {imgDir}...")
+      if os.system(f"tar -xzf {imgfile} -C {imgDir}"):
+        print("Error: unable to extract tarball image.")
+        self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.threadOk = False
+        return
+      os.remove(imgfile)
+      return
+
+    # for raw images, we will use virt-copy-out to extract the filesystem.
+    print(f"Extracting raw image {imgfile} to {imgDir}...")
+    os.environ['LIBGUESTFS_BACKEND'] = 'direct'
+    # if os.system(f"/usr/sbin/virtqemud -d"):
+    #   print("Error: unable to start virtqemud for virt-copy-out.")
+    #   self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+    #   self.threadOk = False
+    #   return
+    if os.system(f"virt-copy-out -a {imgfile} / {imgDir}/"):
+      print("Error: unable to extract raw image.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+    # os.system(f"pklil virtqemud")
 
 
+  def finish_image_setup(self, imageDetails, imgDir,repos):   
     # now let's loop through the repos, if it's not managed, it should be a repo URL
     # if it is managed, create the yum.conf for it in /etc/yum.repos.d/
     for repo in repos:
@@ -131,59 +199,34 @@ class UpdateImage(JobServerPlugin):
           repofile.write(f"baseurl=\"{repourl}\"\n")
           repofile.write(f"enabled=1\n")
           repofile.write(f"gpgcheck=0\n")
-      
-    # here we are going to disable all the default repos, we'll do this again after the main install.
-    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
-    for drepo in disable_repos:
-      try:
-        os.system(f"dnf -y --installroot {imgDir} config-manager --disable {drepo}")
-      except:
-        pass
 
-    ######
-
-    ver= str(imageDetails['osdistro']['version'])
-    # run a clean on yum
-    if os.system('dnf -y clean all'):
-      print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
-      print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-    # install gpg keys for the distro into the installroot
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
-      print("Error: unable to genergate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return 
-    # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
-    # if os.system(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"'):
-    #   print("Error: unable to genergate image filesystem.")
-    #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-    #   self.threadOk = False
-    #   return 
-      
-    # build the filesystem.
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
-      print("Error: unable to genergate image filesystem.")
+    # disable the default repos if we are managed.
+    repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
+    for srepo in repos:
+      if imageDetails['osdistro']['managed'] :   
+        # here we are going to disable all the default repos, we'll do this again after the main install.
+        try:
+          print("Disabling repo: " + srepo)
+          os.system(f"dnf -y --installroot {imgDir} config-manager --disable {srepo}")
+        except:
+          pass
+      else: 
+        # here we are going to disable all the default repos, we'll do this again after the main install.
+        try:
+          print("Enabling repo: " + srepo)
+          os.system(f"dnf -y --installroot {imgDir} config-manager --enable {srepo}")
+        except:
+          pass   
+  # bind mount proc and sys into the image.
+    try: 
+      os.system(f"mount -o bind /proc {imgDir}/proc")
+      os.system(f"mount -o bind /sys {imgDir}/sys")
+    except:
+      print("Error: unable to bind mount /proc and /sys")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     
-    # here we are going to disable all the default repos again just to make sure.
-    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
-    for drepo in disable_repos:
-      try:
-        os.system(f"chroot {imgDir} dnf -y --disable config-manager {drepo}")
-      except:
-        pass
-
     # install and copy the kernel image to the image root
     if float(imageDetails['osdistro']['version']) >= 9 :
       pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch"
@@ -191,7 +234,11 @@ class UpdateImage(JobServerPlugin):
     else:
       pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch"
       
-
+    if os.system(f"chroot {imgDir} dnf -y reinstall dnf* *gpg* --nogpgcheck"):
+      print("Error unable to reinstall dnf in image filesystem")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
     print(f'chroot {imgDir} dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
     if os.system(f'chroot {imgDir}  dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       print("Error unable to install required packages into image filesystem")
@@ -257,6 +304,15 @@ class UpdateImage(JobServerPlugin):
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
+    try: 
+      os.system(f"umount /proc {imgDir}/proc")
+      os.system(f"umount /sys {imgDir}/sys")
+    except:
+      print("Error: unable to bind umount /proc and /sys")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
