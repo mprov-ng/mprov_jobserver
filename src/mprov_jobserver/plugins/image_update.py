@@ -277,6 +277,7 @@ class image_update(JobServerPlugin):
           if imageDetails['osdistro'] is None:
             print(f"Error: No OS Distrubtion set. Not generating image.")
             continue
+          print(f"..{imageDetails}")
           print(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
           mod = importlib.import_module(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}", "mprov_jobserver.plugins")
           update_klass = getattr(mod, 'UpdateImage')
@@ -285,6 +286,7 @@ class image_update(JobServerPlugin):
           fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
           print("Error: Unable to import Image Update Module.")
           print(f"Exception: {err=}, {type(err)=}, File={fname}, Line={exc_tb.tb_lineno}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 
         try:
