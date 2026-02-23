@@ -94,7 +94,7 @@ class mprov_webserver(JobServerPlugin):
   maxConnFileSize = 0 
 
   def handle_jobs(self):
-    print(f"Starting mProv Webserver on port {self.serverPort}...")
+    print(f"Starting mProv Webserver on port {self.serverPort} serving {self.rootDir} ...")
 
     serverInstance = mProvHTTPServer((self.hostName, self.serverPort), mProvHTTPReqestHandler)
     serverInstance.rootDir = self.rootDir
