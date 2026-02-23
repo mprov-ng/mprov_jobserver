@@ -216,6 +216,15 @@ class UpdateImage(JobServerPlugin):
         self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         self.threadOk = False
         return
+      else:
+        # we succeeded so try to run the original command again.
+        if os.system(f'chroot {imgDir}  dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+          # still failed, uh... let's die.
+          print("Error: Unable to use dnf for some reason.  Bailing.")
+          print("Error: No image generated.")
+          self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.threadOk = False
+          return
 
     # set up a version lock on the kernel
     os.system(f'chroot {imgDir} dnf -y versionlock kernel*')
