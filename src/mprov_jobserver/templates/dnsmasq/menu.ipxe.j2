@@ -46,11 +46,11 @@ reboot
 exit
 
 :mprov
-chain --replace --autofree http://{{ bootserver }}/ipxe/ ||
+chain --replace --autofree {{ mprov_url }}/ipxe/ ||
 goto exit
 
 :mprovres
-chain --replace --autofree http://{{ bootserver }}/ipxe/?rescue ||
+chain --replace --autofree {{ mprov_url }}/ipxe/?rescue ||
 goto exit
 
 :pxelinux
@@ -78,7 +78,7 @@ choose --timeout ${submenu-timeout} --default ${submenu-default} selected && got
 #chain memtest86+-4.20.elf.img - || goto failed
 #chain memtest86plus-4.20.elf.img - || goto failed
 #sanboot https://{{ bootserver }}/static/memtest86plus-nightly-64.iso.zip
-chain http://{{ bootserver }}/static/memtest64.efi
+chain {{ mprov_url }}/static/memtest64.efi
 goto start
 
 :memtest-ipxe
