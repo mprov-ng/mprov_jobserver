@@ -1,0 +1,7 @@
+#!/bin/bash
+# example repack script, may need tweaking.
+# pass the path to the image directory
+
+rm $1/`basename $1`.img -f
+busybox tar c -C $1-f - ./ | gzip -1 -c > /tmp/`basename $1`.img
+mv /tmp/`basename $1`.img $1/`basename $1`.img
