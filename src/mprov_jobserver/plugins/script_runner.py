@@ -7,6 +7,7 @@ import json
 import subprocess
 import yaml
 import socket
+from pathlib import Path
 # import pprint
 
 class script_runner(JobServerPlugin):
@@ -83,6 +84,12 @@ class script_runner(JobServerPlugin):
       print("Error: script-runner must be run in a 'runonce' jobserver session.")
       return False
     print("Jobserver Running script-runner...")
+    file_path = Path("/etc/nologin")
+    try: 
+      file_path.touch()
+    except:
+      pass
+      
     sysimage=False
     system=False
     scriptMode='image-gen' # should be img-gen or post-boot, def: img-gen
@@ -295,6 +302,10 @@ class script_runner(JobServerPlugin):
         t.join()
     # remove the entity file.
     os.unlink(self.scriptTmpDir + "/entity.json")
+    try:
+      os.unlink("/etc/nologin")
+    except:
+      pass
     print("script-runner complete.")
 
   def runScript(self, filename):
