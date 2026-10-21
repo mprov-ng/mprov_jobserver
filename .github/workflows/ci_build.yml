@@ -1,7 +1,21 @@
 name: Python Module CI and Docker build.
 on:
-  release: 
+  release:
     types: [published]
+  # Pull requests that change the build run it as a dry run: everything up
+  # to publishing, so action and build changes are tested before merge.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/ci_build.yml'
+      - 'setup.py'
+      - 'setup.cfg'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'Containerfile'
+      - 'VERSION'
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -9,53 +23,62 @@ jobs:
       # to commit the next dev version to main.
       contents: write
     steps:
-      - 
-        name: Checkout 
+      -
+        name: Checkout
         uses: actions/checkout@v2
-      
-      - name: Setup Python 3.8
+
+      - name: Setup Python
         uses: actions/setup-python@v3
         with:
-          python-version: "3.8"
-        
+          python-version: "3.11"
+
       - name: Install Dependancies
         run: |
           sudo apt-get update
-          sudo apt-get install libparted-dev libparted2
+          sudo apt-get install -y libparted-dev
           python -m pip install --upgrade pip
-          pip install setuptools build
+          pip install setuptools build twine
           pip install -r requirements.txt
-          sudo ln -sf /usr/bin/python /usr/bin/python3
-      
+
+      # A release builds the tag.  A dry run builds the release main is
+      # heading for, e.g. v0.0.63 for VERSION 0.0.63.dev0.
       - name: Parse the version
-        id: vars
-        run: echo tag=$(echo ${GITHUB_REF:10}) >> $GITHUB_ENV
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            tag=${GITHUB_REF#refs/tags/}
+          else
+            tag=v$(sed 's/\.dev[0-9]*$//' VERSION)
+          fi
+          echo "tag=$tag" >> "$GITHUB_ENV"
 
       - name: Build Package
         run: |
           echo "$tag" > VERSION
           python -m build
-      
+          twine check dist/*
+
       - name: Publish Package to Pypi
+        if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
 
-      - 
+      -
         name: Setup buildx
         id: buildx
         uses: docker/setup-buildx-action@v1
 
-      - 
+      -
         name: Login to GHCR
+        if: github.event_name == 'release'
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
           username: ${{ secrets.CR_USER }}
           password: ${{ secrets.CR_PAT }}
 
-      - 
+      -
         name: Build the mProv Jobserver Docker Image
         uses: docker/build-push-action@v2
         with:
@@ -64,11 +87,12 @@ jobs:
           tags: |
             ghcr.io/mprov-ng/mprov-jobserver:${{ env.tag }}
             ghcr.io/mprov-ng/mprov-jobserver:latest
-          push: true
+          push: ${{ github.event_name == 'release' }}
 
       # main builds as the next release plus .devN (see dockerimage-dev.yml),
       # so start the next one: v0.0.63 sets VERSION to 0.0.64.dev0.  Skipped
       # if main is already past it, e.g. for a release of an older branch.
+      # A dry run makes the commit but doesn't push it.
       - name: Move main to the next dev version
         run: |
           release=${tag#v}
@@ -84,4 +108,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Start $next after the $tag release" VERSION
-          git push origin main
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            git push origin main
+          else
+            echo "Dry run: would push this to main:"
+            git show --stat HEAD
+          fi

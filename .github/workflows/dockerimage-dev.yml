@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - main
+  # Pull requests build the image too, without logging in or pushing.
+  pull_request:
+    branches:
+      - main
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -48,6 +52,7 @@ jobs:
 
       -
         name: Login to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v2.2.0
         with:
           registry: ghcr.io
@@ -63,4 +68,4 @@ jobs:
           tags: |
             ghcr.io/mprov-ng/mprov-jobserver:dev
             ghcr.io/mprov-ng/mprov-jobserver:${{ env.version }}
-          push: true
+          push: ${{ github.event_name == 'push' }}
