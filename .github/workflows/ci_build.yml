@@ -5,6 +5,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      # to commit the next dev version to main.
+      contents: write
     steps:
       - 
         name: Checkout 
@@ -56,7 +59,29 @@ jobs:
         name: Build the mProv Jobserver Docker Image
         uses: docker/build-push-action@v2
         with:
+          # the checkout, so dist/ has the wheel built above.
+          context: .
           tags: |
             ghcr.io/mprov-ng/mprov-jobserver:${{ env.tag }}
             ghcr.io/mprov-ng/mprov-jobserver:latest
-          push: true    
+          push: true
+
+      # main builds as the next release plus .devN (see dockerimage-dev.yml),
+      # so start the next one: v0.0.63 sets VERSION to 0.0.64.dev0.  Skipped
+      # if main is already past it, e.g. for a release of an older branch.
+      - name: Move main to the next dev version
+        run: |
+          release=${tag#v}
+          next="${release%.*}.$(( ${release##*.} + 1 )).dev0"
+          git fetch origin main
+          git checkout -f -B main origin/main
+          current=$(sed 's/\.dev[0-9]*$//' VERSION)
+          if [ "$(printf '%s\n' "$current" "${next%.dev0}" | sort -V | tail -n1)" = "$current" ]; then
+            echo "VERSION on main is already $(cat VERSION); leaving it."
+            exit 0
+          fi
+          echo -n "$next" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Start $next after the $tag release" VERSION
+          git push origin main
