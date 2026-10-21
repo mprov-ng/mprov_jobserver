@@ -5,6 +5,14 @@ FROM docker.io/rockylinux/rockylinux:8.8
 # install epel repo
 RUN dnf install -y epel-release
 
+# Use EPEL's main server instead of the mirror list, which sometimes hands
+# out mirrors with bad certificates or stale metadata and fails the build.
+# Retry dropped connections.
+RUN sed -i -e 's|^metalink=|#metalink=|' \
+        -e 's|^#baseurl=https://download.example/|baseurl=https://dl.fedoraproject.org/|' \
+        /etc/yum.repos.d/epel*.repo && \
+    echo "retries=10" >> /etc/dnf/dnf.conf
+
 # enable powertools repo
 RUN dnf config-manager --enable powertools
 
