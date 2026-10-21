@@ -9,6 +9,12 @@ from slugify import slugify
 # the libgenders module is used to generate a genders file for use 
 # with the pdsh command.
 
+# genders attributes can't contain whitespace, ',' or '=', so slugify
+# every name we write.  Underscores are kept so mPCC slugs come through
+# unchanged.
+def genders_slug(name):
+  return slugify(str(name), regex_pattern=r'[^-a-z0-9_]+')
+
 class libgenders(JobServerPlugin):
   jobModule = 'libgenders'
   gendersFile = "/etc/genders"
@@ -81,20 +87,20 @@ class libgenders(JobServerPlugin):
               # find the system image in question
               image = [image for image in images if image.get('slug')==image_name]
               image = image[0]
-              imgStr = f"image={image_name},"
-              # find the distro for the image
-              distro = [distro for distro in distros if distro.get('id')==image['osdistro']['id']]
+              imgStr = f"image={genders_slug(image_name)},"
+              # find the distro for the image.  The systemimages/ list can
+              # return osdistro as an ID or as a nested object.
+              osdistro = image['osdistro']
+              distro_id = osdistro['id'] if isinstance(osdistro, dict) else osdistro
+              distro = [distro for distro in distros if distro.get('id')==distro_id]
               distro = distro[0]
-              distStr = f"os={slugify(distro['name'])},"
-            
+              distStr = f"os={genders_slug(distro['name'])},"
+
             node_groups=""
-            if len(node['systemgroups']) > 0:
-              node_groups = ""
-              for groupId in node['systemgroups']:
-                group = [group for group in groups if group.get('id')==groupId]
-                group = group[0]
-                node_groups += group['name']
-              node_groups += ","
+            for groupId in node['systemgroups']:
+              group = [group for group in groups if group.get('id')==groupId]
+              group = group[0]
+              node_groups += genders_slug(group['name']) + ","
 
             line = f"{node['hostname']}   {distStr}{imgStr}{node_groups}all"
           except Exception as f:
