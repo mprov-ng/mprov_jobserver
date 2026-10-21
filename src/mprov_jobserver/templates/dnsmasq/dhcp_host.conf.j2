@@ -3,17 +3,19 @@
 
 # dhcp-host=[<hwaddr>][,id:<client_id>|*][,set:<tag>][tag:<tag>][,<ipaddr>][,<hostname>][,<lease_time>][,ignore]
 {% for host in hosts %}
-{% if host.ipaddress is none %}
+{% if not host.ipaddress %}
 # {{ host }} has no ip address!
 {% else %}
-    {% if host.mac is none %}
+    {% if not host.mac %}
 # {{ host.hostname }} has no mac address set on this network.
-    {% else %} 
+    {% else %}
         {% if ':' in host.ipaddress %}
-{{host.mac}},{{hostid}}set:{{host.network}},[{{host.ipaddress}}],{{host.hostname}}
+{{host.mac}},set:{{host.network}},[{{host.ipaddress}}]{% if host.hostname %},{{host.hostname}}{% endif %}
+
         {% else %}
-{{host.mac}},{{hostid}}set:{{host.network}},{{host.ipaddress}},{{host.hostname}}
+{{host.mac}},set:{{host.network}},{{host.ipaddress}}{% if host.hostname %},{{host.hostname}}{% endif %}
+
         {% endif %}
-    {% endif %} 
+    {% endif %}
 {% endif %}
 {% endfor %}
