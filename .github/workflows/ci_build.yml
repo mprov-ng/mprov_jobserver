@@ -19,6 +19,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # a build normally takes about 10 minutes; fail a hung one instead of
+    # waiting for GitHub's 6-hour limit.
+    timeout-minutes: 30
     permissions:
       # to commit the next dev version to main.
       contents: write

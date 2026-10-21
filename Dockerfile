@@ -2,16 +2,19 @@
 # Use the full URL to avoid confusion with podman builds.
 FROM docker.io/rockylinux/rockylinux:8.8
 
+# For every dnf command below: give up on a mirror that stalls for 15
+# seconds or crawls below 50 kB/s and move on to the next one, instead of
+# waiting on it, and retry dropped connections.
+RUN printf '%s\n' 'timeout=15' 'minrate=50k' 'retries=10' >> /etc/dnf/dnf.conf
+
 # install epel repo
 RUN dnf install -y epel-release
 
 # Use EPEL's main server instead of the mirror list, which sometimes hands
 # out mirrors with bad certificates or stale metadata and fails the build.
-# Retry dropped connections.
 RUN sed -i -e 's|^metalink=|#metalink=|' \
         -e 's|^#baseurl=https://download.example/|baseurl=https://dl.fedoraproject.org/|' \
-        /etc/yum.repos.d/epel*.repo && \
-    echo "retries=10" >> /etc/dnf/dnf.conf
+        /etc/yum.repos.d/epel*.repo
 
 # enable powertools repo
 RUN dnf config-manager --enable powertools
