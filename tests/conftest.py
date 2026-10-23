@@ -39,6 +39,7 @@ class FakeSession:
   def __init__(self):
     self.routes = {}
     self.requests = []
+    self.patches = []
 
   def get(self, url, **kwargs):
     assert url.startswith(MPROV_URL), f"request outside the mPCC: {url}"
@@ -49,6 +50,14 @@ class FakeSession:
     if isinstance(route, tuple):
       return FakeResponse(*route)
     return FakeResponse(200, route)
+
+  def patch(self, url, data=None, **kwargs):
+    """ Records the PATCH (path, decoded body) and answers 200. """
+    assert url.startswith(MPROV_URL), f"request outside the mPCC: {url}"
+    path = url[len(MPROV_URL):]
+    self.requests.append(("PATCH", path))
+    self.patches.append((path, json.loads(data) if data else None))
+    return FakeResponse(200, {})
 
 
 class FakeJobServer:

@@ -42,13 +42,15 @@ class UpdateRepo(JobServerPlugin):
     # try to make the directory for this repo.
     os.makedirs(f"{self.repoDir}/{self.repo['id']}", exist_ok=True)
 
-    os.chdir(f"{self.repoDir}/")
+    # Don't os.chdir() into repoDir: plugins are threads of one process, so
+    # that would move every other plugin's working directory too, and theirs
+    # could move this reposync (#130).  reposync writes to destdir/<repo id>.
     baseURL = repoDetails['repo_package_url']
     print("Grabbing repository mirror: " + baseURL)
     #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
     # the --installroot option here allows us to override dnf's stupid download locking and allows
     # us to parallelize reposync properly-ish.
-    if os.system(f"dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir=./ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
+    if os.system(f"dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
       print("Error: unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
