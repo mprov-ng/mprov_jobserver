@@ -77,6 +77,21 @@ def test_a_job_query_is_used_as_is(server):
   assert server.update_job_status("image-delete", 2, jobquery="jobserver=5&module=image-delete&status=1") == 1
 
 
+def test_a_params_filter_only_claims_the_matching_jobs(server):
+  # the mPCC returns every job the query matches; a params_filter narrows the
+  # claim client-side to jobs whose params match (#172).
+  server.session.routes["jobs/?jobserver=5&module=image-update&status=1"] = [
+    {"id": 11, "status": 1, "params": {"imageId": "compute"}},
+    {"id": 12, "status": 1, "params": {"imageId": "login"}},
+    {"id": 13, "status": 1},
+  ]
+  assert server.update_job_status(
+    "image-update", 2,
+    jobquery="jobserver=5&module=image-update&status=1",
+    params_filter={"imageId": "compute"}) == 1
+  assert [path for path, _ in patches(server)] == ["jobs/11/"]
+
+
 @pytest.mark.parametrize("route", [[], (500, None), (404, None)])
 def test_no_jobs_or_an_mpcc_error_returns_false(server, route):
   server.session.routes["jobs/?search=libgenders"] = route

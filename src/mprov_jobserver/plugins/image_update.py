@@ -237,10 +237,12 @@ class image_update(JobServerPlugin):
     else:
       # imageList is not none, so let's grab just the ones we care about.
       updateFound = False
+      # query this job server's pending jobs for the module and filter by
+      # imageId client-side; the mPCC can't filter by params (#172).
+      jobquery = 'jobserver=' + str(self.js.id) + '&module=' + self.jobModule + '&status=1'
       for image in self.imageList:
-        # json to pass to the job search.
-        paramstr="{\"imageId\":\"" + image + "\"}"
-        if self.js.update_job_status(self.jobModule, 2, jobquery=paramstr):
+        if self.js.update_job_status(self.jobModule, 2, jobquery=jobquery,
+                                     params_filter={"imageId": image}):
           updateFound=True
         else: 
           # this image wasn't requested to be updated, remove it from the list.
