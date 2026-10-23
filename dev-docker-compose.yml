@@ -12,6 +12,7 @@ services:
       - mprov-conf:/etc/mprov/
       - /home/export:/export
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    # copy stack.env.example to stack.env and fill it in
     env_file:
       - stack.env
     user: ${UID:-0}:${GID:-0}

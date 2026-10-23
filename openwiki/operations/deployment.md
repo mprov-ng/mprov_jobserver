@@ -27,7 +27,7 @@ First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` co
 
 ## Dev stack
 
-`dev-docker-compose.yml` runs the dev image with `network_mode: host`, `privileged: true`, systemd init, volumes for `/etc/mprov` config and `/export` (images/repos/tftpboot persistence — `/tftpboot` was deliberately moved under `/export/tftpboot` for persistence), env from `stack.env`, and `wait-for-it.sh` gating on the local mPCC at `localhost:80`.
+`dev-docker-compose.yml` runs the dev image with `network_mode: host`, `privileged: true`, systemd init, volumes for `/etc/mprov` config and `/export` (images/repos/tftpboot persistence — `/tftpboot` was deliberately moved under `/export/tftpboot` for persistence), env from `stack.env` (copied from `stack.env.example`; git ignores `stack.env`), and `wait-for-it.sh` gating on the local mPCC at `localhost:80`.
 
 ## CI
 
@@ -40,4 +40,4 @@ First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` co
 - **Container**: any new listening port needs an `EXPOSE` update; anything stateful belongs under `/export` or the `mprov-conf` volume.
 - **Changing plugin logic**: add or update a pytest case in `tests/` (the fixtures in `tests/conftest.py` serve canned mPCC responses and stub out host side effects); CI runs the suite in the shipped image. For live smoke-testing use `-r -d -m <module> -c <config>` against a dev mPCC.
 
-Source map: `install_mprov_jobserver.sh`, `Dockerfile`, `start_server.sh`, `jobserver.yaml.j2`, `dev-docker-compose.yml`, `stack.env`, `mprov_jobserver*.service`, `setup.cfg`, `requirements.txt`, `.github/workflows/`.
+Source map: `install_mprov_jobserver.sh`, `Dockerfile`, `start_server.sh`, `jobserver.yaml.j2`, `dev-docker-compose.yml`, `stack.env.example`, `mprov_jobserver*.service`, `setup.cfg`, `requirements.txt`, `.github/workflows/`.
