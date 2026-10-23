@@ -1,5 +1,6 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
+from mprov_jobserver.plugins.dnsmasq_mod.dhcp import host_list
 import os, socket, ipaddress, netifaces
 from socket import AF_INET, AF_INET6
 import psutil
@@ -121,7 +122,9 @@ class DnsmasqDNSConfig(JobServerPlugin):
                     pass
             # merge in the switches
             response = self.js.session.get( self.js.mprovURL + 'switches/?network=' + network['slug'])
-            data_hosts['hosts'] = data_hosts['hosts'] + (response.json())
+            # host_list() turns the 404 with null for a network with no
+            # switches into [] (#135).
+            data_hosts['hosts'] = data_hosts['hosts'] + host_list(response)
             
             # print(data_hosts)
             for idx, host in enumerate(data_hosts['hosts']):
