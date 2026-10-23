@@ -84,9 +84,12 @@ class repo_sync(JobServerPlugin):
       if ourVersion != mpccVersion:
         # Versions don't match, ask the MPCC to grab a new copy.
         os.makedirs(self.repoDir + '/' + str(repo), exist_ok=True)
-        os.chdir(self.repoDir)
-        # TODO: Do the wget.
-        print(" ".join([
+        # Mirror into repoDir with -P instead of os.chdir() into it: plugins
+        # are threads of one process, so a chdir would move every other
+        # plugin's working directory too, and theirs could move this mirror
+        # (#131).  -nH and --cut-dirs=1 drop the host and osrepos/, so the
+        # files land in repoDir/<repo>/.
+        wgetArgs = [
           '--mirror', 
           '--retry-on-http-error=404',
           '--tries=0',
@@ -94,18 +97,11 @@ class repo_sync(JobServerPlugin):
           '-nH', 
           f'--cut-dirs=1', 
           '-np', 
+          '-P', self.repoDir,
           f"{self.js.mprovURL}osrepos/{repo}/"
-        ]))
-        sh.wget([
-          '--mirror', 
-          '--retry-on-http-error=404',
-          '--tries=0',
-          '--waitretry=1',
-          '-nH', 
-          f'--cut-dirs=1', 
-          '-np', 
-          f"{self.js.mprovURL}osrepos/{repo}/"
-        ])
+        ]
+        print(" ".join(wgetArgs))
+        sh.wget(wgetArgs)
          
         print(f"repo {repo} download complete. Updating versions")        
         # file download complete.  Update our version
