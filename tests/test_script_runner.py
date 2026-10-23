@@ -7,6 +7,7 @@ and running each script is replaced by a recorder.
 """
 import json
 import os
+import stat
 import threading
 
 import types
@@ -187,3 +188,49 @@ def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch):
   js.session.routes["systemimages/compute/"] = entity(scripts=[script("tool", depends=[{"slug": "missing"}])])
   plugin.handle_jobs()
   assert plugin.ran == []
+
+
+# the entity file holds the api key: it must never be group/world readable,
+# and must not outlive the run (#169)
+
+def test_tmp_dir_is_created_without_group_or_world_access(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  plugin.handle_jobs()
+  assert stat.S_IMODE(os.stat(tmp_path / "scripts").st_mode) & 0o077 == 0
+
+
+def test_a_pre_existing_world_readable_tmp_dir_is_tightened(js, plugin, tmp_path, monkeypatch):
+  # a dir an older version left with default perms must not keep exposing the key
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  os.chmod(tmp_path / "scripts", 0o755)
+  plugin.handle_jobs()
+  assert stat.S_IMODE(os.stat(tmp_path / "scripts").st_mode) & 0o077 == 0
+
+
+def test_entity_json_is_written_without_group_or_world_access(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  ent = tmp_path / "scripts" / "entity.json"
+  modes = []
+
+  def record_mode(filename):
+    modes.append(stat.S_IMODE(os.stat(ent).st_mode))
+  plugin.runScript = record_mode
+  plugin.handle_jobs()
+  assert modes, "no script ran, so the entity file was never observed"
+  assert all(mode & 0o077 == 0 for mode in modes), [oct(m) for m in modes]
+
+
+def test_entity_json_does_not_outlive_a_crash_in_the_run(js, plugin, tmp_path, monkeypatch):
+  # a malformed script entry raises inside the run loop, after entity.json
+  # (holding the api key) has been written; it must not be left behind
+  argv(monkeypatch, "-i", "compute")
+  broken = script("broken")
+  del broken["filename"]  # print() in the run loop raises KeyError on it
+  js.session.routes["systemimages/compute/"] = entity(scripts=[broken])
+  with pytest.raises(KeyError):
+    plugin.handle_jobs()
+  assert not (tmp_path / "scripts" / "entity.json").exists()
