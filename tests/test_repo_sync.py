@@ -61,3 +61,34 @@ def test_up_to_date_repo_is_not_mirrored(js, plugin, sh):
   plugin.handle_jobs()
   assert sh.wget_calls == []
   assert js.session.patches == []
+
+
+def test_repos_are_listed_from_the_mpcc_without_a_repo_list(js, plugin, sh):
+  plugin.repoList = None
+  js.session.routes.update({"repos/": [{"id": 5}], "repos/5/": {"id": 5, "version": 3, "hosted_by": [1]}})
+  plugin.handle_jobs()
+  [args] = sh.wget_calls
+  assert args[-1] == "http://mpcc/osrepos/5/"
+
+
+def test_repos_it_no_longer_serves_are_removed(js, plugin, sh):
+  plugin.repoList = None
+  os.makedirs(f"{plugin.repoDir}/9")
+  js.session.routes["repos/"] = []
+  plugin.handle_jobs()
+  assert not os.path.exists(f"{plugin.repoDir}/9")
+
+
+def test_needs_the_webserver(js):
+  js.jobmodules = ["repo-sync"]
+  with pytest.raises(SystemExit):
+    repo_sync(js).load_config()
+
+
+@pytest.mark.xfail(strict=True, raises=TypeError,
+                   reason="repo_sync compares status_code with the string \"404\", so a deleted repo crashes the sync (#141)")
+def test_repo_deleted_from_the_mpcc_is_skipped(js, plugin, sh):
+  plugin.repoList = ["4", "5"]
+  js.session.routes.update({"repos/4/": (404, None), "repos/5/": {"id": 5, "version": 3, "hosted_by": [1]}})
+  plugin.handle_jobs()
+  assert len(sh.wget_calls) == 1
