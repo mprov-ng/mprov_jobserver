@@ -5,6 +5,7 @@ another job server.  Each test runs a real server on localhost.
 """
 import socket
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -62,6 +63,12 @@ def test_missing_file_is_404(server):
 
 def test_connection_count_goes_back_down(server):
   get(server, "/images/compute/compute.img")
+  # the handler decrements the count after the response is sent, so the
+  # client can get here first; give it a moment.
+  for _ in range(100):
+    if mProvHTTPReqestHandler.connCount == 0:
+      break
+    time.sleep(0.01)
   assert mProvHTTPReqestHandler.connCount == 0
 
 
