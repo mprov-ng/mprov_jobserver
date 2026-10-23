@@ -10,9 +10,19 @@ import pytest
 
 from mprov_jobserver.plugins.image_sync import image_sync
 
+# Name of the ownership marker file mprov writes into the image
+# directories it creates; the sweep may only delete marked directories (#171).
+MARKER = ".mprov-managed"
+
 
 def image(slug="compute", version=3, jobservers=()):
   return {"slug": slug, "version": version, "jobservers": list(jobservers)}
+
+
+def mark_owned(d):
+  """Create a directory the way image_sync creates its own: with a marker."""
+  d.mkdir(parents=True)
+  (d / MARKER).write_text("mprov owns this directory\n")
 
 
 @pytest.fixture
@@ -74,12 +84,59 @@ def test_image_list_limits_the_images(js, plugin, images):
 
 
 def test_unknown_image_directories_are_removed(js, plugin, images):
-  (images / "old-image").mkdir(parents=True)
+  mark_owned(images / "old-image")
   (images / "old-image" / "old-image.img").write_bytes(b"x")
   js.session.routes["images/"] = []
   plugin.handle_jobs()
   assert not (images / "old-image").exists()
   assert (images / "image-versions").exists()
+
+
+def test_sweep_never_touches_unmarked_directories(js, plugin, images):
+  """#171: a directory mprov did not create must never be deleted."""
+  (images / "operator-data").mkdir(parents=True)
+  (images / "operator-data" / "precious").write_text("keep")
+  mark_owned(images / "old-image")
+  js.session.routes["images/"] = []
+  plugin.handle_jobs()
+  assert (images / "operator-data" / "precious").read_text() == "keep"
+  assert not (images / "old-image").exists()
+
+
+def test_downloaded_image_directory_carries_the_mprov_marker(js, plugin, images):
+  js.session.routes.update({"images/": [{"slug": "compute"}], "systemimages/compute/": image(jobservers=[1])})
+  serve_files(js)
+  plugin.handle_jobs()
+  assert (images / "compute" / MARKER).exists()
+
+
+def test_load_config_refuses_image_dir_outside_the_data_root(js, tmp_path):
+  js.jobmodules = ["image-sync", "mprov-webserver"]
+  js.config_data = {"image-sync": {
+    "dataRoot": str(tmp_path / "mprov"),
+    "imageDir": str(tmp_path / "elsewhere"),
+  }}
+  with pytest.raises(SystemExit):
+    image_sync(js).load_config()
+
+
+def test_load_config_refuses_without_a_data_root(js, tmp_path):
+  js.jobmodules = ["image-sync", "mprov-webserver"]
+  js.config_data = {"image-sync": {"imageDir": str(tmp_path / "images")}}
+  with pytest.raises(SystemExit):
+    image_sync(js).load_config()
+
+
+def test_load_config_accepts_image_dir_inside_the_data_root(js, tmp_path):
+  js.jobmodules = ["image-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"image-sync": {
+    "dataRoot": str(root),
+    "imageDir": str(root / "images"),
+  }}
+  plugin = image_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.imageDir == str(root / "images")
 
 
 def test_corrupt_versions_file_redownloads(js, plugin, images):
