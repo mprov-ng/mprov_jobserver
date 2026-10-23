@@ -18,6 +18,25 @@ def genders_slug(name):
 class libgenders(JobServerPlugin):
   jobModule = 'libgenders'
   gendersFile = "/etc/genders"
+  # hand-written entries, appended to the end of gendersFile.
+  gendersInclude = "/etc/genders.include"
+
+  def read_include(self):
+    """ The include file's contents, ending in a newline; "" if there isn't one.
+    An include that can't be read is skipped with a warning, so the
+    generated entries are still written. """
+    if not os.path.exists(self.gendersInclude):
+      return ""
+    try:
+      with open(self.gendersInclude) as includeFile:
+        contents = includeFile.read()
+    except Exception as e:
+      print(f"Warning[libgenders]: Unable to read {self.gendersInclude}, not including it: {e}")
+      return f"# Unable to read {self.gendersInclude}: {e}\n"
+    if contents and not contents.endswith("\n"):
+      contents += "\n"
+    return f"# Included from {self.gendersInclude}\n" + contents
+
   def handle_jobs(self):
     nodes = None
     images = None
@@ -108,6 +127,7 @@ class libgenders(JobServerPlugin):
 
             line = f"# Error processing node {node['hostname']}: {f} Line: {exc_tb.tb_lineno}"
           gendersFile.write(line + "\n")
+        gendersFile.write(self.read_include())
     except Exception as e:
         print(f"Error[libgenders]: Unable to write to {self.gendersFile}: {e}")
         self.set_job_failure()
