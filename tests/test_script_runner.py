@@ -153,6 +153,34 @@ def test_bad_arguments_run_nothing(js, plugin, monkeypatch, args):
   argv(monkeypatch, *args)
   assert plugin.handle_jobs() is False
   assert js.session.requests == []
+  # a bad invocation must never create /etc/nologin and lock users out (#173)
+  assert plugin.nologin == []
+
+
+def test_entity_load_failure_never_creates_nologin(js, plugin, monkeypatch):
+  # neither the image nor the nads fallback loads: handle_jobs() exits(1),
+  # and it must not have locked anyone out on the way (#173).
+  argv(monkeypatch, "-i", "gone")
+  js.session.routes.update({"systemimages/gone/": (404, None), "systemimages/nads/": (404, None)})
+  with pytest.raises(SystemExit):
+    plugin.handle_jobs()
+  assert plugin.nologin == []
+
+
+def test_nologin_is_lifted_when_the_scripts_region_fails(js, plugin, monkeypatch):
+  # if anything raises while the scripts run (here: the entity file can't
+  # be removed), /etc/nologin is still lifted on the way out (#173).
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  previous_unlink = os.unlink
+  def fail_on_entity_file(path):
+    if str(path).endswith("entity.json"):
+      raise OSError("cannot remove the entity file")
+    return previous_unlink(path)
+  monkeypatch.setattr(os, "unlink", fail_on_entity_file)
+  with pytest.raises(OSError):
+    plugin.handle_jobs()
+  assert plugin.nologin == [("touch", "/etc/nologin"), ("unlink", "/etc/nologin")]
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
