@@ -270,6 +270,19 @@ class JobServer ():
     #print(job_module + " " + str(status))
     pass
 
+  def reply_object(self, response):
+    """ The mPCC's POST /jobservers/ reply as a dict, or None if it isn't one.
+    The mPCC has double-encoded this reply (a JSON string holding the
+    object), and will send the object itself (mprov_control_center#268);
+    accept both. """
+    try:
+      result = response.json()
+      if isinstance(result, str):
+        result = json.loads(result)
+    except Exception:
+      return None
+    return result if isinstance(result, dict) else None
+
   def register_server(self):
     if not self.register:
       return
@@ -314,32 +327,20 @@ class JobServer ():
         return
     if response.status_code == 500:
         print("Error: The mPCC had an internal server error.")
-        try:
-          result = json.loads(response.json())
-        except: 
+        result = self.reply_object(response)
+        if result is None or 'msg' not in result:
           print("Error: And we were unable to load json from the response.")
           print(f"Error: so here is the raw response: {response.text}")
           sys.exit(1)
-        print(f"Error: The mPCCC said: \"{result['msg']}\"")
+        print(f"Error: The mPCC said: \"{result['msg']}\"")
         sys.exit(1)
-    # pp = pprint.PrettyPrinter(indent=2,width=100,)
-    # pp.pprint(vars(response))
-    # # print(response.text)
-    try: 
-      # check if we are actually json
-      _ = response.json()
-    except:
+
+    result = self.reply_object(response)
+    if result is None or 'pk' not in result:
       print("Error: mPCC gave us an invalid reply.")
       print(response.text)
       return
-    
-    if type(response.json()) is dict:
-      print("Error: Invalid response from mPCC")
-      print(response.json())
-      return
-    # print(response.json())
-    result = json.loads(response.json())
-    
+
     # grab our id from the MPCC
     self.id = result['pk']
 
