@@ -89,7 +89,7 @@ def test_no_pending_jobs_does_nothing(js, update, commands):
 
 
 @pytest.mark.xfail(strict=True, raises=AttributeError,
-                   reason="repo_update's error paths call self.module, which doesn't exist (see the PR)")
+                   reason="repo_update's error paths call self.module, which doesn't exist (#145)")
 def test_job_with_bad_params_fails_the_job(js, update):
   js.session.routes[JOBS] = [{"id": 21, "params": {}}]
   update.handle_jobs()
@@ -149,7 +149,7 @@ def test_sync_needs_the_webserver(js):
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="repo_sync compares status_code with the string \"404\", so a deleted repo crashes the sync (see the PR)")
+                   reason="repo_sync compares status_code with the string \"404\", so a deleted repo crashes the sync (#141)")
 def test_sync_skips_a_repo_deleted_from_the_mpcc(js, sync):
   sync.repoList = ["4", "5"]
   js.session.routes.update({"repos/4/": (404, None), "repos/5/": {"version": 2, "hosted_by": [1]}})

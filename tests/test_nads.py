@@ -129,13 +129,13 @@ def test_refuses_to_run_outside_runonce(js, plugin, host):
   assert js.session.writes == []
 
 
-@pytest.mark.xfail(strict=True, reason="getLLDP() returns True without a switch and port, so nads registers None (see the PR)")
+@pytest.mark.xfail(strict=True, reason="getLLDP() returns True without a switch and port, so nads registers None (#149)")
 def test_no_lldp_doesnt_register(js, plugin, host, frames):
   plugin.handle_jobs()
   assert register_writes(js) == []
 
 
-@pytest.mark.xfail(strict=True, reason="the Port ID's subtype byte is kept when the port has no '/' (see the PR)")
+@pytest.mark.xfail(strict=True, reason="the Port ID's subtype byte is kept when the port has no '/' (#149)")
 def test_port_without_a_slash(js, plugin, host, frames):
   frames.append(lldp_frame(port=b"\x05swp12"))
   plugin.handle_jobs()

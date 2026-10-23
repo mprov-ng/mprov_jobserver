@@ -139,7 +139,7 @@ def test_no_register_flag_skips_registration(server):
 
 
 @pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="register_server() reads loadmon from config_data, where it never is (see the PR)")
+                   reason="register_server() reads loadmon from config_data, where it never is (#147)")
 def test_high_load_skips_the_heartbeat(server, monkeypatch):
   monkeypatch.setattr(app.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
   server.register_server()

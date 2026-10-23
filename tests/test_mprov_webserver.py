@@ -85,7 +85,7 @@ def test_plugin_serves_until_the_job_server_stops(js, root):
   assert not thread.is_alive()
 
 
-@pytest.mark.xfail(strict=True, reason="checkFileSize() compares the filesystem path with /images/, so the connection limit never applies (see the PR)")
+@pytest.mark.xfail(strict=True, reason="checkFileSize() compares the filesystem path with /images/, so the connection limit never applies (#148)")
 def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
   monkeypatch.setattr(mProvHTTPReqestHandler, "connCount", mProvHTTPReqestHandler.maxConn)
   with pytest.raises(urllib.error.HTTPError) as err:
@@ -94,7 +94,7 @@ def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
   assert js.register is False
 
 
-@pytest.mark.xfail(strict=True, reason="under high load do_GET() reads self.js.config_data['loadmon']; the handler has no js (see the PR)")
+@pytest.mark.xfail(strict=True, reason="under high load do_GET() reads self.js.config_data['loadmon']; the handler has no js (#147)")
 def test_high_load_turns_image_requests_away(js, server, monkeypatch):
   monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
   with pytest.raises(urllib.error.HTTPError) as err:

@@ -111,7 +111,7 @@ def test_pulls_a_newer_image_from_another_host(js, plugin, images):
   assert (images / "compute" / "compute.vmlinuz").read_bytes() == b"KERNEL"
 
 
-@pytest.mark.xfail(strict=True, reason="a pulled image's version is never recorded, so it's pulled again every pass (see the PR)")
+@pytest.mark.xfail(strict=True, reason="a pulled image's version is never recorded, so it's pulled again every pass (#142)")
 def test_pulled_image_version_is_recorded(js, plugin, images):
   hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=3)
   js.session.routes.update({
@@ -121,7 +121,7 @@ def test_pulled_image_version_is_recorded(js, plugin, images):
   assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
 
 
-@pytest.mark.xfail(strict=True, reason="updateImageJobservers() ignores a configured imageList (see the PR)")
+@pytest.mark.xfail(strict=True, reason="updateImageJobservers() ignores a configured imageList (#142)")
 def test_configured_image_list_is_used(js, plugin, images):
   plugin.imageList = ["compute"]
   (images / "image-versions").write_text(json.dumps({"compute": 4}))
@@ -239,7 +239,7 @@ def test_unknown_ostype_fails_the_job(js, plugin, commands):
   assert commands.run == []
 
 
-@pytest.mark.xfail(strict=True, reason="a failed mprov_jobserver install in the image returns without failing the job (see the PR)")
+@pytest.mark.xfail(strict=True, reason="a failed mprov_jobserver install in the image returns without failing the job (#144)")
 def test_jobserver_install_failure_fails_the_job(js, plugin, commands):
   commands.fail = ["pip3 --no-cache-dir install --upgrade mprov_jobserver"]
   pending_build(js)
@@ -247,7 +247,7 @@ def test_jobserver_install_failure_fails_the_job(js, plugin, commands):
   assert job_states(js) == [(3, 9)]
 
 
-@pytest.mark.xfail(strict=True, reason="a failed build fails every running job on this job server, not just its own (see the PR)")
+@pytest.mark.xfail(strict=True, reason="a failed build fails every running job on this job server, not just its own (#143)")
 def test_mpcc_error_fails_only_this_modules_jobs(js, plugin):
   pending_build(js)
   js.session.routes["systemimages/compute/"] = (500, None)
@@ -257,7 +257,7 @@ def test_mpcc_error_fails_only_this_modules_jobs(js, plugin):
   assert "module=image-update" in query
 
 
-@pytest.mark.xfail(strict=True, reason="handle_jobs() with a configured imageList crashes on list.items() (see the PR)")
+@pytest.mark.xfail(strict=True, reason="handle_jobs() with a configured imageList crashes on list.items() (#144)")
 def test_configured_image_list_builds_requested_images(js, plugin, commands):
   plugin.imageList = ["compute"]
   pending_build(js)

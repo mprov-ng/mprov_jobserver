@@ -156,7 +156,7 @@ def test_bad_arguments_run_nothing(js, plugin, monkeypatch, args):
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="group scripts' dependsOn are objects (depth 3), but they're used as slugs (see the PR)")
+                   reason="group scripts' dependsOn are objects (depth 3), but they're used as slugs (#146)")
 def test_group_script_dependencies(js, plugin, monkeypatch):
   argv(monkeypatch, "-i", "compute")
   data = entity()
@@ -167,7 +167,7 @@ def test_group_script_dependencies(js, plugin, monkeypatch):
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="with -s, distro scripts' dependsOn are slugs (depth 4), but they're read as objects (see the PR)")
+                   reason="with -s, distro scripts' dependsOn are slugs (depth 4), but they're read as objects (#146)")
 def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
   argv(monkeypatch, "-s")
   system = entity(scripts=[])
@@ -181,7 +181,7 @@ def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="an unresolvable dependency makes depResolve() return None, which handle_jobs() iterates (see the PR)")
+                   reason="an unresolvable dependency makes depResolve() return None, which handle_jobs() iterates (#146)")
 def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch):
   argv(monkeypatch, "-i", "compute")
   js.session.routes["systemimages/compute/"] = entity(scripts=[script("tool", depends=[{"slug": "missing"}])])

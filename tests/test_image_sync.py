@@ -98,7 +98,7 @@ def test_needs_the_webserver(js):
 
 
 @pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="image_sync compares status_code with the string \"404\", so a deleted image crashes the sync (see the PR)")
+                   reason="image_sync compares status_code with the string \"404\", so a deleted image crashes the sync (#141)")
 def test_image_deleted_from_the_mpcc_is_skipped(js, plugin, images):
   plugin.imageList = ["gone", "compute"]
   js.session.routes.update({"systemimages/gone/": (404, None), "systemimages/compute/": image(jobservers=[1])})
