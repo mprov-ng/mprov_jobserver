@@ -9,6 +9,7 @@ fixture), so the tests check the commands and the files written.
 import copy
 import json
 import os
+import stat
 
 import pytest
 import yaml
@@ -202,6 +203,51 @@ def test_script_runner_config_is_runonce_script_runner(js, plugin, images, comma
   assert config[0]["global"]["jobmodules"] == ["script-runner"]
   assert config[0]["global"]["runonce"] is True
   assert "- !include plugins/*.yaml" in seen["config"]
+
+
+def test_root_ssh_keys_are_written_into_the_image(js, plugin, images, commands, monkeypatch):
+  """
+  The distro's rootsshkeys must land inside the image tree with ssh-usable
+  permissions; the build host's /root/.ssh must not be touched (#175).
+  """
+  host_dirs = []
+  real_makedirs = os.makedirs
+  def spy_makedirs(path, *args, **kwargs):
+    if not str(path).startswith(str(images)):
+      host_dirs.append(str(path))
+    return real_makedirs(path, *args, **kwargs)
+  monkeypatch.setattr(os, "makedirs", spy_makedirs)
+
+  data = image()
+  data["osdistro"]["rootsshkeys"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  pending_build(js, data)
+  plugin.handle_jobs()
+
+  ssh_dir = images / "compute/root/.ssh"
+  keyfile = ssh_dir / "authorized_keys"
+  assert keyfile.read_text() == "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  assert stat.S_IMODE(os.stat(ssh_dir).st_mode) == 0o700
+  assert stat.S_IMODE(os.stat(keyfile).st_mode) == 0o600
+  assert "/root/.ssh" not in host_dirs
+  assert job_states(js) == [(4, 9)]
+
+
+def test_unwritable_authorized_keys_fails_the_job(js, plugin, images, commands):
+  """
+  Key material that cannot be written must fail the image update, not pack
+  an image silently without it (#175).
+  """
+  data = image()
+  data["osdistro"]["rootsshkeys"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  pending_build(js, data)
+  # something already owns the .ssh path in the image, and it isn't a directory.
+  (images / "compute/root").mkdir(parents=True)
+  (images / "compute/root/.ssh").write_text("not a directory")
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  # not registered as a host of the image
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
 
 
 def test_root_password_is_set_in_the_image(js, plugin, images, commands):

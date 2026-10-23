@@ -334,12 +334,19 @@ class image_update(JobServerPlugin):
         # copy in our root keys from the distro
         if 'rootsshkeys' in imageDetails['osdistro']:
           if imageDetails['osdistro']['rootsshkeys'] is not None:
-            os.makedirs("/root/.ssh", exist_ok=True)
+            # the key material must land in the image tree, not on the build host (#175)
+            sshDir = imgDir + '/root/.ssh'
+            authKeys = sshDir + '/authorized_keys'
             try:
-              with open(imgDir + '/root/.ssh/authorized_keys', mode="w") as authkeys:
+              os.makedirs(sshDir, mode=0o700, exist_ok=True)
+              os.chmod(sshDir, 0o700)
+              with open(authKeys, mode="w") as authkeys:
                 authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
-            except:
-              print("WARN: No authorized_keys copied, /root/.ssh/authorized_keys access error")
+              os.chmod(authKeys, 0o600)
+            except OSError as err:
+              print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
+              self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+              return
         
         # set the root pw to the password in the distro
         if 'rootpw' in imageDetails['osdistro']:
