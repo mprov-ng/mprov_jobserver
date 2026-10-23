@@ -9,10 +9,12 @@ fixture), so the tests check the commands and the files written.
 import copy
 import json
 import os
+import stat
 
 import pytest
 import yaml
 
+from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
 
@@ -45,13 +47,31 @@ def images(tmp_path):
   return path
 
 
+@pytest.fixture(autouse=True)
+def fake_wget(monkeypatch):
+  """
+  A recorded wget that succeeds writes its ``-O`` target, as a real wget
+  does, so the build can verify the busybox it fetched (#170).  Tests can
+  plant other content at the target by setting ``body``.
+  """
+  class FakeWget:
+    body = b"\x7fELFfake busybox"
+  fake = FakeWget()
+  record = Commands.__call__
+  def call(self, cmd):
+    rc = record(self, cmd)
+    if rc == 0 and "wget " in cmd and " -O " in cmd:
+      with open(cmd.split(" -O ")[1].split()[0], "wb") as f:
+        f.write(fake.body)
+    return rc
+  monkeypatch.setattr(Commands, "__call__", call)
+  return fake
+
+
 @pytest.fixture
-def plugin(js, images, commands, monkeypatch):
+def plugin(js, images, commands):
   js.jobmodules = ["image-update", "mprov-webserver"]
   js.config_data = {"global": {"mprovURL": js.mprovURL, "jobmodules": ["image-update", "mprov-webserver"]}}
-  # busybox is fetched with wget (a recorded command), so there's no file to chmod.
-  chmod = os.chmod
-  monkeypatch.setattr(os, "chmod", lambda path, mode: None if path == "/tmp/busybox" else chmod(path, mode))
   plugin = image_update(js)
   plugin.imageDir = str(images)
   return plugin
@@ -211,6 +231,47 @@ def test_root_password_is_set_in_the_image(js, plugin, images, commands):
   plugin.handle_jobs()
   [cmd] = commands.matching("passwd root")
   assert f"chroot {images}/compute passwd root" in cmd
+
+
+# the busybox download and its verification (#170)
+
+def busybox_target(commands):
+  """ The path the build fetched busybox to. """
+  [download] = commands.matching(" -O ")
+  return download.split(" -O ")[1].split()[0]
+
+
+def test_busybox_is_fetched_to_a_root_only_dir_under_the_image_store(js, plugin, images, commands):
+  pending_build(js)
+  plugin.handle_jobs()
+  target = busybox_target(commands)
+  # never the fixed world-writable /tmp path, where another user could plant
+  # a binary for us to run as root
+  assert not target.startswith("/tmp/")
+  assert target.startswith(str(images) + os.sep)
+  assert stat.S_IMODE(os.stat(os.path.dirname(target)).st_mode) == 0o700
+  # and the pack step runs the binary we just fetched and verified, from there
+  [pack] = commands.matching("tar c")
+  assert pack.startswith(target + " ")
+
+
+def test_failed_busybox_download_fails_the_build(js, plugin, images, commands):
+  commands.fail = ["https://busybox.net"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert any(status == 3 for _, status, _ in js.job_updates)
+  assert not commands.matching("tar c")
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_busybox_that_is_not_an_elf_binary_is_not_executed(js, plugin, images, commands, fake_wget):
+  # a planted or truncated download must fail the build, not be chmod'ed 755
+  # and exec'ed as root
+  fake_wget.body = b"#!/bin/sh\necho pwned\n"
+  pending_build(js)
+  plugin.handle_jobs()
+  assert any(status == 3 for _, status, _ in js.job_updates)
+  assert not commands.matching("tar c")
 
 
 def test_distro_build_failure_fails_the_job(js, plugin, commands):
