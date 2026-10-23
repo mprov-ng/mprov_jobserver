@@ -108,7 +108,7 @@ class image_update(JobServerPlugin):
         # we are already in here.  
         continue
       #print(imgVersions)
-      if imageData['customIPXE'] is not "" and imageData['customIPXE'] is not None:
+      if imageData['customIPXE'] not in ("", None):
         continue
 
       # skip if rebuild requested.
