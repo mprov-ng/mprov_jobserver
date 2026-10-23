@@ -146,6 +146,24 @@ def test_dns_handles_404_null_for_nics_and_bmcs(js, dirs, no_interfaces):
   assert [line.split() for line in config_lines(hosts)] == [["10.0.0.250", "switch01.cluster.local"]]
 
 
+def test_dns_handles_a_network_with_no_switches(js, dirs, no_interfaces):
+  # A network with no switches gets the mPCC's 404 with null (#135).
+  js.session.routes.update({
+    "networks/?managedns=True": [NETWORK, dict(NETWORK, id=4, slug="other-net")],
+    "networkinterfaces/?network=cluster-net": [NIC],
+    "networkinterfaces/?network=other-net": [dict(NIC, hostname="node02", ipaddress="10.0.0.12")],
+    "systembmcs/?network=3&detail": [],
+    "systembmcs/?network=4&detail": [],
+    "switches/?network=cluster-net": (404, None),
+    "switches/?network=other-net": (404, None),
+  })
+  _, hosts = run_dns(js, dirs)
+  assert [line.split() for line in config_lines(hosts)] == [["10.0.0.11", "node01.cluster.local"]]
+  # and the networks after it are still written
+  other = hosts.parent / "other-net-dns.conf"
+  assert [line.split() for line in config_lines(other)] == [["10.0.0.12", "node02.cluster.local"]]
+
+
 @pytest.fixture
 def conf_plugin(js, dirs, monkeypatch):
   # Don't look up our own AAAA record.

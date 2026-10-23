@@ -59,7 +59,8 @@ class FakeSession:
   something it didn't set up.
 
   POSTs and PATCHes are recorded in ``writes`` as ``(method, path, data)``,
-  with ``data`` decoded from JSON, and answer 200 with ``{}`` unless
+  with ``data`` decoded from JSON (PATCHes also in ``patches`` as
+  ``(path, data)``), and answer 200 with ``{}`` unless
   ``write_routes[(method, path)]`` says otherwise.
   """
 
@@ -69,6 +70,8 @@ class FakeSession:
     self.write_routes = {}
     self.writes = []
     self.headers = {}
+    # PATCHes alone, as (path, data)
+    self.patches = []
 
   def _path(self, url):
     assert url.startswith(MPROV_URL), f"request outside the mPCC: {url}"
@@ -89,6 +92,8 @@ class FakeSession:
     path = self._path(url)
     self.requests.append((method, path))
     self.writes.append((method, path, json.loads(data) if data else None))
+    if method == "PATCH":
+      self.patches.append(self.writes[-1][1:])
     return self._response(self.write_routes.get((method, path), {}))
 
   def post(self, url, data=None, **kwargs):
