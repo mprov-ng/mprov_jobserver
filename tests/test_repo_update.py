@@ -1,10 +1,13 @@
 """
-repo_update (rhel) mirrors a repo with dnf reposync into repoDir/<repo id>.
+repo_update claims the mPCC's repo-update jobs and hands each repo to its
+ostype's sub-module; repo_update (rhel) mirrors a repo with dnf reposync
+into repoDir/<repo id>.
 """
 import os
 
 import pytest
 
+from mprov_jobserver.plugins.repo_update import repo_update
 from mprov_jobserver.plugins.repo_update_mod.rhel import UpdateRepo
 
 REPO = {"id": 5, "name": "Rocky BaseOS", "repo_package_url": "https://mirror.example/rocky/9/BaseOS/x86_64/os/"}
@@ -44,3 +47,65 @@ def test_reposync_failure_fails_the_job(plugin, js, monkeypatch):
   plugin.handle_jobs()
   assert js.session.patches == []
   assert js.job_updates[-1][:2] == ("repo-update", 3)
+
+
+def test_rhel_registers_its_ostype(js):
+  UpdateRepo(js).load_config()
+  [(method, path, data)] = js.session.writes
+  # the URL has a double slash (#115)
+  assert method == "POST" and path.endswith("ostypes/")
+  assert data == {"slug": "rhel", "name": "Yum/DNF Based Linux"}
+
+
+# repo_update.handle_jobs()
+
+JOBS = "jobs/?jobserver=1&module=repo-update&status=2"
+
+
+@pytest.fixture
+def update(js, tmp_path, commands, monkeypatch):
+  # Run the ostype sub-module in the test's thread, so it's done when handle_jobs() returns.
+  monkeypatch.setattr(UpdateRepo, "start", lambda self: self.handle_jobs())
+  plugin = repo_update(js)
+  plugin.repoDir = str(tmp_path / "repos")
+  return plugin
+
+
+def job_states(js):
+  return [(status, jobid) for _, status, jobid in js.job_updates_by_id if jobid is not None]
+
+
+def test_job_runs_the_repos_ostype_module(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}], "repos/5/": dict(REPO, ostype="rhel")})
+  update.handle_jobs()
+  assert commands.matching("dnf reposync")
+  assert os.path.exists(f"{update.repoDir}/robots.txt")
+  assert job_states(js) == [(4, 21)]
+
+
+def test_repo_without_an_ostype_fails_the_job(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}], "repos/5/": dict(REPO, ostype=None)})
+  update.handle_jobs()
+  assert commands.run == []
+  assert job_states(js) == [(3, 21)]
+
+
+def test_mpcc_error_for_the_repo_fails_the_job(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}], "repos/5/": (404, None)})
+  update.handle_jobs()
+  assert commands.run == []
+  assert job_states(js) == [(3, 21)]
+
+
+def test_no_pending_jobs_does_nothing(js, update):
+  js.has_jobs = False
+  update.handle_jobs()
+  assert js.session.requests == []
+
+
+@pytest.mark.xfail(strict=True, raises=AttributeError,
+                   reason="repo_update's error paths call self.module, which doesn't exist (#145)")
+def test_job_with_bad_params_fails_the_job(js, update):
+  js.session.routes[JOBS] = [{"id": 21, "params": {}}]
+  update.handle_jobs()
+  assert job_states(js) == [(3, 21)]
