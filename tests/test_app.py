@@ -113,9 +113,22 @@ def test_register_defaults_the_webserver_port(server):
   assert server.session.writes[0][2]["port"] == 8080
 
 
-def test_register_ignores_an_object_reply(server):
-  # Only the double-encoded form is understood today (mprov_control_center#268).
+def test_register_accepts_an_object_reply(server):
+  # what the mPCC sends once it stops double-encoding (mprov_control_center#268, #155)
   server.session.write_routes[("POST", "jobservers/")] = {"pk": 9}
+  server.register_server()
+  assert server.id == 9
+
+
+@pytest.mark.parametrize("reply", [
+  {"name": "js01"},              # no pk
+  json.dumps({"name": "js01"}),  # double-encoded, no pk
+  "not json",                    # a string that isn't JSON inside
+  [{"pk": 9}],                   # not an object
+  b"<html>Bad Gateway</html>",   # not JSON at all
+])
+def test_register_ignores_an_invalid_reply(server, reply):
+  server.session.write_routes[("POST", "jobservers/")] = reply
   server.register_server()
   assert server.id == 5
 
@@ -126,10 +139,20 @@ def test_register_400_drops_the_session(server):
   assert server.sessionOk is False
 
 
-def test_register_500_exits(server):
-  server.session.write_routes[("POST", "jobservers/")] = (500, json.dumps({"msg": "boom"}))
+@pytest.mark.parametrize("body", [json.dumps({"msg": "boom"}), {"msg": "boom"}])
+def test_register_500_reports_the_message_and_exits(server, capsys, body):
+  # double-encoded today, an object after mprov_control_center#268 (#155)
+  server.session.write_routes[("POST", "jobservers/")] = (500, body)
   with pytest.raises(SystemExit):
     server.register_server()
+  assert 'The mPCC said: "boom"' in capsys.readouterr().out
+
+
+def test_register_500_without_a_message_exits(server, capsys):
+  server.session.write_routes[("POST", "jobservers/")] = (500, b"Internal Server Error")
+  with pytest.raises(SystemExit):
+    server.register_server()
+  assert "raw response: Internal Server Error" in capsys.readouterr().out
 
 
 def test_no_register_flag_skips_registration(server):
