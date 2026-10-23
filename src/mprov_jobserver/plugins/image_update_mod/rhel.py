@@ -50,8 +50,10 @@ class UpdateImage(JobServerPlugin):
 
     
     # create this image's dir.  Use the image['slug']
+    # Don't os.chdir() into it: plugins are threads of one process, so that
+    # would move every other plugin's working directory too (#129).  Every
+    # path below is absolute.
     os.makedirs(imgDir, exist_ok=True)
-    os.chdir(imgDir)
     # grab the repo rpm
     url = urlparse(baseURL)
     file = os.path.basename(url.path)
