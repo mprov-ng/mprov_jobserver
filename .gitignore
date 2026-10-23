@@ -151,3 +151,6 @@ src/mprov_jobserver/bin/python3
 src/mprov_jobserver/bin/python3.8
 src/mprov_jobserver/bin/normalizer
 src/mprov_jobserver/bin/slugify
+
+# Local environment for dev-docker-compose.yml; copy stack.env.example
+stack.env
