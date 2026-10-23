@@ -7,6 +7,8 @@ class JobServerPlugin(threading.Thread):
   jobModule = ""
   js = None
   threadOk = True
+  # set True by a module that ran and failed, so runonce can exit nonzero (#174)
+  failed = False
 
 
   def set_job_running(self):

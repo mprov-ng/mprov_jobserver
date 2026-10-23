@@ -36,6 +36,8 @@ class JobServer ():
   runonce = False
   register = True
   firstrun = True
+  # jobmodules that ran and failed in runonce mode, checked before exiting (#174)
+  failed_runonce_modules = []
 
   def __init__(self, **kwargs):
     print("mProv Job Server Starting.")
@@ -197,8 +199,16 @@ class JobServer ():
           # check if this thread is still running
           # print("\tWaiting on thread " + mod)
           self.running_threads[mod].join()
-          
-    
+
+    if self.runonce:
+      # a module that failed its run means this process exits nonzero (#174)
+      self.failed_runonce_modules = [
+        mod for mod in self.jobmodules
+        if mod in self.running_threads and getattr(self.running_threads[mod], "failed", False)]
+      if self.failed_runonce_modules:
+        print("Error: Jobmodule(s) failed: " + ", ".join(self.failed_runonce_modules), file=sys.stderr)
+        return 1
+
     return 0
 
 
