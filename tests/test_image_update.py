@@ -245,9 +245,10 @@ def test_busybox_is_fetched_to_a_root_only_dir_under_the_image_store(js, plugin,
   pending_build(js)
   plugin.handle_jobs()
   target = busybox_target(commands)
-  # never the fixed world-writable /tmp path, where another user could plant
-  # a binary for us to run as root
-  assert not target.startswith("/tmp/")
+  # never the fixed world-writable /tmp/busybox path, where another user
+  # could plant a binary for us to run as root. (the image store itself may
+  # live under /tmp in CI, so containment in it is the real check.)
+  assert target != "/tmp/busybox"
   assert target.startswith(str(images) + os.sep)
   assert stat.S_IMODE(os.stat(os.path.dirname(target)).st_mode) == 0o700
   # and the pack step runs the binary we just fetched and verified, from there
