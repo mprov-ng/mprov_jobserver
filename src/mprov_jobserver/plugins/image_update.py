@@ -375,9 +375,29 @@ class image_update(JobServerPlugin):
         if os.path.exists(imgDir +"/tmp/mprov/jobserver.yaml"):
           os.unlink(imgDir + "/tmp/mprov/jobserver.yaml")
 
-        # grab a copy of busybox to /tmp
-        os.system(f"wget -q -O /tmp/busybox https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox")
-        os.chmod("/tmp/busybox", 0o755)
+        # grab a copy of busybox into a root-only directory under the image
+        # store.  A fixed /tmp path is world-writable: another user could
+        # plant a binary there for us to run as root (#170).
+        busyboxDir = self.imageDir + '/.busybox'
+        os.makedirs(busyboxDir, mode=0o700, exist_ok=True)
+        os.chmod(busyboxDir, 0o700)
+        busybox = busyboxDir + '/busybox'
+        if os.system(f"wget -q -O {busybox} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
+          print("Error: unable to download busybox")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        # don't run the download unless it is the ELF binary we asked for;
+        # wget -O leaves error pages and partial files in place (#170).
+        try:
+          with open(busybox, "rb") as f:
+            magic = f.read(4)
+        except OSError:
+          magic = b""
+        if magic != b"\x7fELF":
+          print("Error: downloaded busybox is not a valid ELF binary, refusing to run it")
+          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        os.chmod(busybox, 0o755)
 
         # attempt to call updateBootFiles()
         # Check if 'updateBootFiles' exists and is callable
@@ -391,7 +411,7 @@ class image_update(JobServerPlugin):
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-        if os.system('/tmp/busybox tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
+        if os.system(busybox + ' tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
