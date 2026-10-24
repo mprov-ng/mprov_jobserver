@@ -161,6 +161,18 @@ def test_no_register_flag_skips_registration(server):
   assert server.session.writes == []
 
 
+def test_registration_heartbeat_sends_the_one_minute_average(server, monkeypatch):
+  # os.getloadavg() returns the 1-, 5- and 15-minute averages; the
+  # one_minute_load field must carry index 0, not the fifteen-minute
+  # value (#176).  All values stay below any cpu count so the
+  # high-load guard never fires and the heartbeat is always sent.
+  monkeypatch.setattr(app.os, "getloadavg", lambda: (0.25, 0.5, 0.75))
+  server.register_server()
+  method, path, data = server.session.writes[0]
+  assert (method, path) == ("POST", "jobservers/")
+  assert data["one_minute_load"] == 0.25
+
+
 @pytest.mark.xfail(strict=True, raises=KeyError,
                    reason="register_server() reads loadmon from config_data, where it never is (#147)")
 def test_high_load_skips_the_heartbeat(server, monkeypatch):

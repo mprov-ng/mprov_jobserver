@@ -297,7 +297,7 @@ class JobServer ():
         'name': myHostname,
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
-        'one_minute_load': os.getloadavg()[2]
+        'one_minute_load': os.getloadavg()[0]
     }
     if data['one_minute_load'] >= multiprocessing.cpu_count() and self.config_data['loadmon']:
       print("Not Registering, high load.")
