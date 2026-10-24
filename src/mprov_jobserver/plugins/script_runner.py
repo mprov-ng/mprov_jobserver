@@ -281,27 +281,37 @@ class script_runner(JobServerPlugin):
     scriptDeps=self.depResolve(scriptDeps)
     # print(scripts)
 
-    # make sure our local tmp dir exists
-    os.makedirs(self.scriptTmpDir, exist_ok=True)
-    
-    # output the entity to a json file
-    with open(self.scriptTmpDir + "/entity.json", "w") as entFile:
-      entFile.write(json.dumps(entity))
-    
-    for step in scriptDeps:
-      threads = []
-      for script in step:
-        # download the script and thread it out within this step.
-        print(f"Running {scripts[script]['filename']}")
-        t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
-        t.start()
-        threads.append(t)
+    # make sure our local tmp dir exists.  the entity file we write there
+    # holds our api key, so the workspace must be reachable by us alone (#169).
+    entityPath = self.scriptTmpDir + "/entity.json"
+    os.makedirs(self.scriptTmpDir, mode=0o700, exist_ok=True)
+    # a dir left behind by an older version may be world-readable; tighten it.
+    os.chmod(self.scriptTmpDir, 0o700)
 
-        # wait for the threads in this step to finish.
-      for t  in threads:
-        t.join()
-    # remove the entity file.
-    os.unlink(self.scriptTmpDir + "/entity.json")
+    # output the entity to a json file, owner read/write only (#169).
+    entFd = os.open(entityPath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(entFd, "w") as entFile:
+      entFile.write(json.dumps(entity))
+
+    try:
+      for step in scriptDeps:
+        threads = []
+        for script in step:
+          # download the script and thread it out within this step.
+          print(f"Running {scripts[script]['filename']}")
+          t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
+          t.start()
+          threads.append(t)
+
+          # wait for the threads in this step to finish.
+        for t  in threads:
+          t.join()
+    finally:
+      # remove the entity file, even if the run raised (#169).
+      try:
+        os.unlink(entityPath)
+      except FileNotFoundError:
+        pass
     try:
       os.unlink("/etc/nologin")
     except:
