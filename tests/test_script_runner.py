@@ -187,3 +187,98 @@ def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch):
   js.session.routes["systemimages/compute/"] = entity(scripts=[script("tool", depends=[{"slug": "missing"}])])
   plugin.handle_jobs()
   assert plugin.ran == []
+
+
+# script failures propagate (#174)
+
+def failing_plugin(js, tmp_path, monkeypatch):
+  """ A script_runner with the host touched by /etc/nologin stubbed out, but
+  downloading and running otherwise real; scriptsTmp is under tmp_path. """
+  nologin = []
+  monkeypatch.setattr(script_runner_module, "Path",
+                      lambda p: types.SimpleNamespace(touch=lambda: nologin.append(("touch", p))))
+  unlink = os.unlink
+  monkeypatch.setattr(os, "unlink", lambda p: nologin.append(("unlink", p)) if p == "/etc/nologin" else unlink(p))
+  # downloads go to the fake session, like every other mPCC conversation
+  monkeypatch.setattr(script_runner_module.requests, "get", js.session.get)
+  plugin = script_runner(js)
+  plugin.nologin = nologin
+  plugin.scriptTmpDir = str(tmp_path / "scripts")
+  return plugin
+
+
+def compute_routes():
+  """ The entity plus a download stub for each script file it references. """
+  routes = {"systemimages/compute/": entity()}
+  for slug in ("base", "group-tool", "image-tool"):
+    routes[f"media/scripts/{slug}.sh"] = b"#!/bin/sh\nexit 0\n"
+  return routes
+
+
+def test_a_failing_script_fails_the_run(js, tmp_path, monkeypatch, capsys):
+  # the real runScript, with every script's subprocess exiting 7
+  monkeypatch.setattr(script_runner_module.subprocess, "run",
+                      lambda *a, **k: types.SimpleNamespace(returncode=7))
+  js.session.routes.update(compute_routes())
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  # every script's return code is recorded, the failure reaches the jobserver,
+  # and the run is not reported as complete
+  assert plugin.scriptResults == {
+    script_file: 7 for script_file in
+    ("http://mpcc/media/scripts/base.sh", "http://mpcc/media/scripts/group-tool.sh",
+     "http://mpcc/media/scripts/image-tool.sh")}
+  assert plugin.failed is True
+  assert js.job_updates == [("script-runner", 3, None)]
+  out = capsys.readouterr().out
+  assert "script-runner complete." not in out
+  assert "script-runner: 3 script(s) failed." in out
+
+
+def test_a_script_that_never_ran_fails_the_run(js, tmp_path, monkeypatch):
+  # a download failure kills the script's thread before the subprocess starts;
+  # the thread must report it, not vanish with it
+  def refused(url):
+    raise OSError("download failed")
+  js.session.routes["systemimages/compute/"] = entity()
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  monkeypatch.setattr(plugin, "download_file", refused)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert len(plugin.scriptResults) == 3
+  assert all(str(rc).startswith("error:") for rc in plugin.scriptResults.values())
+  assert plugin.failed is True
+  assert js.job_updates == [("script-runner", 3, None)]
+
+
+def test_a_failing_script_is_still_cleaned_up(js, tmp_path, monkeypatch):
+  # entity.json is removed and /etc/nologin lifted even when a script fails
+  monkeypatch.setattr(script_runner_module.subprocess, "run",
+                      lambda *a, **k: types.SimpleNamespace(returncode=1))
+  js.session.routes.update(compute_routes())
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert plugin.failed is True
+  assert not (tmp_path / "scripts" / "entity.json").exists()
+  assert plugin.nologin == [("touch", "/etc/nologin"), ("unlink", "/etc/nologin")]
+
+
+def test_successful_scripts_run_and_report_no_failure(js, tmp_path, monkeypatch, capsys):
+  # the real runScript with every script's subprocess exiting 0
+  monkeypatch.setattr(script_runner_module.subprocess, "run",
+                      lambda *a, **k: types.SimpleNamespace(returncode=0))
+  js.session.routes.update(compute_routes())
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert len(plugin.scriptResults) == 3
+  assert all(rc == 0 for rc in plugin.scriptResults.values())
+  assert plugin.failed is False
+  assert js.job_updates == []
+  assert "script-runner complete." in capsys.readouterr().out
