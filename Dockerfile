@@ -37,6 +37,7 @@ RUN dnf update -y && \
     which \
     parted-devel \
     gcc \
+    genisoimage \
     procps
 
 # install the mprov_jobserver python module and some other useful mods
