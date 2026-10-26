@@ -106,6 +106,64 @@ def test_dhcp_handles_404_null_for_a_network(js, dirs):
   assert config_lines(hosts) == []
 
 
+@pytest.mark.parametrize("unset", [None, "", "missing"])
+@pytest.mark.parametrize("field, option", [
+  ("dhcpstart", "dhcp-range="),
+  ("dhcpend", "dhcp-range="),
+  ("gateway", "option:router"),
+  ("nameserver1", "option:dns-server"),
+  ("domain", "option:domain-name"),
+])
+def test_dhcp_leaves_out_options_for_unset_network_fields(js, dirs, field, option, unset):
+  # the mPCC allows each of these to be null or blank (#178)
+  network = dict(NETWORK)
+  if unset == "missing":
+    del network[field]
+  else:
+    network[field] = unset
+  js.session.routes.update({
+    "networks/?isdhcp=True": [network],
+    "networkinterfaces/?network=cluster-net": [NIC],
+    "switches/?network=cluster-net": [],
+  })
+  dhcp_conf, hosts = run_dhcp(js, dirs)
+
+  ok, out = dnsmasq_test(dhcp_conf)
+  assert ok, out
+  lines = config_lines(dhcp_conf)
+  assert not [line for line in lines if option in line]
+  # the other options are still there
+  expected = {
+    "dhcp-range=": "dhcp-range=set:cluster-net,10.0.0.100,10.0.0.200",
+    "option:router": "dhcp-option=tag:cluster-net,option:router,10.0.0.1",
+    "option:dns-server": "dhcp-option=tag:cluster-net,option:dns-server,10.0.0.2",
+  }
+  for other, line in expected.items():
+    if other != option:
+      assert line in lines
+  # the hosts file is still written
+  assert config_lines(hosts) == ["aa:bb:cc:00:00:01,set:cluster-net,10.0.0.11,node01"]
+
+
+def test_dhcp_renders_a_network_with_only_a_dhcp_range(js, dirs):
+  network = dict(NETWORK, gateway=None, nameserver1=None, domain=None)
+  js.session.routes.update({
+    "networks/?isdhcp=True": [network],
+    "networkinterfaces/?network=cluster-net": [],
+    "switches/?network=cluster-net": [],
+  })
+  dhcp_conf, _ = run_dhcp(js, dirs)
+
+  ok, out = dnsmasq_test(dhcp_conf)
+  assert ok, out
+  text = dhcp_conf.read_text()
+  assert "# no router option: the gateway isn't set" in text
+  assert "# no DNS server option: the nameserver isn't set" in text
+  assert [line for line in config_lines(dhcp_conf) if "cluster-net" in line] == [
+    "dhcp-range=set:cluster-net,10.0.0.100,10.0.0.200",
+  ]
+
+
 def run_dns(js, dirs):
   conf, mprov, _ = dirs
   plugin = DnsmasqDNSConfig(js)
