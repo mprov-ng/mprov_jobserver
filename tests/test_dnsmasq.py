@@ -3,12 +3,16 @@ The dnsmasq submodules write dnsmasq's config (dhcp.conf, dns.conf,
 ipxe.conf) and one hosts file per network.  Each test checks the output by
 content and, for anything dnsmasq parses as config, with ``dnsmasq --test``.
 """
+import os
+import pathlib
+
 import pytest
 
 from mprov_jobserver.plugins.dnsmasq_mod import config, dns
 from mprov_jobserver.plugins.dnsmasq_mod.config import DnsmasqConfig
 from mprov_jobserver.plugins.dnsmasq_mod.dhcp import DnsmasqDHCPConfig
 from mprov_jobserver.plugins.dnsmasq_mod.dns import DnsmasqDNSConfig
+from mprov_jobserver.plugins import dnsmasq as dnsmasq_plugin
 from tools import run
 
 NETWORK = {
@@ -274,3 +278,64 @@ def test_all_generated_config_passes_dnsmasq_test_together(js, dirs, conf_plugin
   combined.write_text("".join(f"conf-file={conf / name}\n" for name in ("dhcp.conf", "dns.conf", "ipxe.conf")))
   ok, out = dnsmasq_test(combined)
   assert ok, out
+
+
+class FakeSh:
+  """ Stands in for the sh module in build_ipxe(): records the commands and
+  runs ``on`` hooks instead of git and make. """
+  def __init__(self, on=None):
+    self.calls = []
+    self.on = on or {}
+  def __getattr__(self, name):
+    def command(args, **kwargs):
+      self.calls.append((name, args))
+      if name in self.on:
+        self.on[name](args, kwargs)
+    return command
+
+
+def ipxe_plugin(js, tftproot):
+  plugin = dnsmasq_plugin.dnsmasq(js)
+  plugin.tftproot = str(tftproot)
+  return plugin
+
+
+def fake_make(args, kwargs):
+  # "build" each target named on the command line
+  for target in args[1:]:
+    built = f"{kwargs['_cwd']}/{target}"
+    os.makedirs(os.path.dirname(built), exist_ok=True)
+    with open(built, "w") as f:
+      f.write(target)
+
+
+def fake_clone(args, kwargs):
+  # pathlib, not os.makedirs, which a test breaks on purpose
+  if args[0] == "clone":
+    pathlib.Path(kwargs["_cwd"], "ipxe", "src").mkdir(parents=True)
+
+
+def test_ipxe_build_installs_nothing_at_runtime(js, tmp_path, monkeypatch):
+  # the tools come with the image; a runtime dnf raced the image builds (#207)
+  fake = FakeSh(on={"git": fake_clone, "make": fake_make})
+  monkeypatch.setattr(dnsmasq_plugin, "sh", fake)
+  tftproot = tmp_path / "tftproot"
+  tftproot.mkdir()
+  ipxe_plugin(js, tftproot).build_ipxe()
+
+  assert [name for name, _ in fake.calls] == ["git", "git", "make", "make"]
+  assert sorted(p.name for p in tftproot.iterdir()) == ["snponly.efi", "snponly_ipv4.efi", "undionly.kpxe"]
+
+
+def test_ipxe_build_failure_doesnt_end_the_plugin(js, tmp_path, monkeypatch, capsys):
+  # an unexpected error is logged; the build is retried on the next start (#207)
+  def broken(args, kwargs):
+    raise OSError("disk full")
+  monkeypatch.setattr(dnsmasq_plugin, "sh", FakeSh(on={"git": fake_clone}))
+  monkeypatch.setattr(dnsmasq_plugin.os, "makedirs", lambda *a, **kw: broken(a, kw))
+  tftproot = tmp_path / "tftproot"
+  tftproot.mkdir()
+  ipxe_plugin(js, tftproot).build_ipxe()
+
+  assert "Error: unable to build iPXE: disk full" in capsys.readouterr().out
+  assert list(tftproot.iterdir()) == []
