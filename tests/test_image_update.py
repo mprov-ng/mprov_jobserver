@@ -200,6 +200,36 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
+def test_dracut_gets_only_real_modules_of_the_image_kernel(js, plugin, images, commands):
+  # dracut stops at a built-in or unknown module and drops every driver
+  # after it (#206), so those are left out of --add-drivers.
+  data = image()
+  data["osdistro"]["initial_mods"] = "virtio_scsi,virtio_pci,e1000,nosuchmod,,e1000,sd_mod"
+  pending_build(js, data)
+  (images / "compute/lib/modules/4.18.0-553.el8_10.x86_64").mkdir(parents=True)
+  commands.fail = ["-n virtio_pci ", "-n nosuchmod "]
+  plugin.handle_jobs()
+
+  assert commands.matching("modinfo -k 4.18.0-553.el8_10.x86_64 -n virtio_pci ")
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "virtio_scsi e1000 sd_mod"' in cmd for cmd in dracut)
+  assert job_states(js) == [(4, 9)]
+
+
+def test_dracut_module_needs_to_be_a_module_of_every_image_kernel(js, plugin, images, commands):
+  data = image()
+  data["osdistro"]["initial_mods"] = "e1000,virtio_pci"
+  pending_build(js, data)
+  for kernel in ("4.18.0-1.el8.x86_64", "4.18.0-2.el8.x86_64"):
+    (images / "compute/lib/modules" / kernel).mkdir(parents=True)
+  # built in on only one of the two kernels
+  commands.fail = ["-k 4.18.0-2.el8.x86_64 -n virtio_pci "]
+  plugin.handle_jobs()
+
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "e1000"' in cmd for cmd in dracut)
+
+
 def test_script_runner_config_is_runonce_script_runner(js, plugin, images, commands, monkeypatch):
   # Capture jobserver.yaml before it's removed, when the script runs.
   seen = {}

@@ -28,11 +28,31 @@ class UpdateImage(JobServerPlugin):
     if response.status_code != 200:
       print("Error: Error updating OS Type for module.")
     return True
+  def realModules(self, imgDir, initial_mods):
+    # dracut stops at a built-in or unknown module and leaves out every
+    # driver listed after it (#206), so keep only the ones that are a module
+    # for every kernel in the image.
+    mods = [mod for mod in initial_mods.replace(',', ' ').split() if mod]
+    try:
+      kernels = os.listdir(f"{imgDir}/lib/modules")
+    except OSError:
+      # no kernel installed yet, so nothing to check against.
+      return mods
+    keep = []
+    for mod in mods:
+      if mod in keep:
+        continue
+      if all(os.system(f"chroot {imgDir} modinfo -k {kernel} -n {mod} >/dev/null 2>&1") == 0 for kernel in kernels):
+        keep.append(mod)
+      else:
+        print(f"Leaving {mod} out of the initramfs: it's built in, or not a module of the image's kernel.")
+    return keep
+
   def updateBootFiles(self):
     # update the dracut image one last time.
     imgDir = self.imageDir + '/' + self.imageDetails['slug']
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{self.imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, self.imageDetails['osdistro']['initial_mods']))}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
@@ -282,7 +302,7 @@ class UpdateImage(JobServerPlugin):
       return
       
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{imageDetails['osdistro']['initial_mods'].replace(',',' ')}\""
+    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, imageDetails['osdistro']['initial_mods']))}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
