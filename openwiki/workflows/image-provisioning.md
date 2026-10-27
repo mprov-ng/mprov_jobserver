@@ -30,7 +30,7 @@ dnf reposync --repofrompath <id>,"<url>" --repo <id> --destdir=<repoDir>/ \
              --download-metadata --installroot=<repoDir>/<id>
 ```
 
-The `--installroot` trick sidesteps dnf's download lock so repos sync in parallel, and `--destdir` is an absolute path so the plugin never `os.chdir()`s — plugins are threads of one process, and a global chdir would move every other plugin's working directory (#130). On success it PATCHes `repos/<id>/` with `hosted_by=[js.id]` and `update: False`. Caveat: the mprov-webserver requirement check present in image plugins is commented out here.
+The `--installroot` trick sidesteps dnf's download lock so repos sync in parallel, and `--destdir` is an absolute path so the plugin never `os.chdir()`s — plugins are threads of one process, and a global chdir would move every other plugin's working directory (#130). On success it PATCHes `repos/<id>/` with only `id` and `hosted_by=[js.id]` — the old `update: False` key that cleared the repo's re-sync flag is gone, because mPCC mprov-ng/mpcc#358 renamed that field to `resync` and clears it when the repo-update job is queued (#204). Upgrade the mPCC first or together: against an older mPCC nothing clears the flag after a mirror, so a later save of the repo queues another sync. Caveat: the mprov-webserver requirement check present in image plugins is commented out here.
 
 `repo-delete` is a stub — its class body is `pass`, so it inherits the base simulated `handle_jobs()` (sleep 15s, mark success).
 
@@ -46,7 +46,7 @@ The `--installroot` trick sidesteps dnf's download lock so repos sync in paralle
 
 - Writes `mprov`-managed `.repo` files pointing at `{mprovURL}/osrepos/<id>/` (gpgcheck=0), disables stock repos (baseos/appstream/epel/extras/powertools/crb).
 - `dnf --installroot=<imgDir> groupinstall 'Minimal Install'` with a fallback that retries via `chroot imgDir dnf ...`; installs a fixed package set (kernel, grub2 + EFI modules, mdadm, ipmitool, python stack — version-split at RHEL 9) and freezes the kernel with `dnf versionlock kernel*`. Retries once after `rpm --rebuilddb` on failure.
-- Symlinks newest non-rescue kernel/initramfs out as `<slug>.vmlinuz` / `<slug>.initramfs`, `mknod`s `/dev/ram0`+`/dev/initrd`, and regenerates initramfs with `dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod ...` (repeated in `updateBootFiles()` after scripts run, so the final initramfs includes script changes).
+- Symlinks newest non-rescue kernel/initramfs out as `<slug>.vmlinuz` / `<slug>.initramfs`, `mknod`s `/dev/ram0`+`/dev/initrd`, and regenerates initramfs with `dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod ...` (repeated in `updateBootFiles()` after scripts run, so the final initramfs includes script changes). The distro's `initial_mods` list is first filtered by `realModules()`, which keeps only names that `modinfo -k` confirms as modules of every kernel in the image: dracut-install stops at a built-in or unknown module and silently drops every driver listed after it (#206).
 - No subscription-manager flow exists; everything is `--nogpgcheck` plus mProv-generated repo files.
 
 Caveats: heavy `os.system` string interpolation and chroot of the half-built image are by design (root daemon, trusted mPCC input).
