@@ -2,7 +2,7 @@ from .plugin import JobServerPlugin
 import sys
 import os
 import requests
-from threading import Thread
+from threading import Thread, Lock
 import json
 import subprocess
 import yaml
@@ -13,6 +13,14 @@ from pathlib import Path
 class script_runner(JobServerPlugin):
   jobModule = 'script-runner'
   scriptTmpDir="/tmp/mprov-script-runner/"
+
+  def __init__(self, js):
+    super().__init__(js)
+    # each script thread records its subprocess return code (or an error
+    # string) here so handle_jobs() can check them all after joining (#174)
+    self.scriptResults = {}
+    self.scriptLock = Lock()
+    self.failed = False
 
   def depResolve(self, depDict):
     '''
@@ -300,20 +308,34 @@ class script_runner(JobServerPlugin):
         # wait for the threads in this step to finish.
       for t  in threads:
         t.join()
+    # if any script failed, or never ran, report failure instead of success (#174)
+    failures = [(name, rc) for name, rc in self.scriptResults.items() if rc != 0]
+    if failures:
+      self.failed = True
+      for name, rc in failures:
+        print(f"Error: script '{name}' failed: {rc}")
+      print(f"script-runner: {len(failures)} script(s) failed.")
+      self.set_job_failure()
     # remove the entity file.
     os.unlink(self.scriptTmpDir + "/entity.json")
     try:
       os.unlink("/etc/nologin")
     except:
       pass
-    print("script-runner complete.")
+    if not failures:
+      print("script-runner complete.")
 
   def runScript(self, filename):
-    # grab the file
-    local_file = self.download_file(filename)
-
-    # run the file
-    subprocess.run(local_file, shell=True)
+    try:
+      # grab the file
+      local_file = self.download_file(filename)
+      # run the file, and record its return code (#174)
+      return_code = subprocess.run(local_file, shell=True).returncode
+    except Exception as e:
+      # a script that never started is a failure, not a success
+      return_code = f"error: {e}"
+    with self.scriptLock:
+      self.scriptResults[filename] = return_code
     
 
   def download_file(self, url):
