@@ -310,3 +310,64 @@ def test_successful_scripts_run_and_report_no_failure(js, tmp_path, monkeypatch,
   assert plugin.failed is False
   assert js.job_updates == []
   assert "script-runner complete." in capsys.readouterr().out
+
+
+# the mPCC's merge (#269): an mPCC that serves `config` does the merge, with
+# the image layer and image groups for a system; the layers are only used to
+# look up each script's file, type and dependencies.
+
+def mpcc_config(scripts, config_params):
+  return {"config_params": config_params, "scripts": scripts, "ansibleplaybooks": [], "ansibleroles": [],
+          "ansiblecollections": [], "install_kernel_cmdline": "quiet"}
+
+
+def test_image_uses_the_mpcc_merge(js, plugin, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  # the mPCC left group-tool out and merged config_params its own way
+  js.session.routes["systemimages/compute/"] = entity(config=mpcc_config(["base", "image-tool", "motd"], {"from": "mpcc"}))
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "image-tool"]
+  assert plugin.ran.index("base") < plugin.ran.index("image-tool")
+  assert plugin.entities[0]["config_params"] == {"from": "mpcc"}
+  assert plugin.entities[0]["config"]["install_kernel_cmdline"] == "quiet"
+
+
+def test_system_runs_its_image_and_image_group_scripts(js, plugin, monkeypatch):
+  argv(monkeypatch, "-s", "-b")
+  system = {
+    "hostname": "node01",
+    "scripts": [script("own", stype="post-boot")],
+    # group scripts come with dependsOn as slugs, the other layers as objects
+    "systemgroups": [{"scripts": [script("group-tool", depends=["image-tool"], stype="post-boot")], "config_params": ""}],
+    "systemimage": {
+      "osdistro": {"scripts": [script("base", stype="post-boot")], "config_params": ""},
+      "scripts": [script("image-tool", depends=[script("base")], stype="post-boot")],
+      "systemgroups": [{"scripts": [script("image-group-tool", stype="post-boot")]}],
+    },
+    "config_params": "",
+    "config": mpcc_config(["base", "group-tool", "image-group-tool", "image-tool", "own"], {"a": 1}),
+  }
+  js.session.routes["systems/?self"] = system
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "group-tool", "image-group-tool", "image-tool", "own"]
+  assert plugin.ran.index("base") < plugin.ran.index("image-tool") < plugin.ran.index("group-tool")
+  assert plugin.entities[0]["config_params"] == {"a": 1}
+  assert plugin.failed is False
+
+
+def test_a_script_missing_from_the_entity_fails_the_run(js, plugin, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity(config=mpcc_config(["base", "ghost"], {}))
+  plugin.handle_jobs()
+  assert plugin.ran == ["base"]
+  assert plugin.failed is True
+  assert js.job_updates == [("script-runner", 3, None)]
+
+
+def test_an_older_mpcc_config_falls_back_to_the_layers(js, plugin, monkeypatch):
+  # before #269 the mPCC served config_params in `config` as the last layer's string, and no scripts
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity(config={"config_params": "c: entity\n"})
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "group-tool", "image-tool"]
+  assert plugin.entities[0]["config_params"] == {"a": "distro", "b": "group", "c": "entity"}
