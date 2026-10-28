@@ -170,6 +170,132 @@ class script_runner(JobServerPlugin):
       print("Error: Corrupted entity found, cannot continue.")
       exit(1)
 
+    # merge the scripts and config_params from distro -> system groups ->
+    # image -> system.  The mPCC does the merge and serves it as `config`;
+    # an mPCC from before #269 doesn't, so merge the layers here instead.
+    merged = self.mpccMerge(entity, scriptMode)
+    if merged is None:
+      merged = self.layerMerge(entity, scriptMode)
+    scripts, scriptDeps, entity['config_params'] = merged
+
+    # add the mprovURL to the entity. 
+    entity['mprovURL'] = self.js.mprovURL
+    
+    # only add the API key for images that will be sync'ed 
+    # to registered machines only.
+    # nads images are public, so don't sync the api key.
+    if entityId == "nads" and sysimage:
+      entity['apikey'] = ""
+    else:
+      # add our apikey to the entity
+      entity['apikey'] = self.js.apikey
+
+    # print(scriptDeps)
+    # resolve our dependancies
+    scriptDeps=self.depResolve(scriptDeps)
+    # print(scripts)
+
+    # make sure our local tmp dir exists
+    os.makedirs(self.scriptTmpDir, exist_ok=True)
+    
+    # output the entity to a json file
+    with open(self.scriptTmpDir + "/entity.json", "w") as entFile:
+      entFile.write(json.dumps(entity))
+    
+    # all argument and entity validation has passed; now, and only now,
+    # keep users out while the scripts run.  Creating it earlier would
+    # lock users out of the node on any bad invocation (#173).
+    file_path = Path("/etc/nologin")
+    try:
+      file_path.touch()
+    except:
+      pass
+    try:
+      for step in scriptDeps:
+        threads = []
+        for script in step:
+          # download the script and thread it out within this step.
+          print(f"Running {scripts[script]['filename']}")
+          t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
+          t.start()
+          threads.append(t)
+
+          # wait for the threads in this step to finish.
+        for t  in threads:
+          t.join()
+      # if any script failed, or never ran, report failure instead of success (#174)
+      failures = [(name, rc) for name, rc in self.scriptResults.items() if rc != 0]
+      if failures:
+        self.failed = True
+        for name, rc in failures:
+          print(f"Error: script '{name}' failed: {rc}")
+        print(f"script-runner: {len(failures)} script(s) failed.")
+        self.set_job_failure()
+      # remove the entity file.
+      os.unlink(self.scriptTmpDir + "/entity.json")
+    finally:
+      # lift the login block however we leave: clean run or error (#173).
+      try:
+        os.unlink("/etc/nologin")
+      except:
+        pass
+    if not failures:
+      print("script-runner complete.")
+
+  def mpccMerge(self, entity, scriptMode):
+    '''
+    Use the merge the mPCC serves as the entity's `config` (#269): its
+    config_params, and its scripts in order, looked up in the entity's layers
+    for their file, type and dependencies.
+
+      Returns:
+        (scripts, scriptDeps, config_params), or None if the mPCC doesn't
+        serve the merge.
+    '''
+    config = entity.get('config')
+    if not isinstance(config, dict) or not isinstance(config.get('config_params'), dict) \
+        or not isinstance(config.get('scripts'), list):
+      return None
+
+    # every script object in the entity's layers, by slug
+    layers = [entity, entity.get('osdistro')]
+    layers += entity.get('systemgroups') or []
+    image = entity.get('systemimage')
+    if isinstance(image, dict):
+      layers += [image] + (image.get('systemgroups') or [])
+    found = {}
+    for layer in layers:
+      if not isinstance(layer, dict):
+        continue
+      for script in layer.get('scripts') or []:
+        if isinstance(script, dict):
+          found.setdefault(script['slug'], script)
+
+    scriptDeps = {}
+    scripts = {}
+    for slug in config['scripts']:
+      script = found.get(slug)
+      if script is None:
+        # it would run, but we can't tell what it is or where to get it.
+        print(f"Error: script '{slug}' is in the mPCC's config but not in the entity.")
+        self.scriptResults[slug] = "error: not found in the entity"
+        continue
+      scriptType = script['scriptType']
+      if (scriptType['slug'] if isinstance(scriptType, dict) else scriptType) != scriptMode:
+        continue
+      # dependsOn is a list of objects or of slugs, depending on the nesting
+      scriptDeps[slug] = [dep['slug'] if isinstance(dep, dict) else dep for dep in script['dependsOn']]
+      scripts[slug] = script
+    return scripts, scriptDeps, config['config_params']
+
+  def layerMerge(self, entity, scriptMode):
+    '''
+    Merge the scripts and config_params from the entity's own layers (distro
+    -> system groups -> entity), for an mPCC that doesn't serve `config`.
+
+      Returns:
+        (scripts, scriptDeps, config_params)
+    '''
     # merge the scripts from distro -> system_groups -> entity
 
     # we should iterate in all the scripts.  Let's process that into a dependancy tree.
@@ -265,71 +391,7 @@ class script_runner(JobServerPlugin):
         pass
               
     # print(yaml_merged)
-    entity['config_params'] = yaml_merged
-
-    # add the mprovURL to the entity. 
-    entity['mprovURL'] = self.js.mprovURL
-    
-    # only add the API key for images that will be sync'ed 
-    # to registered machines only.
-    # nads images are public, so don't sync the api key.
-    if entityId == "nads" and sysimage:
-      entity['apikey'] = ""
-    else:
-      # add our apikey to the entity
-      entity['apikey'] = self.js.apikey
-
-    # print(scriptDeps)
-    # resolve our dependancies
-    scriptDeps=self.depResolve(scriptDeps)
-    # print(scripts)
-
-    # make sure our local tmp dir exists
-    os.makedirs(self.scriptTmpDir, exist_ok=True)
-    
-    # output the entity to a json file
-    with open(self.scriptTmpDir + "/entity.json", "w") as entFile:
-      entFile.write(json.dumps(entity))
-    
-    # all argument and entity validation has passed; now, and only now,
-    # keep users out while the scripts run.  Creating it earlier would
-    # lock users out of the node on any bad invocation (#173).
-    file_path = Path("/etc/nologin")
-    try:
-      file_path.touch()
-    except:
-      pass
-    try:
-      for step in scriptDeps:
-        threads = []
-        for script in step:
-          # download the script and thread it out within this step.
-          print(f"Running {scripts[script]['filename']}")
-          t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
-          t.start()
-          threads.append(t)
-
-          # wait for the threads in this step to finish.
-        for t  in threads:
-          t.join()
-      # if any script failed, or never ran, report failure instead of success (#174)
-      failures = [(name, rc) for name, rc in self.scriptResults.items() if rc != 0]
-      if failures:
-        self.failed = True
-        for name, rc in failures:
-          print(f"Error: script '{name}' failed: {rc}")
-        print(f"script-runner: {len(failures)} script(s) failed.")
-        self.set_job_failure()
-      # remove the entity file.
-      os.unlink(self.scriptTmpDir + "/entity.json")
-    finally:
-      # lift the login block however we leave: clean run or error (#173).
-      try:
-        os.unlink("/etc/nologin")
-      except:
-        pass
-    if not failures:
-      print("script-runner complete.")
+    return scripts, scriptDeps, yaml_merged
 
   def runScript(self, filename):
     try:
