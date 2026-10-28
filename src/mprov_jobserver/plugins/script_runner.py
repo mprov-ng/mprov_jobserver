@@ -92,12 +92,7 @@ class script_runner(JobServerPlugin):
       print("Error: script-runner must be run in a 'runonce' jobserver session.")
       return False
     print("Jobserver Running script-runner...")
-    file_path = Path("/etc/nologin")
-    try: 
-      file_path.touch()
-    except:
-      pass
-      
+
     sysimage=False
     system=False
     scriptMode='image-gen' # should be img-gen or post-boot, def: img-gen
@@ -296,32 +291,43 @@ class script_runner(JobServerPlugin):
     with open(self.scriptTmpDir + "/entity.json", "w") as entFile:
       entFile.write(json.dumps(entity))
     
-    for step in scriptDeps:
-      threads = []
-      for script in step:
-        # download the script and thread it out within this step.
-        print(f"Running {scripts[script]['filename']}")
-        t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
-        t.start()
-        threads.append(t)
-
-        # wait for the threads in this step to finish.
-      for t  in threads:
-        t.join()
-    # if any script failed, or never ran, report failure instead of success (#174)
-    failures = [(name, rc) for name, rc in self.scriptResults.items() if rc != 0]
-    if failures:
-      self.failed = True
-      for name, rc in failures:
-        print(f"Error: script '{name}' failed: {rc}")
-      print(f"script-runner: {len(failures)} script(s) failed.")
-      self.set_job_failure()
-    # remove the entity file.
-    os.unlink(self.scriptTmpDir + "/entity.json")
+    # all argument and entity validation has passed; now, and only now,
+    # keep users out while the scripts run.  Creating it earlier would
+    # lock users out of the node on any bad invocation (#173).
+    file_path = Path("/etc/nologin")
     try:
-      os.unlink("/etc/nologin")
+      file_path.touch()
     except:
       pass
+    try:
+      for step in scriptDeps:
+        threads = []
+        for script in step:
+          # download the script and thread it out within this step.
+          print(f"Running {scripts[script]['filename']}")
+          t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
+          t.start()
+          threads.append(t)
+
+          # wait for the threads in this step to finish.
+        for t  in threads:
+          t.join()
+      # if any script failed, or never ran, report failure instead of success (#174)
+      failures = [(name, rc) for name, rc in self.scriptResults.items() if rc != 0]
+      if failures:
+        self.failed = True
+        for name, rc in failures:
+          print(f"Error: script '{name}' failed: {rc}")
+        print(f"script-runner: {len(failures)} script(s) failed.")
+        self.set_job_failure()
+      # remove the entity file.
+      os.unlink(self.scriptTmpDir + "/entity.json")
+    finally:
+      # lift the login block however we leave: clean run or error (#173).
+      try:
+        os.unlink("/etc/nologin")
+      except:
+        pass
     if not failures:
       print("script-runner complete.")
 
