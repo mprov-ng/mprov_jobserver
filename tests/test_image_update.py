@@ -9,6 +9,7 @@ fixture), so the tests check the commands and the files written.
 import copy
 import json
 import os
+import subprocess
 
 import pytest
 import yaml
@@ -55,6 +56,17 @@ def plugin(js, images, commands, monkeypatch):
   plugin = image_update(js)
   plugin.imageDir = str(images)
   return plugin
+
+
+@pytest.fixture
+def recorded_processes(monkeypatch):
+  """ Record calls to subprocess.run instead of running them.  Use after no_processes. """
+  runs = []
+  def run(argv, **kwargs):
+    runs.append((argv, kwargs))
+    return subprocess.CompletedProcess(argv, 0)
+  monkeypatch.setattr(subprocess, "run", run)
+  return runs
 
 
 def no_dependent_jobs(js):
@@ -188,6 +200,36 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
+def test_dracut_gets_only_real_modules_of_the_image_kernel(js, plugin, images, commands):
+  # dracut stops at a built-in or unknown module and drops every driver
+  # after it (#206), so those are left out of --add-drivers.
+  data = image()
+  data["osdistro"]["initial_mods"] = "virtio_scsi,virtio_pci,e1000,nosuchmod,,e1000,sd_mod"
+  pending_build(js, data)
+  (images / "compute/lib/modules/4.18.0-553.el8_10.x86_64").mkdir(parents=True)
+  commands.fail = ["-n virtio_pci ", "-n nosuchmod "]
+  plugin.handle_jobs()
+
+  assert commands.matching("modinfo -k 4.18.0-553.el8_10.x86_64 -n virtio_pci ")
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "virtio_scsi e1000 sd_mod"' in cmd for cmd in dracut)
+  assert job_states(js) == [(4, 9)]
+
+
+def test_dracut_module_needs_to_be_a_module_of_every_image_kernel(js, plugin, images, commands):
+  data = image()
+  data["osdistro"]["initial_mods"] = "e1000,virtio_pci"
+  pending_build(js, data)
+  for kernel in ("4.18.0-1.el8.x86_64", "4.18.0-2.el8.x86_64"):
+    (images / "compute/lib/modules" / kernel).mkdir(parents=True)
+  # built in on only one of the two kernels
+  commands.fail = ["-k 4.18.0-2.el8.x86_64 -n virtio_pci "]
+  plugin.handle_jobs()
+
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "e1000"' in cmd for cmd in dracut)
+
+
 def test_script_runner_config_is_runonce_script_runner(js, plugin, images, commands, monkeypatch):
   # Capture jobserver.yaml before it's removed, when the script runs.
   seen = {}
@@ -204,13 +246,40 @@ def test_script_runner_config_is_runonce_script_runner(js, plugin, images, comma
   assert "- !include plugins/*.yaml" in seen["config"]
 
 
-def test_root_password_is_set_in_the_image(js, plugin, images, commands):
+def test_root_password_is_set_in_the_image(js, plugin, images, commands, recorded_processes):
   data = image()
   data["osdistro"]["rootpw"] = "s3cret"
   pending_build(js, data)
   plugin.handle_jobs()
-  [cmd] = commands.matching("passwd root")
-  assert f"chroot {images}/compute passwd root" in cmd
+  passwd_runs = [run for run in recorded_processes if "passwd" in run[0]]
+  assert len(passwd_runs) == 1
+  argv, kwargs = passwd_runs[0]
+  assert argv == ["chroot", f"{images}/compute", "passwd", "root"]
+  feed = kwargs["input"]
+  if isinstance(feed, bytes):
+    feed = feed.decode()
+  # the password reaches passwd's stdin: the new password, then the confirmation
+  assert feed.count("s3cret") == 2
+
+
+def test_root_password_never_reaches_process_argv(js, plugin, images, commands, recorded_processes):
+  """The password must never be visible in a shell command line or any argv (#168)."""
+  data = image()
+  data["osdistro"]["rootpw"] = "s3cret"
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert not [cmd for cmd in commands.run if "s3cret" in cmd]
+  for argv, _ in recorded_processes:
+    assert all("s3cret" not in arg for arg in argv)
+
+
+def test_root_password_never_printed_to_daemon_output(js, plugin, images, commands, recorded_processes, capsys):
+  """The per-image debug print must not dump rootpw into the daemon log (#168)."""
+  data = image()
+  data["osdistro"]["rootpw"] = "s3cret"
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert "s3cret" not in capsys.readouterr().out
 
 
 def test_distro_build_failure_fails_the_job(js, plugin, commands):

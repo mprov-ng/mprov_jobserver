@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-10-23T13:59:16.772Z",
+  "updatedAt": "2026-10-27T23:59:36.123Z",
   "command": "update",
-  "gitHead": "be981f76a57888f8aee18ac53dc401c71121c304",
+  "gitHead": "77e99f2234f7c3e88bbb81586a7c06d4bb26f400",
   "model": "qwen38-flash-fp8"
 }

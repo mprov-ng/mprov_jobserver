@@ -1,6 +1,6 @@
 import shutil
 from threading import local
-from .plugin import JobServerPlugin
+from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_marked_dir
 import os
 import json
 import sys
@@ -9,6 +9,9 @@ class image_sync(JobServerPlugin):
   jobModule = 'image-sync'
   imageDir = ""
   imageList = None
+  # The declared mprov data root; imageDir must sit inside it so the
+  # end-of-sync sweep can only ever touch mprov-owned space (#171).
+  dataRoot = None
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -17,7 +20,16 @@ class image_sync(JobServerPlugin):
       print("                   : image-sync nodes are SOURCE nodes for images!")
       print("                   : and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)
-    return super().load_config()
+    if not super().load_config():
+      return False
+    # The sweep at the end of handle_jobs deletes directories under
+    # imageDir, so refuse to start unless imageDir sits inside a data
+    # root the operator declared (#171).
+    if not self.dataRoot or not path_is_under(self.imageDir, self.dataRoot):
+      print("Configuration Error: image-sync imageDir '" + str(self.imageDir) + "' must be inside dataRoot '" + str(self.dataRoot) + "'.")
+      print("                   : Refusing to run: the end-of-sync sweep deletes directories under imageDir.")
+      sys.exit(1)
+    return True
 
   def handle_jobs(self):
     
@@ -85,6 +97,8 @@ class image_sync(JobServerPlugin):
         with self.js.session.get(self.js.mprovURL + 'images/' + image, stream=True) as remoteImage:
           remoteImage.raise_for_status()
           os.makedirs(self.imageDir + '/' + image,exist_ok=True)
+          # mark it as mprov-owned so the sweep below may clean it up (#171)
+          mark_mprov_dir(self.imageDir + '/' + image)
           with open(self.imageDir + '/' + image + '/' + image + '.img', 'wb') as localFile:
             for chunk in remoteImage.iter_content(chunk_size=8192):
               localFile.write(chunk)
@@ -131,12 +145,18 @@ class image_sync(JobServerPlugin):
     print("Scanning for haning images... " + self.imageDir)
     for entry in os.listdir(self.imageDir):
       # print(entry)
-      if os.path.isdir(self.imageDir + '/' + entry):
+      entryPath = self.imageDir + '/' + entry
+      if os.path.isdir(entryPath):
         # see if this entry is in our image list
         if not os.path.basename(entry) in self.imageList:
           # Nope doesn't seem to be there, doesn't need to exist on disk then.
-          #print("rm -rf " + self.imageDir + '/' + entry)
-          print("Warn: Removed unknown image directory: " + self.imageDir + '/' + entry)
-          shutil.rmtree(self.imageDir + '/' + entry)
+          # But only if we own it: without our marker this directory is
+          # somebody else's data and we must never delete it (#171).
+          if not is_mprov_marked_dir(entryPath):
+            print("Warn: leaving unowned directory alone (no mprov marker): " + entryPath)
+            continue
+          #print("rm -rf " + entryPath)
+          print("Warn: Removed unknown image directory: " + entryPath)
+          shutil.rmtree(entryPath)
 
         

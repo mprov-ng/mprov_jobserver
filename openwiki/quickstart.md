@@ -37,7 +37,7 @@ Useful CLI flags (global): `-c <configfile>`, `-r` runonce mode, `-d` do not reg
 
 ## Things to watch out for
 
-- **Plugin coupling is enforced at runtime**: `image-update`, `image-delete` peers, `image-sync` and `repo-sync` hard-exit unless `mprov-webserver` is also enabled (`sys.exit` in `load_config`).
+- **Plugin coupling is enforced at runtime**: `image-update`, `image-delete` peers, `image-sync` and `repo-sync` hard-exit unless `mprov-webserver` is also enabled (`sys.exit` in `load_config`). `image-sync`/`repo-sync` also require their sync directory to sit inside a declared `dataRoot` so the cleanup sweep can only touch mprov-owned space.
 - Plugins are **threads, not processes**; a crash in one module (many call `sys.exit(1)`) takes down the whole daemon.
 - Config keys are mapped onto plugin class attributes by name; unknown keys print an error but do not stop startup (`src/mprov_jobserver/plugins/plugin.py`).
 - The image build path uses heavy `os.system`/chroot of the partially built image by design — treat the job server as requiring root and trusted mPCC input.

@@ -53,11 +53,13 @@ class dnsmasq(JobServerPlugin):
     plugin's working directory, and theirs would move ours mid-build (#91).
     Everything uses absolute paths, or _cwd for commands.  A file is only
     copied once it has built, so a failed build is retried on the next start.
+    The build tools come with the image (mkisofs is genisoimage in the
+    Dockerfile): installing them here raced the image builds' dnf on a
+    fresh job server and killed this plugin's thread (#207).
     '''
     buildDir = tempfile.mkdtemp(prefix="mprov-ipxe-")
     src = f"{buildDir}/ipxe/src"
     try:
-      sh.dnf(['-y', 'install', 'mkisofs'])
       print(f"\tCheck out iPXE code to {buildDir}/ipxe/")
       try:
         sh.git(['clone', 'https://github.com/ipxe/ipxe'], _cwd=buildDir)
@@ -94,6 +96,9 @@ class dnsmasq(JobServerPlugin):
         return
       self.copy_ipxe_file(f"{src}/bin-x86_64-efi/snponly.efi", "snponly_ipv4.efi")
       print("Build Process finished.  Errors appear above.")
+    except Exception as e:
+      # don't let a failed build end the plugin's thread; it's retried on the next start.
+      print(f"Error: unable to build iPXE: {e}")
     finally:
       shutil.rmtree(buildDir, ignore_errors=True)
 
