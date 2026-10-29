@@ -69,9 +69,10 @@ class image_update(JobServerPlugin):
       jobservers.append(jobserver)
     # now append our id
     jobservers.append(self.js.id)
+    # no needs_rebuild: we only add ourselves when the image doesn't need
+    # one, and sending False would clear a rebuild asked for since our GET (#226).
     data = {
       'slug': image,
-      'needs_rebuild': False,
       'jobservers': jobservers,
     }
     response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))

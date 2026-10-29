@@ -59,8 +59,19 @@ def test_downloads_a_new_image_and_adds_itself(js, plugin, images):
   assert (images / "compute" / "compute.vmlinuz").read_bytes() == b"KERNEL"
   assert versions(images) == {"compute": 3}
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
   ]
+
+
+def test_adding_itself_keeps_a_requested_rebuild(js, plugin, images):
+  # the PATCH sent needs_rebuild: false, so syncing an image cleared any
+  # rebuild asked for on it (#226)
+  js.session.routes.update({"images/": [{"slug": "compute"}], "systemimages/compute/": dict(image(jobservers=[7]), needs_rebuild=True)})
+  serve_files(js)
+  plugin.handle_jobs()
+  [(method, path, data)] = js.session.writes
+  assert path == "systemimages/compute/?addjs"
+  assert "needs_rebuild" not in data
 
 
 def test_current_image_isnt_downloaded_again(js, plugin, images):
