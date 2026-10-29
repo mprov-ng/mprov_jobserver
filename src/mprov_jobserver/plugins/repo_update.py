@@ -51,6 +51,8 @@ class repo_update(JobServerPlugin):
     # grab the list of repos to update.
     self.repoList = {}
     response = self.js.session.get( f"{self.js.mprovURL}jobs/?jobserver={str(self.js.id)}&module={self.jobModule}&status=2")
+    # A job that fails here or below fails by its id, and the others carry
+    # on: returning would leave them running (#145).
     for job in response.json():
       # get the ostype from the repo.
       
@@ -58,20 +60,23 @@ class repo_update(JobServerPlugin):
         params = job['params']
       except:
         print("Error: Repo Update with no repo_id, cannot parse params.")
-        self.js.update_job_status(self.module, 3, jobid=job['id'])
-        return
+        self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
+        continue
       try:
         self.repoList[params['repo_id']] = job['id']
       except:
         print("Error: Repo Update Job Failed, corrupted params")
-        self.js.update_job_status(self.module, 3, jobid=job['id'])
-        return
+        self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
+        continue
     if not os.path.exists(self.repoDir):
       try:
         os.makedirs(self.repoDir, exist_ok=True)
       except:
         print("Error: unable to make repodir:" + self.repoDir)
-        self.js.update_job_status(self.module, 3, jobquery='jobserver=' + self(self.js.id) + "&status=2")
+        # no repo is being synced yet, so fail every job we claimed.
+        for jid in self.repoList.values():
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        return
     # create an empty robots.txt file.
     with open(f'{self.repoDir}/robots.txt', 'w') as fp:
       pass
@@ -88,10 +93,12 @@ class repo_update(JobServerPlugin):
           repo = response.json()
         except:
           print("Error: Unable to parse response.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         if repo['ostype'] == None:
           print(f"Error: Repo {repo['id']} doesn't have an OS type set.  Exiting.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
         try:
           print(f".repo_update_mod.{repo['ostype']}")
           mod = importlib.import_module(f".repo_update_mod.{repo['ostype']}", "mprov_jobserver.plugins")
@@ -99,12 +106,14 @@ class repo_update(JobServerPlugin):
         except BaseException as err:
           print("Error: Unable to import OS Repo Module.")
           print(f"Exception: {err=}, {type(err)=}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         
         try:
           repo_update = update_klass(self.js)
         except:
           print(f"Error: Unable to instantiate UpdateRepo class on {repo['ostype']}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         repo_update.repo = repo
         repo_update.repoDir = self.repoDir
