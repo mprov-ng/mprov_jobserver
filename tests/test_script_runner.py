@@ -415,6 +415,10 @@ def test_entity_json_does_not_outlive_a_crash_in_the_run(js, plugin, tmp_path, m
   broken = script("broken")
   del broken["filename"]  # print() in the run loop raises KeyError on it
   js.session.routes["systemimages/compute/"] = entity(scripts=[broken])
+  # scripts in the same step may already be running when the loop raises,
+  # and can outlive handle_jobs(); keep them off the entity file it removes,
+  # or they fail later, in whichever test runs next.
+  plugin.runScript = lambda filename: None
   with pytest.raises(KeyError):
     plugin.handle_jobs()
   assert not (tmp_path / "scripts" / "entity.json").exists()
