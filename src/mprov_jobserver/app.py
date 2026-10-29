@@ -308,7 +308,7 @@ class JobServer ():
         'name': myHostname,
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
-        'one_minute_load': os.getloadavg()[2]
+        'one_minute_load': os.getloadavg()[0]
     }
     # Keep heartbeating under high load: the mPCC deletes a job server that
     # goes quiet for a minute, and it already steers image downloads to the
