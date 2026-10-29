@@ -38,7 +38,7 @@ def test_reposync_uses_an_absolute_destdir_without_chdir(plugin, js, monkeypatch
   assert "./" not in cmd
   assert os.path.isdir(f"{plugin.repoDir}/5")
   # the repo is marked as hosted here, and the job done
-  assert js.session.patches == [("repos/5/", {"id": 5, "hosted_by": [1], "update": False})]
+  assert js.session.patches == [("repos/5/", {"id": 5, "hosted_by": [1]})]
   assert js.job_updates[-1][:2] == ("repo-update", 4)
 
 

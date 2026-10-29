@@ -3,6 +3,7 @@ mprov_webserver serves the job server's image and repo directories over
 HTTP.  It sends 404s for images while it's overloaded, so clients retry on
 another job server.  Each test runs a real server on localhost.
 """
+import http.client
 import socket
 import threading
 import time
@@ -92,6 +93,52 @@ def test_plugin_serves_until_the_job_server_stops(js, root):
   assert not thread.is_alive()
 
 
+def test_defaults_to_serving_export():
+  assert mprov_webserver.rootDir == "/export/"
+  assert mProvHTTPServer.rootDir == "/export/"
+
+
+@pytest.mark.parametrize("unsafe", ["", "/", "/no/such/dir"])
+def test_unsafe_root_dir_serves_nothing(js, tmp_path, monkeypatch, unsafe):
+  """
+  An empty rootDir used to serve the working directory, which is / under
+  systemd, so the API key in /etc/mprov/jobserver.yaml was one GET away
+  (#214).  The server must close the connection instead.
+  """
+  (tmp_path / "secret").write_text("apikey")
+  monkeypatch.chdir(tmp_path)
+  server = mProvHTTPServer(("127.0.0.1", 0), mProvHTTPReqestHandler)
+  server.rootDir = unsafe
+  server.js = js
+  thread = threading.Thread(target=server.serve_forever, daemon=True)
+  thread.start()
+  try:
+    for path in ("/secret", "/etc/hostname"):
+      with pytest.raises((urllib.error.URLError, ConnectionError, http.client.HTTPException)):
+        get(server, path)
+  finally:
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.parametrize("unsafe", ["", "/", "/no/such/dir"])
+def test_plugin_refuses_to_start_on_an_unsafe_root_dir(js, unsafe, capsys):
+  with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+  plugin = mprov_webserver(js)
+  plugin.hostName, plugin.serverPort, plugin.rootDir = "127.0.0.1", port, unsafe
+  thread = threading.Thread(target=plugin.handle_jobs, daemon=True)
+  thread.start()
+  thread.join(5)
+  assert not thread.is_alive()
+  assert plugin.failed
+  assert "not started" in capsys.readouterr().out
+  # nothing is listening on the port
+  with socket.socket() as s:
+    assert s.connect_ex(("127.0.0.1", port)) != 0
+
+
 @pytest.mark.xfail(strict=True, reason="checkFileSize() compares the filesystem path with /images/, so the connection limit never applies (#148)")
 def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
   monkeypatch.setattr(mProvHTTPReqestHandler, "connCount", mProvHTTPReqestHandler.maxConn)
@@ -101,9 +148,14 @@ def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
   assert js.register is False
 
 
-@pytest.mark.xfail(strict=True, reason="under high load do_GET() reads self.js.config_data['loadmon']; the handler has no js (#147)")
 def test_high_load_turns_image_requests_away(js, server, monkeypatch):
   monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
   with pytest.raises(urllib.error.HTTPError) as err:
     get(server, "/images/compute/compute.img")
   assert err.value.code == 404
+
+
+def test_high_load_serves_images_when_loadmon_is_off(js, server, monkeypatch):
+  monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
+  js.loadmon = False
+  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")

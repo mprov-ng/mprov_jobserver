@@ -6,6 +6,8 @@ __init__ (which would log in and register), except where __init__ is what's
 being tested.
 """
 import json
+import os
+import sys
 import types
 
 import pytest
@@ -173,12 +175,32 @@ def test_registration_heartbeat_sends_the_one_minute_average(server, monkeypatch
   assert data["one_minute_load"] == 0.25
 
 
-@pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="register_server() reads loadmon from config_data, where it never is (#147)")
-def test_high_load_skips_the_heartbeat(server, monkeypatch):
+@pytest.mark.parametrize("loadmon", [True, False])
+def test_high_load_still_heartbeats(server, monkeypatch, loadmon):
+  """
+  A job server that goes quiet for a minute is deleted by the mPCC as
+  stale, so high load must not stop the heartbeat (#113); reading loadmon
+  used to raise KeyError here (#147).
+  """
   monkeypatch.setattr(app.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
+  server.loadmon = loadmon
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 5}
   server.register_server()
-  assert server.session.writes == []
+  assert [(method, path) for method, path, _ in server.session.writes] == [("POST", "jobservers/")]
+
+
+def test_high_load_is_logged_once(server, monkeypatch, capsys):
+  load = [99.0]
+  monkeypatch.setattr(app.os, "getloadavg", lambda: (load[0], load[0], load[0]))
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 5}
+  server.register_server()
+  server.register_server()
+  load[0] = 0.1
+  server.register_server()
+  out = capsys.readouterr().out
+  assert out.count("high load") == 1
+  assert out.count("load back to normal") == 1
+  assert len(server.session.writes) == 3
 
 
 # load_config() and __init__
@@ -290,3 +312,81 @@ def test_runonce_runs_each_module_once_and_waits_for_it(server, monkeypatch):
   assert Recorder.ran == [server]
   # runonce doesn't heartbeat
   assert server.session.writes == []
+
+
+class ScriptRunnerModule:
+  """ Stand-in for the mprov_jobserver.plugins.script_runner module attribute,
+  so start() instantiates the Runner class instead of the real plugin. """
+
+  def __init__(self, runner):
+    self.script_runner = runner
+
+
+def run_script_runner_once(server, monkeypatch, tmp_path, run_script):
+  """ Run a script-runner runonce session through start(), with each script's
+  running replaced by ``run_script`` (which records into scriptResults).
+  Returns start()'s exit code. """
+  import mprov_jobserver.plugins
+  import mprov_jobserver.plugins.script_runner as script_runner_module
+  from mprov_jobserver.plugins.script_runner import script_runner
+
+  class Runner(script_runner):
+    runScript = run_script
+
+  monkeypatch.setattr(mprov_jobserver.plugins, "script_runner",
+                      ScriptRunnerModule(Runner), raising=True)
+  # start() reloads the plugin module before instantiating it; keep it from
+  # replacing the stub above
+  monkeypatch.setattr(app.importlib, "reload", lambda module: module)
+  monkeypatch.setattr(sys, "argv", ["mprov_jobserver", "-i", "compute"])
+  server.session.routes["systemimages/compute/"] = {
+    "name": "compute", "slug": "compute",
+    "osdistro": {"scripts": [], "config_params": ""},
+    "systemgroups": [], "scripts": [
+      {"slug": "good", "filename": "http://mpcc/media/scripts/good.sh",
+       "scriptType": {"slug": "image-gen"}, "dependsOn": []},
+      {"slug": "bad", "filename": "http://mpcc/media/scripts/bad.sh",
+       "scriptType": {"slug": "image-gen"}, "dependsOn": []}],
+    "config_params": "",
+  }
+  # stub script_runner's host touches: the nologin file and the entity cleanup
+  monkeypatch.setattr(script_runner_module, "Path",
+                      lambda p: types.SimpleNamespace(touch=lambda: None))
+  monkeypatch.setattr(os, "unlink", lambda p: None)
+  server.jobmodules = ["script-runner"]
+  server.config_data = {}
+  server.runonce = True
+  server.heartbeatInterval = 10
+  server.firstrun = True
+  # the pending script-runner job the failure report moves to failed
+  server.session.routes["jobs/?search=script-runner"] = [{"id": 11, "status": 1}]
+  # start() spawns (and joins) the module thread itself; keep its scratch out
+  # of the real /tmp
+  real_init = Runner.__init__
+
+  def init(self, js):
+    real_init(self, js)
+    self.scriptTmpDir = str(tmp_path)
+  monkeypatch.setattr(Runner, "__init__", init)
+  return server.start()
+
+
+def test_runonce_exits_nonzero_when_a_script_fails(server, monkeypatch, tmp_path):
+  # a failing script fails its plugin thread (#174); the runonce process exits
+  # nonzero instead of reporting success, and the failure is reported to the mPCC
+  def run_script(self, filename):
+    self.scriptResults[filename] = 1 if "bad" in filename else 0
+  assert run_script_runner_once(server, monkeypatch, tmp_path, run_script) == 1
+  assert server.failed_runonce_modules == ["script-runner"]
+  # the module's job was reported failed, not successful
+  [(_, data)] = server.session.patches
+  assert (data["id"], data["pk"], data["status"]) == (11, "script-runner", 3)
+
+
+def test_runonce_still_exits_zero_when_everything_succeeds(server, monkeypatch, tmp_path):
+  def run_script(self, filename):
+    self.scriptResults[filename] = 0
+  assert run_script_runner_once(server, monkeypatch, tmp_path, run_script) == 0
+  assert server.failed_runonce_modules == []
+  # runonce doesn't heartbeat and reports no failure
+  assert server.session.patches == []
