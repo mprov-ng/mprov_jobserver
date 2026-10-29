@@ -62,8 +62,13 @@ class image_update(JobServerPlugin):
 
   def updateImageJobservers(self):
 
-    # if we don't have an ~image path, make one.
-    os.makedirs(self.imageDir, exist_ok=True)
+    # if we don't have an ~image path, make one.  If we can't, there's
+    # nothing to host; handle_jobs() fails the claimed jobs (#144).
+    try:
+      os.makedirs(self.imageDir, exist_ok=True)
+    except OSError as err:
+      print(f"Error: Unable to make imageDir: {self.imageDir}: {err}")
+      return
 
     # see if we have a image-versions file
     if not os.path.exists(self.imageDir + '/image-versions'):
@@ -274,7 +279,9 @@ class image_update(JobServerPlugin):
         os.makedirs(self.imageDir, exist_ok=True)
       except:
         print("Error: Unable to make imageDir: " + self.imageDir)
-        self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        # no image is being built yet, so fail every job we claimed (#144).
+        for jid in self.imageList.values():
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         return
     
     # now we iterate over our imageList, and build the image(s)
@@ -328,6 +335,7 @@ class image_update(JobServerPlugin):
         os.system(f"/bin/cp -f /etc/resolv.conf {imgDir}/etc/resolv.conf")
         if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
 
         # the jobserver.yaml we write under the image holds the fleet API
@@ -441,6 +449,9 @@ class image_update(JobServerPlugin):
         # Check if 'updateBootFiles' exists and is callable
         if hasattr(image_update, 'updateBootFiles') and callable(getattr(image_update, 'updateBootFiles', None)):
           image_update.updateBootFiles() # You can call it
+          # it fails the job itself; don't pack and register the image (#144).
+          if image_update.threadOk != True:
+            return
         else:
           print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
 
@@ -451,7 +462,7 @@ class image_update(JobServerPlugin):
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
         if os.system(busybox + ' tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
-          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
         endTime = time.time()
         lapsed = endTime - startTime
@@ -487,4 +498,4 @@ class image_update(JobServerPlugin):
       
       else: 
           print(f"Error handling job for {image} server returned {response.status_code} for request {self.js.mprovURL + query}")
-          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
