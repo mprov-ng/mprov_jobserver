@@ -384,7 +384,7 @@ class image_update(JobServerPlugin):
         busybox = busyboxDir + '/busybox'
         if os.system(f"wget -q -O {busybox} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
           print("Error: unable to download busybox")
-          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
         # don't run the download unless it is the ELF binary we asked for;
         # wget -O leaves error pages and partial files in place (#170).
@@ -395,7 +395,7 @@ class image_update(JobServerPlugin):
           magic = b""
         if magic != b"\x7fELF":
           print("Error: downloaded busybox is not a valid ELF binary, refusing to run it")
-          self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
         os.chmod(busybox, 0o755)
 
