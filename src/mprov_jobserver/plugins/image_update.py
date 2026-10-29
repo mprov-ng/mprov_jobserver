@@ -8,6 +8,8 @@ import json
 import time
 import urllib.parse
 
+import requests
+
 import yaml
 from jinja2 import Environment, PackageLoader, select_autoescape
 
@@ -60,6 +62,52 @@ class image_update(JobServerPlugin):
       image_update.load_config()
     return super().load_config()
 
+  def addAsHost(self, image, imageData):
+    # tell the mPCC we host this image too.
+    jobservers = []
+    for jobserver in imageData['jobservers']:
+      jobservers.append(jobserver)
+    # now append our id
+    jobservers.append(self.js.id)
+    data = {
+      'slug': image,
+      'needs_rebuild': False,
+      'jobservers': jobservers,
+    }
+    response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
+    if response.status_code <= 199 or response.status_code >= 300:
+      print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
+
+  def pullImage(self, image):
+    # Pull the image, its initramfs and its kernel from another job server,
+    # through the mPCC's redirect.  Each goes to a temporary file, moved into
+    # place only once all three are complete, so a failed pull (e.g. every
+    # host is full and answers 404) leaves what we had.  False if any
+    # download failed; we try again on the next pass (#142).
+    imgDir = self.imageDir + '/' + image
+    pulled = []
+    try:
+      os.makedirs(imgDir, exist_ok=True)
+      for remote, local in [(image, image + '.img'), (image + '.initramfs', image + '.initramfs'), (image + '.vmlinuz', image + '.vmlinuz')]:
+        tmp = imgDir + '/.' + local + '.pull'
+        pulled.append((tmp, imgDir + '/' + local))
+        with self.js.session.get(self.js.mprovURL + 'images/' + remote, stream=True) as remoteImage:
+          remoteImage.raise_for_status()
+          with open(tmp, 'wb') as localFile:
+            for chunk in remoteImage.iter_content(chunk_size=8192):
+              localFile.write(chunk)
+    except (requests.RequestException, OSError) as err:
+      print(f"Error: Unable to pull image {image} from another job server, will try again: {err}")
+      for tmp, _ in pulled:
+        try:
+          os.unlink(tmp)
+        except FileNotFoundError:
+          pass
+      return False
+    for tmp, final in pulled:
+      os.replace(tmp, final)
+    return True
+
   def updateImageJobservers(self):
 
     # if we don't have an ~image path, make one.  If we can't, there's
@@ -87,8 +135,10 @@ class image_update(JobServerPlugin):
     # cycle through the images we should be serving and 
     # check our version(s) against the mPCC.
     imageList = []
-    if self.imageList is None:
-      imageList = []
+    if self.imageList is not None:
+      # only the configured images (#142)
+      imageList = list(self.imageList)
+    else:
       # no config for image list, so grab all of them from the mPCC
       response = self.js.session.get(f"{self.js.mprovURL}images/")
       #if we don't get a good reply, error out of this function only. We'll try again
@@ -135,48 +185,20 @@ class image_update(JobServerPlugin):
         imgVersions[image] = 0
       if imgVersions[image] == imageData['version']:
         # our image version matches, tell the mPCC about us.
-        jobservers = []
-        for jobserver in imageData['jobservers']:
-          jobservers.append(jobserver)
-        # now append our id
-        jobservers.append(self.js.id)
-        data = {
-          'slug': image,
-          'needs_rebuild': False,
-          'jobservers': jobservers,
-        }
-        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
-        if response.status_code <= 199 or response.status_code >= 300:
-          print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
+        self.addAsHost(image, imageData)
         continue
       # check our version against the mPCC version
       if imgVersions[image] != imageData['version']:
         if len(imageData['jobservers']) > 0:
           # if our version doesn't match, and there are job servers available, pull the image from someone else.
-          with self.js.session.get(self.js.mprovURL + 'images/' + image, stream=True) as remoteImage:
-            remoteImage.raise_for_status()
-            os.makedirs(self.imageDir + '/' + image,exist_ok=True)
-            with open(self.imageDir + '/' + image + '/' + image + '.img', 'wb') as localFile:
-              for chunk in remoteImage.iter_content(chunk_size=8192):
-                localFile.write(chunk)
-
-            # grab the initramfs
-            with self.js.session.get(self.js.mprovURL + 'images/' + image + '.initramfs', stream=True) as remoteImage:
-              remoteImage.raise_for_status()
-              os.makedirs(self.imageDir + '/' + image,exist_ok=True)
-              with open(self.imageDir + '/' + image + '/' + image + '.initramfs', 'wb') as localFile:
-                for chunk in remoteImage.iter_content(chunk_size=8192):
-                  localFile.write(chunk)
-          
-            # grab the kernel
-            with self.js.session.get(self.js.mprovURL + 'images/' + image + '.vmlinuz', stream=True) as remoteImage:
-              remoteImage.raise_for_status()
-              os.makedirs(self.imageDir + '/' + image,exist_ok=True)
-              with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
-                for chunk in remoteImage.iter_content(chunk_size=8192):
-                  localFile.write(chunk)
-            with open(self.imageDir + '/image-versions', "w") as vfile:
-              vfile.write(json.dumps(imgVersions))
+          if not self.pullImage(image):
+            continue # try again on the next pass.
+          # record the version we have now, or we'd pull it again every
+          # pass, and tell the mPCC about us (#142).
+          imgVersions[image] = imageData['version']
+          with open(self.imageDir + '/image-versions', "w") as vfile:
+            vfile.write(json.dumps(imgVersions))
+          self.addAsHost(image, imageData)
         # else:
         #   # if our version doesn't match, and there are no jobservers, submit an image-update job to the mPCC
         #   data = {
