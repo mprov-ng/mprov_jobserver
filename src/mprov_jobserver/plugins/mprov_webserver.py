@@ -44,10 +44,12 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     return stat.S_ISREG(st.st_mode) and st.st_size >= self.server.maxConnFileSize
 
   def refuseBusy(self):
-    # 404 will result in a retry from the mPCC/client hopefully to another server.
+    # 404 will result in a retry from the mPCC/client hopefully to another
+    # server: the mPCC HEADs each job server before redirecting a client,
+    # and skips one that refuses.  Keep heartbeating while full, or the
+    # mPCC deletes this job server after a minute, with its images'
+    # "Hosted By" and its jobs (#148).
     self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
-    if self.server.js is not None:
-      self.server.js.register = False
 
   def do_GET(self):
     print(mProvHTTPReqestHandler.connCount)
@@ -70,17 +72,15 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     if busy:
       self.refuseBusy()
       return None
-    # we are ok to serve.
+    # we are ok to serve; give the slot back however the download ends.
     try:
       return super().do_GET()
     finally:
       with mProvHTTPReqestHandler.connLock:
         mProvHTTPReqestHandler.connCount -= 1
-        free = mProvHTTPReqestHandler.connCount < mProvHTTPReqestHandler.maxConn
-      if free and self.server.js is not None:
-        self.server.js.register = True
 
   def do_HEAD(self):
+    # a HEAD never takes a slot: the mPCC probes with one per redirect.
     if self.isLimitedImage() and mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn:
       self.refuseBusy()
       return None

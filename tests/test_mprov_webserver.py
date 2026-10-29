@@ -156,6 +156,10 @@ def busy(js, monkeypatch):
   """ A server already at its connection limit, and registered with the mPCC. """
   js.register = True
   monkeypatch.setattr(mProvHTTPReqestHandler, "connCount", mProvHTTPReqestHandler.maxConn)
+  yield
+  # being full never stops the heartbeat: the mPCC would delete this job
+  # server after a minute, with its images' "Hosted By" (#148)
+  assert js.register is True
 
 
 def test_busy_server_turns_image_requests_away(js, server, busy):
@@ -164,13 +168,11 @@ def test_busy_server_turns_image_requests_away(js, server, busy):
   with pytest.raises(urllib.error.HTTPError) as err:
     get(server, "/images/compute/compute.img")
   assert err.value.code == 404
-  assert js.register is False
 
 
 @pytest.mark.parametrize("path", ["//images/compute/compute.img", "/osrepos/../images/compute/compute.img"])
 def test_busy_server_limits_image_paths_however_they_are_spelled(js, server, busy, path):
   assert raw_status(server, path) == 404
-  assert js.register is False
 
 
 def test_busy_server_refuses_image_heads(js, server, busy):
@@ -196,14 +198,41 @@ def test_busy_server_leaves_everything_else_alone(js, server, busy, path):
   assert mProvHTTPReqestHandler.connCount == mProvHTTPReqestHandler.maxConn
 
 
-def test_finished_image_download_turns_registration_back_on(js, server):
-  js.register = False
-  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
+def test_heads_never_take_a_slot(server, monkeypatch):
+  # the mPCC HEADs a job server before each redirect; that mustn't use up
+  # the limit
+  seen = []
+  head = webserver_module.SimpleHTTPRequestHandler.do_HEAD
+  def spy(self):
+    seen.append(mProvHTTPReqestHandler.connCount)
+    return head(self)
+  monkeypatch.setattr(webserver_module.SimpleHTTPRequestHandler, "do_HEAD", spy)
+  monkeypatch.setattr(mProvHTTPReqestHandler, "connCount", mProvHTTPReqestHandler.maxConn - 1)
+  for _ in range(3):
+    assert get(server, "/images/compute/compute.img", method="HEAD") == (200, b"")
+  assert seen == [mProvHTTPReqestHandler.maxConn - 1] * 3
+  assert mProvHTTPReqestHandler.connCount == mProvHTTPReqestHandler.maxConn - 1
+
+
+def test_refused_download_takes_no_slot(server, busy):
+  for _ in range(3):
+    with pytest.raises(urllib.error.HTTPError):
+      get(server, "/images/compute/compute.img")
+  assert mProvHTTPReqestHandler.connCount == mProvHTTPReqestHandler.maxConn
+
+
+def test_failed_download_gives_its_slot_back(server, monkeypatch):
+  # a client that hangs up mid-download raises out of the handler
+  def hang_up(self):
+    raise ConnectionResetError("client went away")
+  monkeypatch.setattr(webserver_module.SimpleHTTPRequestHandler, "do_GET", hang_up)
+  with pytest.raises((urllib.error.URLError, ConnectionError, http.client.HTTPException)):
+    get(server, "/images/compute/compute.img")
   for _ in range(100):
-    if js.register:
+    if mProvHTTPReqestHandler.connCount == 0:
       break
     time.sleep(0.01)
-  assert js.register is True
+  assert mProvHTTPReqestHandler.connCount == 0
 
 
 def test_only_image_downloads_count_toward_the_limit(server, monkeypatch):
