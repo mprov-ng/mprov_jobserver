@@ -1,6 +1,7 @@
 import importlib
 from .plugin import JobServerPlugin
 import os
+import stat
 import subprocess
 import sys
 import json
@@ -321,66 +322,88 @@ class image_update(JobServerPlugin):
           print("Error: Unable to install mprov_jobserver python module.")
           return
 
-        # check if the imagDir + /tmp/mprov exists and create it if not
-        os.makedirs(imgDir + '/tmp/mprov/plugins/', exist_ok=True)
-        
+        # the jobserver.yaml we write under the image holds the fleet API
+        # key, so it must be reachable only by us (#169).
+        mprovDir = imgDir + '/tmp/mprov'
+        jobserverYaml = mprovDir + '/jobserver.yaml'
+        os.makedirs(mprovDir, mode=0o700, exist_ok=True)
+        # the image tree is under our control, but the image we unpacked
+        # may have left a symlink or a directory owned by another uid at
+        # this path; refuse to write through it (#169).
+        st = os.lstat(mprovDir)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+          print(f"Error: {mprovDir} is not a directory owned by this user, failing job.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        os.chmod(mprovDir, 0o700)
+        os.makedirs(mprovDir + '/plugins', mode=0o700, exist_ok=True)
+        os.chmod(mprovDir + '/plugins', 0o700)
+
         # create a config file to /tmp for our script-runner instance.
         localConfig = [dict()]
         localConfig[0]['global'] = self.js.config_data['global']
         print(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True
-        # print(imgDir + '/tmp/mprov/jobserver.yaml')
-        with open(imgDir + '/tmp/mprov/jobserver.yaml',"w") as confFile:
+        try:
+          fd = os.open(jobserverYaml, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        except OSError as err:
+          print(f"Error: Unable to create {jobserverYaml}, failing job: {err}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as confFile:
           yaml.dump(localConfig, confFile)
           confFile.write("\n- !include plugins/*.yaml")
 
-        data = {
-          'imgDir': imgDir,
-          'image': imageDetails['slug'],
-        }
+        try:
+          data = {
+            'imgDir': imgDir,
+            'image': imageDetails['slug'],
+          }
 
-        # copy in our root keys from the distro
-        if 'rootsshkeys' in imageDetails['osdistro']:
-          if imageDetails['osdistro']['rootsshkeys'] is not None:
-            # the key material must land in the image tree, not on the build host (#175)
-            sshDir = imgDir + '/root/.ssh'
-            authKeys = sshDir + '/authorized_keys'
-            try:
-              os.makedirs(sshDir, mode=0o700, exist_ok=True)
-              os.chmod(sshDir, 0o700)
-              with open(authKeys, mode="w") as authkeys:
-                authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
-              os.chmod(authKeys, 0o600)
-            except OSError as err:
-              print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
-              self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-              return
-        
-        # set the root pw to the password in the distro
-        if 'rootpw' in imageDetails['osdistro']:
-          if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
-            print("Setting root password...")
-            # feed the password to the chrooted passwd over its stdin pipe,
-            # which is private to this (root) process; an `echo ... | passwd`
-            # shell command would expose it in the sh -c argv (#168).
-            subprocess.run(["chroot", imgDir, "passwd", "root"],
-                           input=f"{imageDetails['osdistro']['rootpw']}\n" * 2,
-                           text=True)
+          # copy in our root keys from the distro
+          if 'rootsshkeys' in imageDetails['osdistro']:
+            if imageDetails['osdistro']['rootsshkeys'] is not None:
+              # the key material must land in the image tree, not on the build host (#175)
+              sshDir = imgDir + '/root/.ssh'
+              authKeys = sshDir + '/authorized_keys'
+              try:
+                os.makedirs(sshDir, mode=0o700, exist_ok=True)
+                os.chmod(sshDir, 0o700)
+                with open(authKeys, mode="w") as authkeys:
+                  authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
+                os.chmod(authKeys, 0o600)
+              except OSError as err:
+                print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
+                self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+                return
+          
+          # set the root pw to the password in the distro
+          if 'rootpw' in imageDetails['osdistro']:
+            if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
+              print("Setting root password...")
+              # feed the password to the chrooted passwd over its stdin pipe,
+              # which is private to this (root) process; an `echo ... | passwd`
+              # shell command would expose it in the sh -c argv (#168).
+              subprocess.run(["chroot", imgDir, "passwd", "root"],
+                             input=f"{imageDetails['osdistro']['rootpw']}\n" * 2,
+                             text=True)
 
-        # now let's run our script-runner shell script.
-        with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
-            conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
-        # now let's run our script-runner shell script.
-        with open(os.open(imgDir + '/tmp/mprov/plugins/script-runner.yaml',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
-            conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
+          # now let's run our script-runner shell script.
+          with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
+              conf.write(jenv.get_template('image-update/script-runner.sh').render(data))
+          # now let's run our script-runner shell script.
+          with open(os.open(imgDir + '/tmp/mprov/plugins/script-runner.yaml',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
+              conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
 
-        if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
-          print("Error while running image-gen scripts via job server..")
-        
-        # remove the jobserver.yaml from /tmp/mprov/
-        if os.path.exists(imgDir +"/tmp/mprov/jobserver.yaml"):
-          os.unlink(imgDir + "/tmp/mprov/jobserver.yaml")
+          if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
+            print("Error while running image-gen scripts via job server..")
+        finally:
+          try:
+            os.unlink(jobserverYaml)
+          except FileNotFoundError:
+            pass
 
         # grab a copy of busybox into a root-only directory under the image
         # store.  A fixed /tmp path is world-writable: another user could
