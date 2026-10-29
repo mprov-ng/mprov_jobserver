@@ -163,12 +163,32 @@ def test_no_register_flag_skips_registration(server):
   assert server.session.writes == []
 
 
-@pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="register_server() reads loadmon from config_data, where it never is (#147)")
-def test_high_load_skips_the_heartbeat(server, monkeypatch):
+@pytest.mark.parametrize("loadmon", [True, False])
+def test_high_load_still_heartbeats(server, monkeypatch, loadmon):
+  """
+  A job server that goes quiet for a minute is deleted by the mPCC as
+  stale, so high load must not stop the heartbeat (#113); reading loadmon
+  used to raise KeyError here (#147).
+  """
   monkeypatch.setattr(app.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
+  server.loadmon = loadmon
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 5}
   server.register_server()
-  assert server.session.writes == []
+  assert [(method, path) for method, path, _ in server.session.writes] == [("POST", "jobservers/")]
+
+
+def test_high_load_is_logged_once(server, monkeypatch, capsys):
+  load = [99.0]
+  monkeypatch.setattr(app.os, "getloadavg", lambda: (load[0], load[0], load[0]))
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 5}
+  server.register_server()
+  server.register_server()
+  load[0] = 0.1
+  server.register_server()
+  out = capsys.readouterr().out
+  assert out.count("high load") == 1
+  assert out.count("load back to normal") == 1
+  assert len(server.session.writes) == 3
 
 
 # load_config() and __init__

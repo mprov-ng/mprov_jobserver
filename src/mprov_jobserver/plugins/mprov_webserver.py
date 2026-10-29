@@ -58,8 +58,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   def do_GET(self):
     print(mProvHTTPReqestHandler.connCount)
       
+    # the job server is the server's, not the handler's (#147)
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
-        and self.js.config_data['loadmon']\
+        and self.server.js is not None and self.server.js.loadmon \
         and self.path.startswith("/images/"):
       print("Not Serving, high load.")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")

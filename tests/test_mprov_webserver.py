@@ -148,9 +148,14 @@ def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
   assert js.register is False
 
 
-@pytest.mark.xfail(strict=True, reason="under high load do_GET() reads self.js.config_data['loadmon']; the handler has no js (#147)")
 def test_high_load_turns_image_requests_away(js, server, monkeypatch):
   monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
   with pytest.raises(urllib.error.HTTPError) as err:
     get(server, "/images/compute/compute.img")
   assert err.value.code == 404
+
+
+def test_high_load_serves_images_when_loadmon_is_off(js, server, monkeypatch):
+  monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
+  js.loadmon = False
+  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
