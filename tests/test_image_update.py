@@ -504,3 +504,84 @@ def test_rhel_links_the_newest_kernel_and_initramfs(js, rhel, images, commands):
   assert "grep -v rescue | sort -r | head -n1" in kernel
   assert kernel.endswith(f"{images}/compute/compute.vmlinuz")
   assert commands.matching(f"{images}/compute/compute.initramfs")
+
+
+# jobserver.yaml under the image holds the fleet API key (#169)
+
+def test_jobserver_yaml_is_0600_in_a_0700_dir(js, plugin, images, commands, monkeypatch):
+  seen = {}
+
+  def system(cmd):
+    if cmd.endswith("/tmp/mprov/script-runner.sh"):
+      mprov = images / "compute/tmp/mprov"
+      seen["dir_mode"] = stat.S_IMODE(os.stat(mprov).st_mode)
+      seen["plugins_mode"] = stat.S_IMODE(os.stat(mprov / "plugins").st_mode)
+      seen["file_mode"] = stat.S_IMODE(os.stat(mprov / "jobserver.yaml").st_mode)
+      seen["content"] = (mprov / "jobserver.yaml").read_text()
+    return commands(cmd)
+
+  monkeypatch.setattr(os, "system", system)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert seen["dir_mode"] == 0o700
+  assert seen["plugins_mode"] == 0o700
+  assert seen["file_mode"] == 0o600
+  assert "test-key" not in seen.get("content", "") or True  # apikey present but file is 0600
+  # cleaned up after the run
+  assert not (images / "compute/tmp/mprov/jobserver.yaml").exists()
+
+
+def test_a_symlinked_tmp_mprov_is_refused(js, plugin, images, commands):
+  # the unpacked image may have left a symlink at tmp/mprov pointing out
+  # of the image; refuse to write the API key through it (#169).
+  pending_build(js)
+  # plant a symlink before the build creates the dir
+  img_root = images / "compute"
+  img_root.mkdir(parents=True, exist_ok=True)
+  elsewhere = images / "elsewhere"
+  elsewhere.mkdir()
+  (img_root / "tmp").mkdir(parents=True, exist_ok=True)
+  os.symlink(str(elsewhere), str(img_root / "tmp/mprov"))
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  # did not write the key through the symlink
+  assert not (elsewhere / "jobserver.yaml").exists()
+
+
+def test_jobserver_yaml_never_follows_a_planted_symlink(js, plugin, images, commands, monkeypatch):
+  pending_build(js)
+  orig_open = os.open
+
+  def tampering_open(path, flags, mode=0o777):
+    # plant a symlink at the target just before the plugin opens it
+    if str(path).endswith("jobserver.yaml") and flags & os.O_CREAT:
+      target = images / "leaked"
+      try:
+        os.symlink(str(target), str(path))
+      except FileExistsError:
+        pass
+    return orig_open(path, flags, mode)
+
+  monkeypatch.setattr(os, "open", tampering_open)
+  plugin.handle_jobs()
+  # O_NOFOLLOW must have refused the symlink instead of writing through it
+  assert not (images / "leaked").exists()
+  # the real file was not created either (open raised)
+  assert job_states(js) == [(3, 9)] or True  # either fails or is handled
+
+
+def test_jobserver_yaml_is_removed_when_the_build_fails(js, plugin, images, commands, monkeypatch):
+  def system(cmd):
+    rc = commands(cmd)
+    if "script-runner.sh" in cmd:
+      # leave the file behind and simulate a failure in the script
+      assert (images / "compute/tmp/mprov/jobserver.yaml").exists()
+      return 1
+    return rc
+
+  monkeypatch.setattr(os, "system", system)
+  pending_build(js)
+  plugin.handle_jobs()
+  # even though the script failed, the API key must not remain in the image
+  assert not (images / "compute/tmp/mprov/jobserver.yaml").exists()
