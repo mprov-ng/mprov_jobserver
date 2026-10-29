@@ -6,6 +6,7 @@ import subprocess
 import sys
 import json
 import time
+import urllib.parse
 
 import yaml
 from jinja2 import Environment, PackageLoader, select_autoescape
@@ -246,16 +247,23 @@ class image_update(JobServerPlugin):
           return
     else:
       # imageList is not none, so let's grab just the ones we care about.
-      updateFound = False
-      for image in self.imageList:
-        # json to pass to the job search.
-        paramstr="{\"imageId\":\"" + image + "\"}"
-        if self.js.update_job_status(self.jobModule, 2, jobquery=paramstr):
-          updateFound=True
-        else: 
-          # this image wasn't requested to be updated, remove it from the list.
-          self.imageList.remove(image)
-      if (not updateFound) or len(self.imageList) == 0:
+      # The mPCC matches ?params= key by key; pending jobs have no
+      # jobserver yet, so the claim can't filter on it (#172).  Build the
+      # same image -> job id dict as above (#144).
+      configured = self.imageList
+      self.imageList = {}
+      for image in configured:
+        params = urllib.parse.quote(json.dumps({"imageId": image}))
+        query = 'module=' + self.jobModule + '&params=' + params
+        if not self.js.update_job_status(self.jobModule, 2, jobquery=query + '&status=1'):
+          continue # this image wasn't requested to be updated.
+        response = self.js.session.get(self.js.mprovURL + 'jobs/?jobserver=' + str(self.js.id) + '&' + query + '&status=2')
+        try:
+          for job in response.json():
+            self.imageList[image] = job['id']
+        except:
+          print(f"Error: Unable to read the claimed job for image {image}.")
+      if len(self.imageList) == 0:
         return # no updates found.
         
 

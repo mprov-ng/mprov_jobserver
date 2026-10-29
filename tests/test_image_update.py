@@ -11,10 +11,12 @@ import json
 import os
 import stat
 import subprocess
+import types
 
 import pytest
 import yaml
 
+import mprov_jobserver.app as app
 from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
@@ -433,13 +435,54 @@ def test_mpcc_error_fails_only_this_modules_jobs(js, plugin):
   assert "module=image-update" in query
 
 
-@pytest.mark.xfail(strict=True, reason="handle_jobs() with a configured imageList crashes on list.items() (#144)")
+# With a configured imageList, the plugin claims each image's pending job
+# through the mPCC's ?params= filter (#172).  Pending image-update jobs have
+# no jobserver yet, so the claim query mustn't filter on it.
+COMPUTE_PARAMS = "params=%7B%22imageId%22%3A%20%22compute%22%7D"
+CLAIM = "jobs/?module=image-update&" + COMPUTE_PARAMS + "&status=1"
+CLAIMED = "jobs/?jobserver=1&module=image-update&" + COMPUTE_PARAMS + "&status=2"
+
+
 def test_configured_image_list_builds_requested_images(js, plugin, commands):
   plugin.imageList = ["compute"]
   pending_build(js)
-  js.session.routes["systemimages/compute/"] = image()
+  js.session.routes[CLAIMED] = [{"id": 9, "params": {"imageId": "compute"}}]
   plugin.handle_jobs()
   assert commands.matching("tar c")
+  assert job_states(js) == [(4, 9)]
+
+
+def test_configured_image_list_only_claims_its_own_jobs(js, plugin, images):
+  """
+  The imageList query used to be a raw JSON blob after the "?", which the
+  mPCC ignores, so update_job_status() claimed every pending job of every
+  module (#172).  Use the real update_job_status() so the claims show up as
+  PATCHes.
+  """
+  js.update_job_status = types.MethodType(app.JobServer.update_job_status, js)
+  plugin.imageList = ["compute"]
+  pending_build(js)
+  js.session.routes.update({
+    # the mPCC filters by params, so it answers with this image's job only
+    CLAIM: [{"id": 9, "status": 1, "params": {"imageId": "compute"}}],
+    CLAIMED: [{"id": 9, "status": 2, "params": {"imageId": "compute"}}],
+    "jobs/9/": {"id": 9, "status": 2, "params": {"imageId": "compute"}},
+  })
+  plugin.handle_jobs()
+  job_gets = [path for method, path in js.session.requests
+              if method == "GET" and path.startswith("jobs/?") and "repo-update" not in path]
+  assert job_gets == [CLAIM, CLAIMED]
+  assert {path for path, _ in js.session.patches if path.startswith("jobs/")} == {"jobs/9/"}
+
+
+def test_configured_image_without_a_pending_job_is_skipped(js, plugin, commands):
+  js.update_job_status = types.MethodType(app.JobServer.update_job_status, js)
+  plugin.imageList = ["compute"]
+  no_dependent_jobs(js)
+  js.session.routes[CLAIM] = []
+  plugin.handle_jobs()
+  assert not commands.matching("tar c")
+  assert js.session.patches == []
 
 
 def test_needs_the_webserver(js):
