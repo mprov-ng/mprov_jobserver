@@ -14,6 +14,7 @@ import subprocess
 import types
 
 import pytest
+import requests
 import yaml
 
 import mprov_jobserver.app as app
@@ -149,23 +150,61 @@ def test_pulls_a_newer_image_from_another_host(js, plugin, images):
   assert (images / "compute" / "compute.vmlinuz").read_bytes() == b"KERNEL"
 
 
-@pytest.mark.xfail(strict=True, reason="a pulled image's version is never recorded, so it's pulled again every pass (#142)")
 def test_pulled_image_version_is_recorded(js, plugin, images):
+  # the version wasn't recorded, so it was pulled again every pass and
+  # never registered as a host (#142)
   hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=3)
   js.session.routes.update({
     "images/compute": b"IMG", "images/compute.initramfs": b"INITRD", "images/compute.vmlinuz": b"KERNEL",
   })
   plugin.updateImageJobservers()
   assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
+  assert js.session.writes == [
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [7, 1]}),
+  ]
+  assert sorted(p.name for p in (images / "compute").iterdir()) == ["compute.img", "compute.initramfs", "compute.vmlinuz"]
 
 
-@pytest.mark.xfail(strict=True, reason="updateImageJobservers() ignores a configured imageList (#142)")
+def old_copy(images):
+  (images / "compute").mkdir()
+  for name in ("compute.img", "compute.initramfs", "compute.vmlinuz"):
+    (images / "compute" / name).write_bytes(b"OLD")
+
+
+@pytest.mark.parametrize("kernel", [(404, None), "connection error"])
+def test_failed_pull_keeps_what_it_had(js, plugin, images, kernel, monkeypatch):
+  # a pull that fails part way (every host full: the mPCC answers 404) used
+  # to raise out of handle_jobs() and leave the files half overwritten (#142)
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=3)
+  old_copy(images)
+  js.session.routes.update({"images/compute": b"IMG", "images/compute.initramfs": b"INITRD"})
+  if kernel == "connection error":
+    get = js.session.get
+    def flaky(url, **kwargs):
+      if url.endswith("images/compute.vmlinuz"):
+        raise requests.ConnectionError("job server went away")
+      return get(url, **kwargs)
+    monkeypatch.setattr(js.session, "get", flaky)
+  else:
+    js.session.routes["images/compute.vmlinuz"] = kernel
+  plugin.updateImageJobservers()
+  assert json.loads((images / "image-versions").read_text()) == {"compute": 3}
+  assert js.session.writes == []
+  assert sorted(p.name for p in (images / "compute").iterdir()) == ["compute.img", "compute.initramfs", "compute.vmlinuz"]
+  assert all((images / "compute" / name).read_bytes() == b"OLD" for name in ("compute.img", "compute.initramfs", "compute.vmlinuz"))
+
+
 def test_configured_image_list_is_used(js, plugin, images):
+  # a configured imageList meant no images were checked at all (#142)
   plugin.imageList = ["compute"]
   (images / "image-versions").write_text(json.dumps({"compute": 4}))
   js.session.routes["systemimages/compute/"] = image(needs_rebuild=False)
   plugin.updateImageJobservers()
-  assert js.session.writes != []
+  assert js.session.writes == [
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [1]}),
+  ]
+  # only the configured images: the mPCC's image list isn't asked for
+  assert ("GET", "images/") not in js.session.requests
 
 
 def test_image_list_error_skips_hosting(js, plugin):
@@ -568,6 +607,8 @@ def test_configured_image_without_a_pending_job_is_skipped(js, plugin, commands)
   plugin.imageList = ["compute"]
   no_dependent_jobs(js)
   js.session.routes[CLAIM] = []
+  # the hosting check looks at the configured image too (#142); already a host
+  js.session.routes["systemimages/compute/"] = image(needs_rebuild=False, jobservers=[1])
   plugin.handle_jobs()
   assert not commands.matching("tar c")
   assert js.session.patches == []
