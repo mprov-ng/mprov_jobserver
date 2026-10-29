@@ -122,10 +122,8 @@ class FakeJobServer:
     # set to False to report no pending jobs to the plugin.
     self.has_jobs = True
 
-  def update_job_status(self, module, status, jobid=None, jobquery=None, params_filter=None):
+  def update_job_status(self, module, status, jobid=None, jobquery=None):
     # Report a pending job, so set_job_running() lets the plugin run.
-    # params_filter is accepted to match the real JobServer signature; the
-    # fake has no job list to filter.
     self.job_updates.append((module, status, jobquery))
     self.job_updates_by_id.append((module, status, jobid))
     return self.has_jobs

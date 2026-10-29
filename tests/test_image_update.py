@@ -435,38 +435,54 @@ def test_mpcc_error_fails_only_this_modules_jobs(js, plugin):
   assert "module=image-update" in query
 
 
-@pytest.mark.xfail(strict=True, reason="handle_jobs() with a configured imageList crashes on list.items() (#144)")
+# With a configured imageList, the plugin claims each image's pending job
+# through the mPCC's ?params= filter (#172).  Pending image-update jobs have
+# no jobserver yet, so the claim query mustn't filter on it.
+COMPUTE_PARAMS = "params=%7B%22imageId%22%3A%20%22compute%22%7D"
+CLAIM = "jobs/?module=image-update&" + COMPUTE_PARAMS + "&status=1"
+CLAIMED = "jobs/?jobserver=1&module=image-update&" + COMPUTE_PARAMS + "&status=2"
+
+
 def test_configured_image_list_builds_requested_images(js, plugin, commands):
   plugin.imageList = ["compute"]
   pending_build(js)
-  js.session.routes["systemimages/compute/"] = image()
+  js.session.routes[CLAIMED] = [{"id": 9, "params": {"imageId": "compute"}}]
   plugin.handle_jobs()
   assert commands.matching("tar c")
+  assert job_states(js) == [(4, 9)]
 
 
 def test_configured_image_list_only_claims_its_own_jobs(js, plugin, images):
-  # #172: the imageList job filter used to be a raw JSON blob appended after
-  # the query mark; the mPCC ignored the unparseable key and update_job_status
-  # claimed every job in the reply, i.e. the whole pending queue.  Use the
-  # real JobServer.update_job_status so the claim PATCHes are observable.
+  """
+  The imageList query used to be a raw JSON blob after the "?", which the
+  mPCC ignores, so update_job_status() claimed every pending job of every
+  module (#172).  Use the real update_job_status() so the claims show up as
+  PATCHes.
+  """
+  js.update_job_status = types.MethodType(app.JobServer.update_job_status, js)
+  plugin.imageList = ["compute"]
+  pending_build(js)
+  js.session.routes.update({
+    # the mPCC filters by params, so it answers with this image's job only
+    CLAIM: [{"id": 9, "status": 1, "params": {"imageId": "compute"}}],
+    CLAIMED: [{"id": 9, "status": 2, "params": {"imageId": "compute"}}],
+    "jobs/9/": {"id": 9, "status": 2, "params": {"imageId": "compute"}},
+  })
+  plugin.handle_jobs()
+  job_gets = [path for method, path in js.session.requests
+              if method == "GET" and path.startswith("jobs/?") and "repo-update" not in path]
+  assert job_gets == [CLAIM, CLAIMED]
+  assert {path for path, _ in js.session.patches if path.startswith("jobs/")} == {"jobs/9/"}
+
+
+def test_configured_image_without_a_pending_job_is_skipped(js, plugin, commands):
   js.update_job_status = types.MethodType(app.JobServer.update_job_status, js)
   plugin.imageList = ["compute"]
   no_dependent_jobs(js)
-  pending = [
-    {"id": 9, "status": 1, "params": {"imageId": "compute"}},
-    {"id": 10, "status": 1, "params": {"imageId": "login"}},
-    {"id": 11, "status": 1},
-  ]
-  # the mPCC ignores query keys it can't parse, so a malformed blob query and
-  # a well-formed scoped query both come back with every pending job; only
-  # the job for the configured image may end up claimed.
-  js.session.routes['jobs/?{"imageId":"compute"}'] = pending
-  js.session.routes["jobs/?jobserver=1&module=image-update&status=1"] = pending
-  try:
-    plugin.handle_jobs()
-  except AttributeError:
-    pass  # handle_jobs() crashes on list.items() after claiming; claim is done (#144)
-  assert [path for path, _ in js.session.patches] == ["jobs/9/"]
+  js.session.routes[CLAIM] = []
+  plugin.handle_jobs()
+  assert not commands.matching("tar c")
+  assert js.session.patches == []
 
 
 def test_needs_the_webserver(js):

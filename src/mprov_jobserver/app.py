@@ -214,7 +214,7 @@ class JobServer ():
 
 
   
-  def update_job_status(self, job_module, status, jobid=None,jobquery="", params_filter=None):
+  def update_job_status(self, job_module, status, jobid=None,jobquery=""):
     data = {
       'pk': job_module,
       'status': status,
@@ -253,12 +253,6 @@ class JobServer ():
     # single objects still need to be in a list.
     if type(jobs) != list:
       jobs = [jobs]
-    if params_filter:
-      # the mPCC doesn't filter by params, so narrow the claim here: only jobs
-      # whose params match every key of the filter get updated (#172).
-      jobs = [job for job in jobs
-              if isinstance(job.get('params'), dict)
-              and all(job['params'].get(k) == v for k, v in params_filter.items())]
     for job in jobs:
 
       # no need to update if our status hasn't changed.
