@@ -61,7 +61,6 @@ class UpdateRepo(JobServerPlugin):
       'hosted_by':[
         self.js.id,
       ],
-      'update': False,
     }
     print(json.dumps(data))
     response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))

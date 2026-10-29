@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Script Execution Workflow (script-runner)
-description: How the mprov_jobserver script-runner module fetches, orders, and runs user scripts against system images (image-gen) or booted hosts (post-boot), the dependency graph and config merging rules, and the MProvScript SDK in script.py.
+description: How the mprov_jobserver script-runner module fetches, orders, and runs user scripts against system images (image-gen) or booted hosts (post-boot), the mPCC merged-config and dependency-graph rules, nologin protection, failure exit codes, and the MProvScript SDK in script.py.
 tags: [mprov, jobserver, script-runner, scripts, image-gen, post-boot, sdk]
 ---
 
@@ -17,14 +17,14 @@ tags: [mprov, jobserver, script-runner, scripts, image-gen, post-boot, sdk]
 
 ## What it does per run
 
-1. **Lock the console**: creates `/etc/nologin` at start and removes it at the end (f0d33a6) so users can't interfere with post-boot scripting.
-2. **Resolve the entity**: the image (`systemimages/<id>/`) or the local system (`systems/?self`); on lookup failure it falls back to the public `nads` systemimage entity, and blanks the API key in the entity file for `nads` so public boot media don't carry credentials.
-3. **Collect scripts** from three scopes — distro, systemgroups, entity — and merge them into a dependency graph. Each script declares `dependsOn`; `depResolve()` performs a topological sort and reports cyclic/unresolvable dependencies.
-4. **Merge config params**: `config_params` YAML blocks from distro → groups → entity are flattened in that precedence order (entity wins).
-5. **Expose context**: writes `entity.json` (entity data + merged config params + `mprovURL` + `apikey` + `jobserverId`) into `scriptTmpDir` (default `/tmp/mprov`, `script-runner.yaml`).
-6. **Execute** each dependency "step": scripts are downloaded from the mPCC, chmod 0755, and run via `subprocess.run(shell=True)`; scripts within a step run as parallel threads. `entity.json` is removed afterwards.
+1. **Resolve the entity**: the image (`systemimages/<id>/`) or the local system (`systems/?self`); on lookup failure it falls back to the public `nads` systemimage entity, and blanks the API key in the entity file for `nads` so public boot media don't carry credentials.
+2. **Collect scripts and config**: `mpccMerge()` prefers the merged `config` the mPCC itself serves on the entity (mPCC #269): `config['config_params']` merged by top-level key, and `config['scripts']` as an ordered list of slugs merged distro → system groups (a system's own plus its image's) → image → system. Each slug is looked up in the entity's layers — including the system's image and the image's groups — for its file, type and `dependsOn` (objects or bare slugs; both accepted). A slug in `config` that isn't in any layer is reported and fails the run. Against an mPCC from before #269 the fallback `layerMerge()` runs the old local merge (distro → groups → entity only — it skips the image layer, so pre-#269 systems missed their image's post-boot scripts). Either path feeds `depResolve()`, a topological sort that reports cyclic/unresolvable dependencies.
+3. **Lock the console**: after all argument and entity validation passes, creates `/etc/nologin` so users can't interfere with scripting. A bad invocation (`-h`, `-i` with `-s`, failed entity load) never creates it, and the script region is wrapped in `try/finally` so the file is lifted however the run exits (#173).
+4. **Expose context**: writes `entity.json` (entity data + merged config params + `mprovURL` + `apikey` + `jobserverId`) into `scriptTmpDir` (default `/tmp/mprov`, `script-runner.yaml`).
+5. **Execute** each dependency "step": scripts are downloaded from the mPCC, chmod 0755, and run via `subprocess.run(shell=True)`; scripts within a step run as parallel threads. `entity.json` is removed afterwards.
+6. **Report failure**: every script's subprocess return code is recorded in a shared dict (a script thread that dies before its subprocess starts records an error string instead). After joining each step's threads, any nonzero result sets the plugin's `failed` flag (defined on the [`JobServerPlugin` base](../architecture/plugin-framework.md)), calls `set_job_failure()` on the mPCC, and in runonce mode makes `JobServer.start()` exit 1 — so image-build and post-boot pipelines fail loudly instead of exiting 0 (#174).
 
-Caveat: group-level `dependsOn` entries are appended raw while distro/entity entries use `dep['slug']` — keep dependency declarations consistent when authoring scripts. Errors generally `exit(1)` the process.
+Caveat: in the `layerMerge()` fallback, group-level `dependsOn` entries are appended raw while distro/entity entries use `dep['slug']` — keep dependency declarations consistent when authoring scripts for older mPCCs. Entity-load errors still `exit(1)` the process.
 
 ## Writing scripts: the `MProvScript` SDK
 
@@ -38,8 +38,8 @@ Scripts can therefore call back into mPCC endpoints using the same session/auth 
 
 ## Where to start when changing this area
 
-- Dependency ordering bugs → `depResolve()` in `script_runner.py`; test with `-r -d -m script-runner -i <slug> -c <config>`.
+- Dependency ordering bugs → `depResolve()` in `script_runner.py`; script-set/config-set differences between mPCC versions → `mpccMerge()` vs `layerMerge()`; test with `-r -d -m script-runner -i <slug> -c <config>`.
 - The chroot handoff between image builds and scripts lives in `src/mprov_jobserver/templates/image-update/` (`script-runner.sh`, `script-runner.yaml.j2`).
-- Post-boot runs execute as root on production nodes; script failure semantics (exit code handling, nologin cleanup) deserve extra scrutiny.
+- Post-boot runs execute as root on production nodes; changes to the `/etc/nologin` region and the `scriptResults`/`failed` failure-propagation path (#173, #174) deserve extra scrutiny — `tests/test_script_runner.py` and `tests/test_app.py` cover both.
 
 Source map: `src/mprov_jobserver/plugins/script_runner.py`, `plugins/script-runner.yaml`, `script.py`, `templates/image-update/script-runner.sh`, `templates/image-update/script-runner.yaml.j2`.

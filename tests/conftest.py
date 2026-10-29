@@ -116,6 +116,7 @@ class FakeJobServer:
     self.apikey = "test-key"
     self.runonce = False
     self.running = True
+    self.loadmon = True
     self.job_updates = []
     self.job_updates_by_id = []
     # set to False to report no pending jobs to the plugin.

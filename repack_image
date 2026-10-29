@@ -1,7 +1,24 @@
 #!/bin/bash
 # example repack script, may need tweaking.
 # pass the path to the image directory
+set -euo pipefail
 
-rm $1/`basename $1`.img -f
-busybox tar c -C $1-f - ./ | gzip -1 -c > /tmp/`basename $1`.img
-mv /tmp/`basename $1`.img $1/`basename $1`.img
+dir=${1:?"usage: repack_image <image directory>"}
+name=$(basename "$dir")
+img="$dir/$name.img"
+# Park the existing image outside the directory being tarred (busybox tar
+# has no --exclude) while the new image is built beside it, then swap the
+# new one in with a same-filesystem mv only after tar and gzip succeed.  A
+# failed repack restores the parked image, so it can never be destroyed.
+tmp="$dir/../.$name.img.tmp.$$"
+old="$dir/../.$name.img.old.$$"
+restore() {
+  if [ -e "$old" ]; then mv "$old" "$img"; fi
+  rm -f "$tmp"
+}
+trap restore EXIT
+
+if [ -f "$img" ]; then mv "$img" "$old"; fi
+busybox tar c -C "$dir" -f - ./ | gzip -1 -c > "$tmp"
+mv "$tmp" "$img"
+rm -f "$old"

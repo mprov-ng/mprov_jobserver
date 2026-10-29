@@ -9,12 +9,15 @@ fixture), so the tests check the commands and the files written.
 import copy
 import json
 import os
+import stat
+import subprocess
 import types
 
 import pytest
 import yaml
 
 import mprov_jobserver.app as app
+from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
 
@@ -47,16 +50,45 @@ def images(tmp_path):
   return path
 
 
+@pytest.fixture(autouse=True)
+def fake_wget(monkeypatch):
+  """
+  A recorded wget that succeeds writes its ``-O`` target, as a real wget
+  does, so the build can verify the busybox it fetched (#170).  Tests can
+  plant other content at the target by setting ``body``.
+  """
+  class FakeWget:
+    body = b"\x7fELFfake busybox"
+  fake = FakeWget()
+  record = Commands.__call__
+  def call(self, cmd):
+    rc = record(self, cmd)
+    if rc == 0 and "wget " in cmd and " -O " in cmd:
+      with open(cmd.split(" -O ")[1].split()[0], "wb") as f:
+        f.write(fake.body)
+    return rc
+  monkeypatch.setattr(Commands, "__call__", call)
+  return fake
+
+
 @pytest.fixture
-def plugin(js, images, commands, monkeypatch):
+def plugin(js, images, commands):
   js.jobmodules = ["image-update", "mprov-webserver"]
   js.config_data = {"global": {"mprovURL": js.mprovURL, "jobmodules": ["image-update", "mprov-webserver"]}}
-  # busybox is fetched with wget (a recorded command), so there's no file to chmod.
-  chmod = os.chmod
-  monkeypatch.setattr(os, "chmod", lambda path, mode: None if path == "/tmp/busybox" else chmod(path, mode))
   plugin = image_update(js)
   plugin.imageDir = str(images)
   return plugin
+
+
+@pytest.fixture
+def recorded_processes(monkeypatch):
+  """ Record calls to subprocess.run instead of running them.  Use after no_processes. """
+  runs = []
+  def run(argv, **kwargs):
+    runs.append((argv, kwargs))
+    return subprocess.CompletedProcess(argv, 0)
+  monkeypatch.setattr(subprocess, "run", run)
+  return runs
 
 
 def no_dependent_jobs(js):
@@ -190,6 +222,36 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
+def test_dracut_gets_only_real_modules_of_the_image_kernel(js, plugin, images, commands):
+  # dracut stops at a built-in or unknown module and drops every driver
+  # after it (#206), so those are left out of --add-drivers.
+  data = image()
+  data["osdistro"]["initial_mods"] = "virtio_scsi,virtio_pci,e1000,nosuchmod,,e1000,sd_mod"
+  pending_build(js, data)
+  (images / "compute/lib/modules/4.18.0-553.el8_10.x86_64").mkdir(parents=True)
+  commands.fail = ["-n virtio_pci ", "-n nosuchmod "]
+  plugin.handle_jobs()
+
+  assert commands.matching("modinfo -k 4.18.0-553.el8_10.x86_64 -n virtio_pci ")
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "virtio_scsi e1000 sd_mod"' in cmd for cmd in dracut)
+  assert job_states(js) == [(4, 9)]
+
+
+def test_dracut_module_needs_to_be_a_module_of_every_image_kernel(js, plugin, images, commands):
+  data = image()
+  data["osdistro"]["initial_mods"] = "e1000,virtio_pci"
+  pending_build(js, data)
+  for kernel in ("4.18.0-1.el8.x86_64", "4.18.0-2.el8.x86_64"):
+    (images / "compute/lib/modules" / kernel).mkdir(parents=True)
+  # built in on only one of the two kernels
+  commands.fail = ["-k 4.18.0-2.el8.x86_64 -n virtio_pci "]
+  plugin.handle_jobs()
+
+  dracut = commands.matching(" dracut --regenerate-all")
+  assert dracut and all('--add-drivers "e1000"' in cmd for cmd in dracut)
+
+
 def test_script_runner_config_is_runonce_script_runner(js, plugin, images, commands, monkeypatch):
   # Capture jobserver.yaml before it's removed, when the script runs.
   seen = {}
@@ -206,13 +268,127 @@ def test_script_runner_config_is_runonce_script_runner(js, plugin, images, comma
   assert "- !include plugins/*.yaml" in seen["config"]
 
 
-def test_root_password_is_set_in_the_image(js, plugin, images, commands):
+def test_root_ssh_keys_are_written_into_the_image(js, plugin, images, commands, monkeypatch):
+  """
+  The distro's rootsshkeys must land inside the image tree with ssh-usable
+  permissions; the build host's /root/.ssh must not be touched (#175).
+  """
+  host_dirs = []
+  real_makedirs = os.makedirs
+  def spy_makedirs(path, *args, **kwargs):
+    if not str(path).startswith(str(images)):
+      host_dirs.append(str(path))
+    return real_makedirs(path, *args, **kwargs)
+  monkeypatch.setattr(os, "makedirs", spy_makedirs)
+
+  data = image()
+  data["osdistro"]["rootsshkeys"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  pending_build(js, data)
+  plugin.handle_jobs()
+
+  ssh_dir = images / "compute/root/.ssh"
+  keyfile = ssh_dir / "authorized_keys"
+  assert keyfile.read_text() == "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  assert stat.S_IMODE(os.stat(ssh_dir).st_mode) == 0o700
+  assert stat.S_IMODE(os.stat(keyfile).st_mode) == 0o600
+  assert "/root/.ssh" not in host_dirs
+  assert job_states(js) == [(4, 9)]
+
+
+def test_unwritable_authorized_keys_fails_the_job(js, plugin, images, commands):
+  """
+  Key material that cannot be written must fail the image update, not pack
+  an image silently without it (#175).
+  """
+  data = image()
+  data["osdistro"]["rootsshkeys"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key@example\n"
+  pending_build(js, data)
+  # something already owns the .ssh path in the image, and it isn't a directory.
+  (images / "compute/root").mkdir(parents=True)
+  (images / "compute/root/.ssh").write_text("not a directory")
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  # not registered as a host of the image
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_root_password_is_set_in_the_image(js, plugin, images, commands, recorded_processes):
   data = image()
   data["osdistro"]["rootpw"] = "s3cret"
   pending_build(js, data)
   plugin.handle_jobs()
-  [cmd] = commands.matching("passwd root")
-  assert f"chroot {images}/compute passwd root" in cmd
+  passwd_runs = [run for run in recorded_processes if "passwd" in run[0]]
+  assert len(passwd_runs) == 1
+  argv, kwargs = passwd_runs[0]
+  assert argv == ["chroot", f"{images}/compute", "passwd", "root"]
+  feed = kwargs["input"]
+  if isinstance(feed, bytes):
+    feed = feed.decode()
+  # the password reaches passwd's stdin: the new password, then the confirmation
+  assert feed.count("s3cret") == 2
+
+
+def test_root_password_never_reaches_process_argv(js, plugin, images, commands, recorded_processes):
+  """The password must never be visible in a shell command line or any argv (#168)."""
+  data = image()
+  data["osdistro"]["rootpw"] = "s3cret"
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert not [cmd for cmd in commands.run if "s3cret" in cmd]
+  for argv, _ in recorded_processes:
+    assert all("s3cret" not in arg for arg in argv)
+
+
+def test_root_password_never_printed_to_daemon_output(js, plugin, images, commands, recorded_processes, capsys):
+  """The per-image debug print must not dump rootpw into the daemon log (#168)."""
+  data = image()
+  data["osdistro"]["rootpw"] = "s3cret"
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert "s3cret" not in capsys.readouterr().out
+
+
+# the busybox download and its verification (#170)
+
+def busybox_target(commands):
+  """ The path the build fetched busybox to. """
+  [download] = commands.matching(" -O ")
+  return download.split(" -O ")[1].split()[0]
+
+
+def test_busybox_is_fetched_to_a_root_only_dir_under_the_image_store(js, plugin, images, commands):
+  pending_build(js)
+  plugin.handle_jobs()
+  target = busybox_target(commands)
+  # never the fixed world-writable /tmp/busybox path, where another user
+  # could plant a binary for us to run as root. (the image store itself may
+  # live under /tmp in CI, so containment in it is the real check.)
+  assert target != "/tmp/busybox"
+  assert target.startswith(str(images) + os.sep)
+  assert stat.S_IMODE(os.stat(os.path.dirname(target)).st_mode) == 0o700
+  # and the pack step runs the binary we just fetched and verified, from there
+  [pack] = commands.matching("tar c")
+  assert pack.startswith(target + " ")
+
+
+def test_failed_busybox_download_fails_the_build(js, plugin, images, commands):
+  commands.fail = ["https://busybox.net"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert any(status == 3 for _, status, _ in js.job_updates)
+  assert not commands.matching("tar c")
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_busybox_that_is_not_an_elf_binary_is_not_executed(js, plugin, images, commands, fake_wget):
+  # a planted or truncated download must fail the build, not be chmod'ed 755
+  # and exec'ed as root
+  fake_wget.body = b"#!/bin/sh\necho pwned\n"
+  pending_build(js)
+  plugin.handle_jobs()
+  assert any(status == 3 for _, status, _ in js.job_updates)
+  assert not commands.matching("tar c")
 
 
 def test_distro_build_failure_fails_the_job(js, plugin, commands):
