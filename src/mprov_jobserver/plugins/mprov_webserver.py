@@ -47,13 +47,11 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     # 404 will result in a retry from the mPCC/client hopefully to another
     # server: the mPCC HEADs each job server before redirecting a client,
     # and skips one that refuses.  Keep heartbeating while full, or the
-    # mPCC deletes this job server after a minute, with its images'
-    # "Hosted By" and its jobs (#148).
+    # mPCC deletes this job server after a minute: it drops out of its
+    # images' "Hosted By", and its jobs lose their job server (#148).
     self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
 
   def do_GET(self):
-    print(mProvHTTPReqestHandler.connCount)
-      
     # the job server is the server's, not the handler's (#147)
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
         and self.server.js is not None and self.server.js.loadmon \
