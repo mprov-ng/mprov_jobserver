@@ -284,7 +284,9 @@ class image_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         return
     
-    # now we iterate over our imageList, and build the image(s)
+    # now we iterate over our imageList, and build the image(s).  An error
+    # fails that image's job and moves on: returning would leave the other
+    # claimed jobs running (#220).
     for image,jid in self.imageList.items():
       print(f"Processing update for image {image}")
       query = 'systemimages/' + image + '/'
@@ -326,7 +328,7 @@ class image_update(JobServerPlugin):
 
         image_update.join()
         if image_update.threadOk != True:
-          return
+          continue
         # run image-gen scripts.
     
         
@@ -336,7 +338,7 @@ class image_update(JobServerPlugin):
         if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
 
         # the jobserver.yaml we write under the image holds the fleet API
         # key, so it must be reachable only by us (#169).
@@ -350,7 +352,7 @@ class image_update(JobServerPlugin):
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
           print(f"Error: {mprovDir} is not a directory owned by this user, failing job.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
         os.chmod(mprovDir, 0o700)
         os.makedirs(mprovDir + '/plugins', mode=0o700, exist_ok=True)
         os.chmod(mprovDir + '/plugins', 0o700)
@@ -366,7 +368,7 @@ class image_update(JobServerPlugin):
         except OSError as err:
           print(f"Error: Unable to create {jobserverYaml}, failing job: {err}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as confFile:
           yaml.dump(localConfig, confFile)
@@ -393,7 +395,7 @@ class image_update(JobServerPlugin):
               except OSError as err:
                 print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
                 self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-                return
+                continue
           
           # set the root pw to the password in the distro
           if 'rootpw' in imageDetails['osdistro']:
@@ -431,7 +433,7 @@ class image_update(JobServerPlugin):
         if os.system(f"wget -q -O {busybox} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
           print("Error: unable to download busybox")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
         # don't run the download unless it is the ELF binary we asked for;
         # wget -O leaves error pages and partial files in place (#170).
         try:
@@ -442,7 +444,7 @@ class image_update(JobServerPlugin):
         if magic != b"\x7fELF":
           print("Error: downloaded busybox is not a valid ELF binary, refusing to run it")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
         os.chmod(busybox, 0o755)
 
         # attempt to call updateBootFiles()
@@ -451,7 +453,7 @@ class image_update(JobServerPlugin):
           image_update.updateBootFiles() # You can call it
           # it fails the job itself; don't pack and register the image (#144).
           if image_update.threadOk != True:
-            return
+            continue
         else:
           print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
 
@@ -463,7 +465,7 @@ class image_update(JobServerPlugin):
         if os.system(busybox + ' tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-          return
+          continue
         endTime = time.time()
         lapsed = endTime - startTime
         print("Image generated in " + str(lapsed) + " seconds.")
