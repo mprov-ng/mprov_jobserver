@@ -417,22 +417,57 @@ def test_unknown_ostype_fails_the_job(js, plugin, commands):
   assert commands.run == []
 
 
-@pytest.mark.xfail(strict=True, reason="a failed mprov_jobserver install in the image returns without failing the job (#144)")
 def test_jobserver_install_failure_fails_the_job(js, plugin, commands):
   commands.fail = ["pip3 --no-cache-dir install --upgrade mprov_jobserver"]
   pending_build(js)
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
 
 
-@pytest.mark.xfail(strict=True, reason="a failed build fails every running job on this job server, not just its own (#143)")
-def test_mpcc_error_fails_only_this_modules_jobs(js, plugin):
+def test_boot_files_failure_fails_the_job_and_skips_packing(js, plugin, commands, monkeypatch):
+  # rhel's updateBootFiles() fails the job itself; the image must not be
+  # packed and registered after it (#144).  Its dracut command is the same
+  # as the build thread's, so fail updateBootFiles() the way it fails.
+  def fail(self):
+    self.js.update_job_status(self.jobModule, 3, jobid=self.jobid)
+    self.threadOk = False
+  monkeypatch.setattr(UpdateImage, "updateBootFiles", fail)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_image_dir_failure_fails_the_claimed_jobs(js, plugin, tmp_path, commands):
+  # used jid before the build loop set it: NameError (#144)
+  (tmp_path / "file").write_text("")
+  plugin.imageDir = str(tmp_path / "file" / "images")
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert commands.run == []
+
+
+def test_pack_failure_fails_only_this_job(js, plugin, commands):
+  commands.fail = ["tar c"]
+  pending_build(js)
+  plugin.handle_jobs()
+  # by its id: a jobquery would fail every running job on the server (#143)
+  assert job_states(js) == [(3, 9)]
+  assert [u for u in js.job_updates_by_id if u[1] == 3 and u[2] is None] == []
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_mpcc_error_fails_only_this_job(js, plugin):
   pending_build(js)
   js.session.routes["systemimages/compute/"] = (500, None)
   js.session.routes["images/"] = []
   plugin.handle_jobs()
-  [(module, status, query)] = [u for u in js.job_updates if u[1] == 3]
-  assert "module=image-update" in query
+  # by its id: a jobquery would fail every running job on the server (#143)
+  assert job_states(js) == [(3, 9)]
+  assert [u for u in js.job_updates_by_id if u[1] == 3 and u[2] is None] == []
 
 
 # With a configured imageList, the plugin claims each image's pending job
