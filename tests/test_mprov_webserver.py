@@ -139,13 +139,84 @@ def test_plugin_refuses_to_start_on_an_unsafe_root_dir(js, unsafe, capsys):
     assert s.connect_ex(("127.0.0.1", port)) != 0
 
 
-@pytest.mark.xfail(strict=True, reason="checkFileSize() compares the filesystem path with /images/, so the connection limit never applies (#148)")
-def test_busy_server_turns_image_requests_away(js, server, monkeypatch):
+def raw_status(server, path, method="GET"):
+  # http.client sends the path as given; urllib would tidy //images/ up.
+  conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+  try:
+    conn.request(method, path)
+    response = conn.getresponse()
+    response.read()
+    return response.status
+  finally:
+    conn.close()
+
+
+@pytest.fixture
+def busy(js, monkeypatch):
+  """ A server already at its connection limit, and registered with the mPCC. """
+  js.register = True
   monkeypatch.setattr(mProvHTTPReqestHandler, "connCount", mProvHTTPReqestHandler.maxConn)
+
+
+def test_busy_server_turns_image_requests_away(js, server, busy):
+  # checked the filesystem path (<rootDir>/images/...) for /images/, so the
+  # limit never applied (#148)
   with pytest.raises(urllib.error.HTTPError) as err:
     get(server, "/images/compute/compute.img")
   assert err.value.code == 404
   assert js.register is False
+
+
+@pytest.mark.parametrize("path", ["//images/compute/compute.img", "/osrepos/../images/compute/compute.img"])
+def test_busy_server_limits_image_paths_however_they_are_spelled(js, server, busy, path):
+  assert raw_status(server, path) == 404
+  assert js.register is False
+
+
+def test_busy_server_refuses_image_heads(js, server, busy):
+  assert raw_status(server, "/images/compute/compute.img", method="HEAD") == 404
+
+
+def test_busy_server_serves_images_under_the_size_limit(js, server, busy):
+  # compared with the handler's maxConnFileSize (always 0), not the server's (#148)
+  server.maxConnFileSize = 1000
+  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
+  assert js.register is True
+
+
+@pytest.mark.parametrize("path", ["/osrepos/5/repomd.xml", "/images/compute/", "/images/compute/nope.img"])
+def test_busy_server_leaves_everything_else_alone(js, server, busy, path):
+  # only image files count toward and are refused by the limit
+  try:
+    status = get(server, path)[0]
+  except urllib.error.HTTPError as err:
+    status = err.code
+  assert status == (404 if path.endswith("nope.img") else 200)
+  assert js.register is True
+  assert mProvHTTPReqestHandler.connCount == mProvHTTPReqestHandler.maxConn
+
+
+def test_finished_image_download_turns_registration_back_on(js, server):
+  js.register = False
+  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
+  for _ in range(100):
+    if js.register:
+      break
+    time.sleep(0.01)
+  assert js.register is True
+
+
+def test_only_image_downloads_count_toward_the_limit(server, monkeypatch):
+  # every GET counted, so busy repo mirrors would turn images away (#148)
+  seen = []
+  serve = webserver_module.SimpleHTTPRequestHandler.do_GET
+  def spy(self):
+    seen.append((self.path, mProvHTTPReqestHandler.connCount))
+    return serve(self)
+  monkeypatch.setattr(webserver_module.SimpleHTTPRequestHandler, "do_GET", spy)
+  get(server, "/osrepos/5/repomd.xml")
+  get(server, "/images/compute/compute.img")
+  assert seen == [("/osrepos/5/repomd.xml", 0), ("/images/compute/compute.img", 1)]
 
 
 def test_high_load_turns_image_requests_away(js, server, monkeypatch):
@@ -153,6 +224,10 @@ def test_high_load_turns_image_requests_away(js, server, monkeypatch):
   with pytest.raises(urllib.error.HTTPError) as err:
     get(server, "/images/compute/compute.img")
   assert err.value.code == 404
+  # however the path is spelled (#148); http.server already folds a
+  # leading // into /, so it's the .. spelling that got past the raw check
+  assert raw_status(server, "/osrepos/../images/compute/compute.img") == 404
+  assert get(server, "/osrepos/5/repomd.xml") == (200, b"<repomd/>")
 
 
 def test_high_load_serves_images_when_loadmon_is_off(js, server, monkeypatch):
