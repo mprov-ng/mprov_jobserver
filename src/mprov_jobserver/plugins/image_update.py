@@ -1,6 +1,7 @@
 import importlib
 from .plugin import JobServerPlugin
 import os
+import subprocess
 import sys
 import json
 import time
@@ -15,6 +16,14 @@ jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
     autoescape=select_autoescape()
 )
+
+
+def redacted_image_details(imageDetails):
+  """Copy of the image details with the root password masked, for logging (#168)."""
+  distro = imageDetails.get('osdistro')
+  if isinstance(distro, dict) and 'rootpw' in distro:
+    return {**imageDetails, 'osdistro': {**distro, 'rootpw': '******'}}
+  return imageDetails
 
 class image_update(JobServerPlugin):
   jobModule = 'image-update'
@@ -277,7 +286,7 @@ class image_update(JobServerPlugin):
           if imageDetails['osdistro'] is None:
             print(f"Error: No OS Distrubtion set. Not generating image.")
             continue
-          print(f"..{imageDetails}")
+          print(f"..{redacted_image_details(imageDetails)}")
           print(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
           mod = importlib.import_module(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}", "mprov_jobserver.plugins")
           update_klass = getattr(mod, 'UpdateImage')
@@ -352,7 +361,12 @@ class image_update(JobServerPlugin):
         if 'rootpw' in imageDetails['osdistro']:
           if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
             print("Setting root password...")
-            os.system(f"echo -e '{imageDetails['osdistro']['rootpw']}\n{imageDetails['osdistro']['rootpw']}' | chroot {imgDir} passwd root")
+            # feed the password to the chrooted passwd over its stdin pipe,
+            # which is private to this (root) process; an `echo ... | passwd`
+            # shell command would expose it in the sh -c argv (#168).
+            subprocess.run(["chroot", imgDir, "passwd", "root"],
+                           input=f"{imageDetails['osdistro']['rootpw']}\n" * 2,
+                           text=True)
 
         # now let's run our script-runner shell script.
         with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:

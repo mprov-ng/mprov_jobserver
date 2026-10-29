@@ -39,7 +39,7 @@ Plugins may override `load_config`/`set_job_*` when they claim specific job IDs 
 
 ## Cross-plugin dependencies (enforced in code)
 
-- `image-update`, `image-sync`, `repo-sync` call `sys.exit(1)` in `load_config` unless `mprov-webserver` is in `jobmodules` — source nodes must be able to serve artifacts.
+- `image-update`, `image-sync`, `repo-sync` call `sys.exit(1)` in `load_config` unless `mprov-webserver` is in `jobmodules` — source nodes must be able to serve artifacts. `image-sync`/`repo-sync` additionally refuse to load unless their sync directory sits inside a declared `dataRoot` (see [Image & Repo Provisioning](../workflows/image-provisioning.md)).
 - `image-update` declares `depMods = ['repo-sync']` and blocks while any `repo-update` job is pending/running.
 - `image-update` shells into the built image to run `script-runner` (see [Script Execution](../workflows/script-execution.md)).
 - `nads` is runonce-only; `script-runner` is runonce-only via `-r -d`.

@@ -3,10 +3,18 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      # Agent instructions only; they can't affect the tests.
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
   # Pull requests build the image too, without logging in or pushing.
   pull_request:
     branches:
       - main
+    paths-ignore:
+      # Agent instructions only; they can't affect the tests.
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
 jobs:
   build:
     runs-on: ubuntu-latest

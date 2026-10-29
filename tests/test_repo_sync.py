@@ -10,6 +10,17 @@ import pytest
 from mprov_jobserver.plugins import repo_sync as repo_sync_module
 from mprov_jobserver.plugins.repo_sync import repo_sync
 
+# Name of the ownership marker file mprov writes into the repo
+# directories it creates; the sweep may only delete marked directories (#171).
+MARKER = ".mprov-managed"
+
+
+def mark_owned(d):
+  """Create a directory the way repo_sync creates its own: with a marker."""
+  os.makedirs(d)
+  with open(f"{d}/{MARKER}", "w") as marker:
+    marker.write("mprov owns this directory\n")
+
 
 class FakeSh:
   """ Records sh.wget calls instead of running wget. """
@@ -73,10 +84,59 @@ def test_repos_are_listed_from_the_mpcc_without_a_repo_list(js, plugin, sh):
 
 def test_repos_it_no_longer_serves_are_removed(js, plugin, sh):
   plugin.repoList = None
-  os.makedirs(f"{plugin.repoDir}/9")
+  mark_owned(f"{plugin.repoDir}/9")
   js.session.routes["repos/"] = []
   plugin.handle_jobs()
   assert not os.path.exists(f"{plugin.repoDir}/9")
+
+
+def test_sweep_never_touches_unmarked_directories(js, plugin, sh):
+  """#171: a directory mprov did not create must never be deleted."""
+  plugin.repoList = None
+  os.makedirs(f"{plugin.repoDir}/operator-data")
+  with open(f"{plugin.repoDir}/operator-data/precious", "w") as f:
+    f.write("keep")
+  mark_owned(f"{plugin.repoDir}/9")
+  js.session.routes["repos/"] = []
+  plugin.handle_jobs()
+  with open(f"{plugin.repoDir}/operator-data/precious") as f:
+    assert f.read() == "keep"
+  assert not os.path.exists(f"{plugin.repoDir}/9")
+
+
+def test_mirrored_repo_directory_carries_the_mprov_marker(js, plugin, sh):
+  js.session.routes["repos/5/"] = {"id": 5, "version": 3, "hosted_by": [1]}
+  plugin.handle_jobs()
+  assert os.path.exists(f"{plugin.repoDir}/5/{MARKER}")
+
+
+def test_load_config_refuses_repo_dir_outside_the_data_root(js, tmp_path):
+  js.jobmodules = ["repo-sync", "mprov-webserver"]
+  js.config_data = {"repo-sync": {
+    "dataRoot": str(tmp_path / "mprov"),
+    "repoDir": str(tmp_path / "elsewhere"),
+  }}
+  with pytest.raises(SystemExit):
+    repo_sync(js).load_config()
+
+
+def test_load_config_refuses_without_a_data_root(js, tmp_path):
+  js.jobmodules = ["repo-sync", "mprov-webserver"]
+  js.config_data = {"repo-sync": {"repoDir": str(tmp_path / "repos")}}
+  with pytest.raises(SystemExit):
+    repo_sync(js).load_config()
+
+
+def test_load_config_accepts_repo_dir_inside_the_data_root(js, tmp_path):
+  js.jobmodules = ["repo-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"repo-sync": {
+    "dataRoot": str(root),
+    "repoDir": str(root / "repos"),
+  }}
+  plugin = repo_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.repoDir == str(root / "repos")
 
 
 def test_needs_the_webserver(js):
