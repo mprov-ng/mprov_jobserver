@@ -21,6 +21,10 @@ from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
 
+# Bound at import, before the no_processes fixture stubs subprocess.run out,
+# for the test that runs the rendered script-runner.sh.
+_run = subprocess.run
+
 JOBS = "jobs/?jobserver=1&module=image-update&status=2"
 
 BASEREPO = {
@@ -401,11 +405,60 @@ def test_distro_build_failure_fails_the_job(js, plugin, commands):
   assert [w for w in js.session.writes if "systemimages" in w[1]] == []
 
 
-def test_image_without_a_distro_is_skipped(js, plugin, commands):
+def test_image_without_a_distro_fails_the_job(js, plugin, commands):
+  # was skipped, leaving the job running (#221)
   pending_build(js, image(osdistro=None))
   plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
   assert commands.run == []
   assert js.session.writes == []
+
+
+def test_unparsable_image_reply_fails_the_job(js, plugin, commands):
+  pending_build(js)
+  js.session.routes["systemimages/compute/"] = b"<html>proxy error</html>"
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert commands.run == []
+
+
+def test_update_module_that_cant_start_fails_the_job(js, plugin, commands, monkeypatch):
+  def broken(self, js):
+    raise RuntimeError("no")
+  monkeypatch.setattr(UpdateImage, "__init__", broken)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert commands.run == []
+
+
+def test_failed_image_gen_script_fails_the_job_and_packs_nothing(js, plugin, images, commands):
+  # the scripts' failure used to be printed and the image packed anyway (#221)
+  commands.fail = ["/tmp/mprov/script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+  # the fleet API key still doesn't stay behind in the image (#169)
+  assert not (images / "compute/tmp/mprov/jobserver.yaml").exists()
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_script_runner_sh_exits_with_the_job_servers_status(tmp_path, status):
+  # it ended with the last umount's status, so failed scripts looked fine (#221)
+  from jinja2 import Environment, PackageLoader
+  script = tmp_path / "script-runner.sh"
+  script.write_text(Environment(loader=PackageLoader("mprov_jobserver"))
+                    .get_template("image-update/script-runner.sh")
+                    .render({"imgDir": str(tmp_path / "img"), "image": "compute"}))
+  bin = tmp_path / "bin"
+  bin.mkdir()
+  for name, rc in [("mount", 0), ("umount", 0), ("chroot", status)]:
+    (bin / name).write_text(f"#!/bin/sh\nexit {rc}\n")
+    (bin / name).chmod(0o755)
+  env = dict(os.environ, PATH=f"{bin}:/usr/bin:/bin")
+  assert _run(["/bin/bash", str(script)], env=env).returncode == status
 
 
 def test_unknown_ostype_fails_the_job(js, plugin, commands):

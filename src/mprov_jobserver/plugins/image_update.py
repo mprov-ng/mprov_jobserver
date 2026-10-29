@@ -298,11 +298,13 @@ class image_update(JobServerPlugin):
           imageDetails = response.json()
         except:
           print("Error: Unable to parse response.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         
         try:
           if imageDetails['osdistro'] is None:
             print(f"Error: No OS Distrubtion set. Not generating image.")
+            self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
             continue
           print(f"..{redacted_image_details(imageDetails)}")
           print(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
@@ -320,6 +322,7 @@ class image_update(JobServerPlugin):
           image_update = update_klass(self.js)
         except:
           print(f"Error: Unable to instantiate UpdateImage class on {imageDetails['osdistro']['baserepo']['ostype']['slug']}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         image_update.imageDetails = imageDetails
         image_update.imageDir = self.imageDir
@@ -415,8 +418,11 @@ class image_update(JobServerPlugin):
           with open(os.open(imgDir + '/tmp/mprov/plugins/script-runner.yaml',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
               conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
 
+          # a failed image-gen script fails the job, and no image is packed (#221)
           if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
-            print("Error while running image-gen scripts via job server..")
+            print("Error while running image-gen scripts via job server, failing job.")
+            self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+            continue
         finally:
           try:
             os.unlink(jobserverYaml)

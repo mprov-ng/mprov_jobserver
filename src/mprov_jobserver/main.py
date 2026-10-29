@@ -73,7 +73,8 @@ def main():
         # Start the main loop and run the plugin handling routines.
         return jobServer.start()
     return 1
+# exit with main()'s status, so a failed runonce session exits nonzero (#221)
 def __main__():
-    main()
+    sys.exit(main())
 if __name__ == "__main__" or __name__ == 'mprov.mprov_jobserver':
-    main()
+    sys.exit(main())
