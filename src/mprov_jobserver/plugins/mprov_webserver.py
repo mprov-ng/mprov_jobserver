@@ -3,7 +3,7 @@ import os
 from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
-import multiprocessing, socket
+import multiprocessing, socket, stat, threading
 
 def safe_root(rootDir):
   # The directory to serve, or None if serving it would expose the whole
@@ -17,71 +17,70 @@ def safe_root(rootDir):
   return real
 
 class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
-  # TODO: make maxConn and maxConnFileSize configurable through
-  # the config yaml.
+  # TODO: make maxConn configurable through the config yaml.
+  # connCount counts the image downloads the connection limit applies to
+  # (files of the server's maxConnFileSize or bigger), across the server's
+  # request threads, so it's only changed under connLock (#148).
   connCount=0
   maxConn=10
-  maxConnFileSize=0 
-  def checkFileSize(self):
-    self.maxConnFileSize = self.server.maxConnFileSize
-    path = self.translate_path(self.path)
-    # only apply to images.
-    if not path.startswith("/images/") :
-      return True
-    if not os.path.isdir(path):
-      if path.endswith("/"):
-        self.send_error(HTTPStatus.NOT_FOUND, "File not found, filename invalid")
-        return False
-    else:
-      return True
-    f=None
-    try:
-      f = open(path, 'rb')
-    except OSError:
-      self.send_error(HTTPStatus.NOT_FOUND, "File not found, unable to open")
+  connLock=threading.Lock()
+
+  def isImageRequest(self):
+    # judge the path we'd serve, not the raw URL, so //images/ and
+    # /x/../images/ are images too (#148).
+    rel = os.path.relpath(self.translate_path(self.path), self.directory)
+    return rel == "images" or rel.startswith("images" + os.sep)
+
+  def isLimitedImage(self):
+    # an image file big enough for the connection limit; stat it without
+    # holding a descriptor (#185).  Anything else, missing files included,
+    # is left to SimpleHTTPRequestHandler.
+    if not self.isImageRequest():
       return False
     try:
-      fs = os.fstat(f.fileno())
-      if fs[6] >= mProvHTTPReqestHandler.maxConnFileSize:
-        if mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn:
-          # 404 will result in a retry from the mPCC/client hopefully to another server.
-          self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
-          if self.server.js is not None:
-            self.server.js.register = False
-          return False
-    except:
-      f.close()
-      print("Exception")
-      raise
-    return True
+      st = os.stat(self.translate_path(self.path))
+    except OSError:
+      return False
+    return stat.S_ISREG(st.st_mode) and st.st_size >= self.server.maxConnFileSize
+
+  def refuseBusy(self):
+    # 404 will result in a retry from the mPCC/client hopefully to another
+    # server: the mPCC HEADs each job server before redirecting a client,
+    # and skips one that refuses.  Keep heartbeating while full, or the
+    # mPCC deletes this job server after a minute: it drops out of its
+    # images' "Hosted By", and its jobs lose their job server (#148).
+    self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
 
   def do_GET(self):
-    print(mProvHTTPReqestHandler.connCount)
-      
     # the job server is the server's, not the handler's (#147)
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
         and self.server.js is not None and self.server.js.loadmon \
-        and self.path.startswith("/images/"):
+        and self.isImageRequest():
       print("Not Serving, high load.")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
       return False
-      
-    retVal = None
-    if self.checkFileSize():
-      # we are ok to serve.
-      mProvHTTPReqestHandler.connCount += 1
-      try:
-        retVal = super().do_GET()
-      finally:
-        mProvHTTPReqestHandler.connCount -= 1
-        if mProvHTTPReqestHandler.connCount < mProvHTTPReqestHandler.maxConn:
-          if self.server.js is not None:
-            self.server.js.register = True
 
-    return retVal
+    if not self.isLimitedImage():
+      return super().do_GET()
+
+    with mProvHTTPReqestHandler.connLock:
+      busy = mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn
+      if not busy:
+        mProvHTTPReqestHandler.connCount += 1
+    if busy:
+      self.refuseBusy()
+      return None
+    # we are ok to serve; give the slot back however the download ends.
+    try:
+      return super().do_GET()
+    finally:
+      with mProvHTTPReqestHandler.connLock:
+        mProvHTTPReqestHandler.connCount -= 1
 
   def do_HEAD(self):
-    if not self.checkFileSize():
+    # a HEAD never takes a slot: the mPCC probes with one per redirect.
+    if self.isLimitedImage() and mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn:
+      self.refuseBusy()
       return None
     return super().do_HEAD()
 
