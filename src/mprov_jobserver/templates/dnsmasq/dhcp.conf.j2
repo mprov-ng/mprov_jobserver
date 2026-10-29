@@ -4,23 +4,35 @@
 # dhcp ranges which have been set and enabled in MPCC
 {% for network in networks %}
 # Network: {{network.slug}}
+{# the address fields are optional in the mPCC: leave out any option whose field is unset (#178) #}
+{% if network.dhcpstart and network.dhcpend %}
 {% if ":" in network.dhcpstart %}
 dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}},slaac
 {% else %}
 dhcp-range=set:{{network.slug}},{{network.dhcpstart}},{{network.dhcpend}}
 {% endif %}
-
-{% if ":" in network.gateway %}
 {% else %}
+# no dhcp-range: the DHCP start or end address isn't set
+{% endif %}
+
+{% if not network.gateway %}
+# no router option: the gateway isn't set
+{% elif ":" not in network.gateway %}
 dhcp-option=tag:{{network.slug}},option:router,{{network.gateway}}
 {% endif %}
 
-{% if ":" in network.nameserver1 %}
+{% if not network.nameserver1 %}
+# no DNS server option: the nameserver isn't set
+{% elif ":" in network.nameserver1 %}
 dhcp-option=tag:{{network.slug}},option6:dns-server,{{network.nameserver1}}
+{% if network.domain %}
 dhcp-option=tag:{{network.slug}},option6:24,{{network.domain}}
+{% endif %}
 {% else %}
 dhcp-option=tag:{{network.slug}},option:dns-server,{{network.nameserver1}}
+{% if network.domain %}
 dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
+{% endif %}
 {% endif %}
 
 {% endfor %}

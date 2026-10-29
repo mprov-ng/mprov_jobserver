@@ -1,12 +1,40 @@
 from time import sleep
 import threading
 import sys
+import os
+
+# Marker file mprov writes into every directory it creates inside a
+# configured sync directory.  The end-of-sync sweep may only delete
+# directories carrying this marker, so a mis-set sync directory can never
+# wipe operator data it does not own (#171).
+MPROV_MARKER = '.mprov-managed'
+
+
+def path_is_under(path, root):
+  # realpath both sides so a symlink or '..' cannot smuggle a path
+  # outside the data root the operator declared.
+  path = os.path.realpath(path)
+  root = os.path.realpath(root)
+  if root == os.sep:
+    return path.startswith(os.sep)
+  return path == root or path.startswith(root + os.sep)
+
+
+def mark_mprov_dir(dirpath):
+  with open(os.path.join(dirpath, MPROV_MARKER), 'w') as marker:
+    marker.write('mprov owns this directory\n')
+
+
+def is_mprov_marked_dir(dirpath):
+  return os.path.isfile(os.path.join(dirpath, MPROV_MARKER))
 
    
 class JobServerPlugin(threading.Thread):
   jobModule = ""
   js = None
   threadOk = True
+  # set True by a module that ran and failed, so runonce can exit nonzero (#174)
+  failed = False
 
 
   def set_job_running(self):

@@ -1,3 +1,7 @@
 - image-sync:
+    # imageDir must sit inside dataRoot: the end-of-sync sweep deletes
+    # directories under imageDir, so it only runs in declared mprov
+    # space (#171).
+    dataRoot: '/export'
     imageDir: '/export/images_synced'
     imageList: null

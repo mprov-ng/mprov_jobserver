@@ -35,7 +35,10 @@ class JobServer ():
   id = -1
   runonce = False
   register = True
+  highLoad = False
   firstrun = True
+  # jobmodules that ran and failed in runonce mode, checked before exiting (#174)
+  failed_runonce_modules = []
 
   def __init__(self, **kwargs):
     print("mProv Job Server Starting.")
@@ -197,8 +200,16 @@ class JobServer ():
           # check if this thread is still running
           # print("\tWaiting on thread " + mod)
           self.running_threads[mod].join()
-          
-    
+
+    if self.runonce:
+      # a module that failed its run means this process exits nonzero (#174)
+      self.failed_runonce_modules = [
+        mod for mod in self.jobmodules
+        if mod in self.running_threads and getattr(self.running_threads[mod], "failed", False)]
+      if self.failed_runonce_modules:
+        print("Error: Jobmodule(s) failed: " + ", ".join(self.failed_runonce_modules), file=sys.stderr)
+        return 1
+
     return 0
 
 
@@ -297,11 +308,19 @@ class JobServer ():
         'name': myHostname,
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
-        'one_minute_load': os.getloadavg()[2]
+        'one_minute_load': os.getloadavg()[0]
     }
-    if data['one_minute_load'] >= multiprocessing.cpu_count() and self.config_data['loadmon']:
-      print("Not Registering, high load.")
-      return
+    # Keep heartbeating under high load: the mPCC deletes a job server that
+    # goes quiet for a minute, and it already steers image downloads to the
+    # least loaded one (#113).  loadmon is a global setting, so load_config()
+    # put it on self (#147).  Only log the change, not every heartbeat.
+    highLoad = data['one_minute_load'] >= multiprocessing.cpu_count() and self.loadmon
+    if highLoad != self.highLoad:
+      if highLoad:
+        print(f"Warning: high load ({data['one_minute_load']}), still heartbeating with the load reported.")
+      else:
+        print("Info: load back to normal.")
+      self.highLoad = highLoad
     # print(self.config_data)
     if 'mprov-webserver' in self.config_data:
     # if  self.config_data['mprov-webserver']:

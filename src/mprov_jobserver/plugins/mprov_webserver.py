@@ -5,6 +5,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
 import multiprocessing, socket
 
+def safe_root(rootDir):
+  # The directory to serve, or None if serving it would expose the whole
+  # filesystem: an empty rootDir means the working directory, which is /
+  # under systemd (#214).
+  if not rootDir:
+    return None
+  real = os.path.realpath(rootDir)
+  if real == "/" or not os.path.isdir(real):
+    return None
+  return real
+
 class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   # TODO: make maxConn and maxConnFileSize configurable through
   # the config yaml.
@@ -13,7 +24,6 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   maxConnFileSize=0 
   def checkFileSize(self):
     self.maxConnFileSize = self.server.maxConnFileSize
-    self.directory = self.server.rootDir
     path = self.translate_path(self.path)
     # only apply to images.
     if not path.startswith("/images/") :
@@ -48,8 +58,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
   def do_GET(self):
     print(mProvHTTPReqestHandler.connCount)
       
+    # the job server is the server's, not the handler's (#147)
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
-        and self.js.config_data['loadmon']\
+        and self.server.js is not None and self.server.js.loadmon \
         and self.path.startswith("/images/"):
       print("Not Serving, high load.")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
@@ -75,9 +86,9 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     return super().do_HEAD()
 
 class mProvHTTPServer(ThreadingHTTPServer):
-  rootDir = ""  
+  rootDir = "/export/"
   maxConnFileSize = 0
-  js = None    
+  js = None
   def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
     if ":" in server_address[0]:
       # we have an IPv6 bind address
@@ -85,15 +96,27 @@ class mProvHTTPServer(ThreadingHTTPServer):
     super().__init__(server_address, RequestHandlerClass, bind_and_activate)
     # self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
 
+  def finish_request(self, request, client_address):
+    # hand the handler our root, so it never falls back to the working
+    # directory; refuse the request if the root isn't safe to serve (#214).
+    root = safe_root(self.rootDir)
+    if root is None:
+      return
+    self.RequestHandlerClass(request, client_address, self, directory=root)
+
 class mprov_webserver(JobServerPlugin):
   jobModule = 'mprov-webserver'
   hostName = "::"
   serverPort = 8080
   serverInstance = None
-  rootDir = ""
-  maxConnFileSize = 0 
+  rootDir = "/export/"
+  maxConnFileSize = 0
 
   def handle_jobs(self):
+    if safe_root(self.rootDir) is None:
+      print(f"Error: mProv Webserver not started: rootDir '{self.rootDir}' is empty, /, or not a directory.  Set rootDir in mprov-webserver.yaml.")
+      self.failed = True
+      return
     print(f"Starting mProv Webserver on port {self.serverPort} serving {self.rootDir} ...")
 
     serverInstance = mProvHTTPServer((self.hostName, self.serverPort), mProvHTTPReqestHandler)

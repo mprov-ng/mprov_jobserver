@@ -1,6 +1,7 @@
 import importlib
 from .plugin import JobServerPlugin
 import os
+import subprocess
 import sys
 import json
 import time
@@ -15,6 +16,14 @@ jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
     autoescape=select_autoescape()
 )
+
+
+def redacted_image_details(imageDetails):
+  """Copy of the image details with the root password masked, for logging (#168)."""
+  distro = imageDetails.get('osdistro')
+  if isinstance(distro, dict) and 'rootpw' in distro:
+    return {**imageDetails, 'osdistro': {**distro, 'rootpw': '******'}}
+  return imageDetails
 
 class image_update(JobServerPlugin):
   jobModule = 'image-update'
@@ -277,7 +286,7 @@ class image_update(JobServerPlugin):
           if imageDetails['osdistro'] is None:
             print(f"Error: No OS Distrubtion set. Not generating image.")
             continue
-          print(f"..{imageDetails}")
+          print(f"..{redacted_image_details(imageDetails)}")
           print(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
           mod = importlib.import_module(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}", "mprov_jobserver.plugins")
           update_klass = getattr(mod, 'UpdateImage')
@@ -334,18 +343,30 @@ class image_update(JobServerPlugin):
         # copy in our root keys from the distro
         if 'rootsshkeys' in imageDetails['osdistro']:
           if imageDetails['osdistro']['rootsshkeys'] is not None:
-            os.makedirs("/root/.ssh", exist_ok=True)
+            # the key material must land in the image tree, not on the build host (#175)
+            sshDir = imgDir + '/root/.ssh'
+            authKeys = sshDir + '/authorized_keys'
             try:
-              with open(imgDir + '/root/.ssh/authorized_keys', mode="w") as authkeys:
+              os.makedirs(sshDir, mode=0o700, exist_ok=True)
+              os.chmod(sshDir, 0o700)
+              with open(authKeys, mode="w") as authkeys:
                 authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
-            except:
-              print("WARN: No authorized_keys copied, /root/.ssh/authorized_keys access error")
+              os.chmod(authKeys, 0o600)
+            except OSError as err:
+              print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
+              self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+              return
         
         # set the root pw to the password in the distro
         if 'rootpw' in imageDetails['osdistro']:
           if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
             print("Setting root password...")
-            os.system(f"echo -e '{imageDetails['osdistro']['rootpw']}\n{imageDetails['osdistro']['rootpw']}' | chroot {imgDir} passwd root")
+            # feed the password to the chrooted passwd over its stdin pipe,
+            # which is private to this (root) process; an `echo ... | passwd`
+            # shell command would expose it in the sh -c argv (#168).
+            subprocess.run(["chroot", imgDir, "passwd", "root"],
+                           input=f"{imageDetails['osdistro']['rootpw']}\n" * 2,
+                           text=True)
 
         # now let's run our script-runner shell script.
         with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:
@@ -361,9 +382,29 @@ class image_update(JobServerPlugin):
         if os.path.exists(imgDir +"/tmp/mprov/jobserver.yaml"):
           os.unlink(imgDir + "/tmp/mprov/jobserver.yaml")
 
-        # grab a copy of busybox to /tmp
-        os.system(f"wget -q -O /tmp/busybox https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox")
-        os.chmod("/tmp/busybox", 0o755)
+        # grab a copy of busybox into a root-only directory under the image
+        # store.  A fixed /tmp path is world-writable: another user could
+        # plant a binary there for us to run as root (#170).
+        busyboxDir = self.imageDir + '/.busybox'
+        os.makedirs(busyboxDir, mode=0o700, exist_ok=True)
+        os.chmod(busyboxDir, 0o700)
+        busybox = busyboxDir + '/busybox'
+        if os.system(f"wget -q -O {busybox} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
+          print("Error: unable to download busybox")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        # don't run the download unless it is the ELF binary we asked for;
+        # wget -O leaves error pages and partial files in place (#170).
+        try:
+          with open(busybox, "rb") as f:
+            magic = f.read(4)
+        except OSError:
+          magic = b""
+        if magic != b"\x7fELF":
+          print("Error: downloaded busybox is not a valid ELF binary, refusing to run it")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          return
+        os.chmod(busybox, 0o755)
 
         # attempt to call updateBootFiles()
         # Check if 'updateBootFiles' exists and is callable
@@ -377,7 +418,7 @@ class image_update(JobServerPlugin):
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-        if os.system('/tmp/busybox tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
+        if os.system(busybox + ' tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           return
