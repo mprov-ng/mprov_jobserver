@@ -7,6 +7,7 @@ import json
 import subprocess
 import yaml
 import socket
+import stat
 from pathlib import Path
 # import pprint
 
@@ -199,11 +200,22 @@ class script_runner(JobServerPlugin):
     # holds our api key, so the workspace must be reachable by us alone (#169).
     entityPath = self.scriptTmpDir + "/entity.json"
     os.makedirs(self.scriptTmpDir, mode=0o700, exist_ok=True)
+    # On a node the workspace is under /tmp, so another local user could
+    # have made it first, or left a symlink there.  We download scripts into
+    # it and run them as root, so only use a real directory we own (#169).
+    workspace = os.lstat(self.scriptTmpDir.rstrip("/") or "/")
+    if not stat.S_ISDIR(workspace.st_mode) or workspace.st_uid != os.geteuid():
+      print(f"Error: {self.scriptTmpDir} is not a directory owned by this user, not running any scripts.")
+      self.failed = True
+      self.set_job_failure()
+      return
     # a dir left behind by an older version may be world-readable; tighten it.
     os.chmod(self.scriptTmpDir, 0o700)
 
-    # output the entity to a json file, owner read/write only (#169).
-    entFd = os.open(entityPath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # output the entity to a json file, owner read/write only (#169).  An
+    # existing file keeps its mode through O_TRUNC, so set it again.
+    entFd = os.open(entityPath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    os.fchmod(entFd, 0o600)
     with os.fdopen(entFd, "w") as entFile:
       entFile.write(json.dumps(entity))
 

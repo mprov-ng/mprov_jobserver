@@ -418,3 +418,56 @@ def test_entity_json_does_not_outlive_a_crash_in_the_run(js, plugin, tmp_path, m
   with pytest.raises(KeyError):
     plugin.handle_jobs()
   assert not (tmp_path / "scripts" / "entity.json").exists()
+
+
+# the workspace is under /tmp on a node, and the scripts run as root from it:
+# never use one another user made first, or a symlink (#169)
+
+def test_a_workspace_owned_by_another_user_is_refused(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  monkeypatch.setattr(script_runner_module.os, "geteuid", lambda: os.stat(tmp_path / "scripts").st_uid + 1)
+  plugin.handle_jobs()
+  assert plugin.ran == []
+  assert plugin.failed
+  assert plugin.nologin == []
+  assert not (tmp_path / "scripts" / "entity.json").exists()
+
+
+def test_a_symlinked_workspace_is_refused(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  elsewhere = tmp_path / "elsewhere"
+  elsewhere.mkdir()
+  os.symlink(elsewhere, tmp_path / "scripts")
+  plugin.handle_jobs()
+  assert plugin.ran == []
+  assert plugin.failed
+  assert list(elsewhere.iterdir()) == []
+
+
+def test_entity_json_never_follows_a_planted_symlink(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  target = tmp_path / "target"
+  target.write_text("untouched")
+  os.symlink(target, tmp_path / "scripts" / "entity.json")
+  with pytest.raises(OSError):
+    plugin.handle_jobs()
+  assert target.read_text() == "untouched"
+  assert plugin.ran == []
+
+
+def test_an_existing_entity_json_is_made_private(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  (tmp_path / "scripts" / "entity.json").write_text("{}")
+  os.chmod(tmp_path / "scripts" / "entity.json", 0o644)
+  ent = tmp_path / "scripts" / "entity.json"
+  modes = []
+  plugin.runScript = lambda filename: modes.append(stat.S_IMODE(os.stat(ent).st_mode))
+  plugin.handle_jobs()
+  assert modes and all(mode == 0o600 for mode in modes), [oct(m) for m in modes]
