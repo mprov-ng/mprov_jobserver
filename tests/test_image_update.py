@@ -125,7 +125,7 @@ def test_adds_itself_as_host_of_an_image_it_has(js, plugin, images):
   hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
   plugin.updateImageJobservers()
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
   ]
 
 
@@ -160,7 +160,7 @@ def test_pulled_image_version_is_recorded(js, plugin, images):
   plugin.updateImageJobservers()
   assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
   ]
   assert sorted(p.name for p in (images / "compute").iterdir()) == ["compute.img", "compute.initramfs", "compute.vmlinuz"]
 
@@ -201,7 +201,7 @@ def test_configured_image_list_is_used(js, plugin, images):
   js.session.routes["systemimages/compute/"] = image(needs_rebuild=False)
   plugin.updateImageJobservers()
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]}),
   ]
   # only the configured images: the mPCC's image list isn't asked for
   assert ("GET", "images/") not in js.session.requests

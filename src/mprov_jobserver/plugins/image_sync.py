@@ -132,9 +132,10 @@ class image_sync(JobServerPlugin):
           jobservers.append(jobserver)
         # now append our id
         jobservers.append(self.js.id)
+        # no needs_rebuild: sending False cleared any rebuild asked for on
+        # the image whenever we added ourselves as a host (#226).
         data = {
           'slug': image,
-          'needs_rebuild': False,
           'jobservers': jobservers,
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
