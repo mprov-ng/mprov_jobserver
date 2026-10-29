@@ -663,3 +663,35 @@ def test_jobserver_yaml_is_removed_when_the_build_fails(js, plugin, images, comm
   plugin.handle_jobs()
   # even though the script failed, the API key must not remain in the image
   assert not (images / "compute/tmp/mprov/jobserver.yaml").exists()
+
+
+def two_pending_builds(js):
+  """ Image-update jobs 9 (compute) and 10 (login), and no hosted images yet. """
+  no_dependent_jobs(js)
+  js.session.routes.update({
+    "images/": [],
+    JOBS: [{"id": 9, "params": {"imageId": "compute"}}, {"id": 10, "params": {"imageId": "login"}}],
+    "systemimages/compute/": image(),
+    "systemimages/login/": image(slug="login"),
+  })
+
+
+def test_failed_image_doesnt_stop_the_others(js, plugin, images, commands):
+  # returning after the first image failed left job 10 running (#220)
+  commands.fail = [f"{images}/compute pip3 --no-cache-dir install"]
+  two_pending_builds(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9), (4, 10)]
+  [pack] = commands.matching("tar c")
+  assert f"-C{images}/login " in pack
+
+
+def test_failed_build_thread_doesnt_stop_the_others(js, plugin, images, commands):
+  # the build thread fails its own job; the next image is still built (#220)
+  commands.fail = [f"--installroot={images}/compute "]
+  two_pending_builds(js)
+  plugin.handle_jobs()
+  assert (3, 9) in job_states(js)
+  assert job_states(js)[-1] == (4, 10)
+  [pack] = commands.matching("tar c")
+  assert f"-C{images}/login " in pack
