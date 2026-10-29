@@ -7,6 +7,7 @@ import json
 import subprocess
 import yaml
 import socket
+import stat
 from pathlib import Path
 # import pprint
 
@@ -195,13 +196,29 @@ class script_runner(JobServerPlugin):
     scriptDeps=self.depResolve(scriptDeps)
     # print(scripts)
 
-    # make sure our local tmp dir exists
-    os.makedirs(self.scriptTmpDir, exist_ok=True)
-    
-    # output the entity to a json file
-    with open(self.scriptTmpDir + "/entity.json", "w") as entFile:
+    # make sure our local tmp dir exists.  the entity file we write there
+    # holds our api key, so the workspace must be reachable by us alone (#169).
+    entityPath = self.scriptTmpDir + "/entity.json"
+    os.makedirs(self.scriptTmpDir, mode=0o700, exist_ok=True)
+    # On a node the workspace is under /tmp, so another local user could
+    # have made it first, or left a symlink there.  We download scripts into
+    # it and run them as root, so only use a real directory we own (#169).
+    workspace = os.lstat(self.scriptTmpDir.rstrip("/") or "/")
+    if not stat.S_ISDIR(workspace.st_mode) or workspace.st_uid != os.geteuid():
+      print(f"Error: {self.scriptTmpDir} is not a directory owned by this user, not running any scripts.")
+      self.failed = True
+      self.set_job_failure()
+      return
+    # a dir left behind by an older version may be world-readable; tighten it.
+    os.chmod(self.scriptTmpDir, 0o700)
+
+    # output the entity to a json file, owner read/write only (#169).  An
+    # existing file keeps its mode through O_TRUNC, so set it again.
+    entFd = os.open(entityPath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    os.fchmod(entFd, 0o600)
+    with os.fdopen(entFd, "w") as entFile:
       entFile.write(json.dumps(entity))
-    
+
     # all argument and entity validation has passed; now, and only now,
     # keep users out while the scripts run.  Creating it earlier would
     # lock users out of the node on any bad invocation (#173).
@@ -231,14 +248,20 @@ class script_runner(JobServerPlugin):
           print(f"Error: script '{name}' failed: {rc}")
         print(f"script-runner: {len(failures)} script(s) failed.")
         self.set_job_failure()
-      # remove the entity file.
-      os.unlink(self.scriptTmpDir + "/entity.json")
     finally:
-      # lift the login block however we leave: clean run or error (#173).
       try:
-        os.unlink("/etc/nologin")
-      except:
-        pass
+        # remove the entity file, even if the run raised (#169).  If it
+        # can't be removed, that still raises, but only after...
+        try:
+          os.unlink(entityPath)
+        except FileNotFoundError:
+          pass
+      finally:
+        # ...the login block is lifted, however we leave (#173).
+        try:
+          os.unlink("/etc/nologin")
+        except:
+          pass
     if not failures:
       print("script-runner complete.")
 

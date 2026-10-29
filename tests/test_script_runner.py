@@ -7,6 +7,7 @@ and running each script is replaced by a recorder.
 """
 import json
 import os
+import stat
 import threading
 
 import types
@@ -371,3 +372,106 @@ def test_an_older_mpcc_config_falls_back_to_the_layers(js, plugin, monkeypatch):
   plugin.handle_jobs()
   assert sorted(plugin.ran) == ["base", "group-tool", "image-tool"]
   assert plugin.entities[0]["config_params"] == {"a": "distro", "b": "group", "c": "entity"}
+
+
+# the entity file holds the api key: it must never be group/world readable,
+# and must not outlive the run (#169)
+
+def test_tmp_dir_is_created_without_group_or_world_access(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  plugin.handle_jobs()
+  assert stat.S_IMODE(os.stat(tmp_path / "scripts").st_mode) & 0o077 == 0
+
+
+def test_a_pre_existing_world_readable_tmp_dir_is_tightened(js, plugin, tmp_path, monkeypatch):
+  # a dir an older version left with default perms must not keep exposing the key
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  os.chmod(tmp_path / "scripts", 0o755)
+  plugin.handle_jobs()
+  assert stat.S_IMODE(os.stat(tmp_path / "scripts").st_mode) & 0o077 == 0
+
+
+def test_entity_json_is_written_without_group_or_world_access(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  ent = tmp_path / "scripts" / "entity.json"
+  modes = []
+
+  def record_mode(filename):
+    modes.append(stat.S_IMODE(os.stat(ent).st_mode))
+  plugin.runScript = record_mode
+  plugin.handle_jobs()
+  assert modes, "no script ran, so the entity file was never observed"
+  assert all(mode & 0o077 == 0 for mode in modes), [oct(m) for m in modes]
+
+
+def test_entity_json_does_not_outlive_a_crash_in_the_run(js, plugin, tmp_path, monkeypatch):
+  # a malformed script entry raises inside the run loop, after entity.json
+  # (holding the api key) has been written; it must not be left behind
+  argv(monkeypatch, "-i", "compute")
+  broken = script("broken")
+  del broken["filename"]  # print() in the run loop raises KeyError on it
+  js.session.routes["systemimages/compute/"] = entity(scripts=[broken])
+  # scripts in the same step may already be running when the loop raises,
+  # and can outlive handle_jobs(); keep them off the entity file it removes,
+  # or they fail later, in whichever test runs next.
+  plugin.runScript = lambda filename: None
+  with pytest.raises(KeyError):
+    plugin.handle_jobs()
+  assert not (tmp_path / "scripts" / "entity.json").exists()
+
+
+# the workspace is under /tmp on a node, and the scripts run as root from it:
+# never use one another user made first, or a symlink (#169)
+
+def test_a_workspace_owned_by_another_user_is_refused(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  monkeypatch.setattr(script_runner_module.os, "geteuid", lambda: os.stat(tmp_path / "scripts").st_uid + 1)
+  plugin.handle_jobs()
+  assert plugin.ran == []
+  assert plugin.failed
+  assert plugin.nologin == []
+  assert not (tmp_path / "scripts" / "entity.json").exists()
+
+
+def test_a_symlinked_workspace_is_refused(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  elsewhere = tmp_path / "elsewhere"
+  elsewhere.mkdir()
+  os.symlink(elsewhere, tmp_path / "scripts")
+  plugin.handle_jobs()
+  assert plugin.ran == []
+  assert plugin.failed
+  assert list(elsewhere.iterdir()) == []
+
+
+def test_entity_json_never_follows_a_planted_symlink(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  target = tmp_path / "target"
+  target.write_text("untouched")
+  os.symlink(target, tmp_path / "scripts" / "entity.json")
+  with pytest.raises(OSError):
+    plugin.handle_jobs()
+  assert target.read_text() == "untouched"
+  assert plugin.ran == []
+
+
+def test_an_existing_entity_json_is_made_private(js, plugin, tmp_path, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  os.makedirs(tmp_path / "scripts")
+  (tmp_path / "scripts" / "entity.json").write_text("{}")
+  os.chmod(tmp_path / "scripts" / "entity.json", 0o644)
+  ent = tmp_path / "scripts" / "entity.json"
+  modes = []
+  plugin.runScript = lambda filename: modes.append(stat.S_IMODE(os.stat(ent).st_mode))
+  plugin.handle_jobs()
+  assert modes and all(mode == 0o600 for mode in modes), [oct(m) for m in modes]
