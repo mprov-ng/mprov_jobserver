@@ -189,7 +189,7 @@ class nads(JobServerPlugin):
       # grab a packet.
       try:
         packet = capture_sock.recvfrom(65565)
-      except:
+      except OSError:
         continue
       packet = packet[0]
       eth_protocol, eth_payload = unpack_ethernet_frame(packet)[3:]
@@ -253,7 +253,7 @@ class nads(JobServerPlugin):
       try:
         with open(ifaceCmdFile, 'w') as ifile:
           ifile.write("lldp stop\n")
-      except:
+      except OSError:
         # ignore all errors here because we really don't care.
         pass
     lldpRes = False
@@ -284,7 +284,7 @@ class nads(JobServerPlugin):
       try:
         with open(ifaceCmdFile, 'w') as ifile:
           ifile.write("lldp start\n")
-      except:
+      except OSError:
         # ignore all errors here because we really don't care.
         pass
     

@@ -125,7 +125,7 @@ class JobServerPlugin(threading.Thread):
         try:
           getattr(self, config_entry)
           setattr(self, config_entry, self.js.config_data[self.jobModule][config_entry])
-        except:
+        except AttributeError:
           log.error("Unknown config entry " + config_entry + " in " + self.jobModule)
     return True
 

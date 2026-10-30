@@ -186,8 +186,11 @@ class JobServer ():
           if self.config_data['global'][config_entry][-1] != "/":
             self.config_data['global'][config_entry] += "/"
         setattr(self, config_entry, self.config_data['global'][config_entry])
-      except:
+      except AttributeError:
         log.error("" + config_entry + " is not a valid config entry in 'global'.")
+        sys.exit(1)
+      except Exception as err:
+        log.error(f"invalid value for {config_entry} in 'global': {err}")
         sys.exit(1)
     self.use_ca_bundle()
     if not log_configure(self.logLevel, self.logTimestamps):
@@ -333,7 +336,7 @@ class JobServer ():
     try:
       if (response.json() == [] ):
         return False
-    except:
+    except ValueError:
       log.error(f"There was an error parsing output from the mPCC.  Output: ")
       log.error(f"{response.text}")
       return False
@@ -462,7 +465,8 @@ class JobServer ():
     try: 
       response = self.session.post(self.mprovURL + 'jobservers/', data=json.dumps(data), )
       
-    except:
+    except Exception as err:
+      log.error(f"heartbeat to the mPCC failed: {err}")
       self.sessionOk = False
       self.startSession()
       return

@@ -352,14 +352,14 @@ class UpdateImage(JobServerPlugin):
     if os.path.exists(imgDir + '/' + imageDetails['slug'] + '.vmlinuz'):
       try:
         os.remove(imgDir + '/' + imageDetails['slug'] + '.vmlinuz')
-      except:
-        pass
+      except OSError as err:
+        log.warning(f"unable to remove the old {imageDetails['slug']}.vmlinuz: {err}")
     
     if os.path.exists(imgDir + '/' + imageDetails['slug'] + '.initramfs'):
       try:
         os.remove(imgDir + '/' + imageDetails['slug'] + '.initramfs')
-      except:
-        pass
+      except OSError as err:
+        log.warning(f"unable to remove the old {imageDetails['slug']}.initramfs: {err}")
 
     if os.system('ls -1 ' + qimg + '/boot/vmlinuz-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + qimg + '/' + imageDetails['slug'] + '.vmlinuz'): 
       log.error("unable to copy kernel image.")

@@ -61,7 +61,7 @@ def main():
                         with importlib.resources.open_text('mprov_jobserver.plugins', p_entry) as p_yaml_file:
                             with open('/etc/mprov/plugins/' + p_entry, 'w') as p_yaml_out_file:
                                 p_yaml_out_file.write(p_yaml_file.read())
-                    except:
+                    except OSError:
                         log.error('copying ' + p_entry + ' to /etc/mprov/plugins/')
                         sys.exit(1)
             

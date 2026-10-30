@@ -38,8 +38,8 @@ class repo_update(JobServerPlugin):
 
       try:
         repo_update = update_klass(self.js)
-      except:
-        log.error(f"Unable to instantiate UpdateRepo class on {name}")
+      except Exception as err:
+        log.error(f"Unable to instantiate UpdateRepo class on {name}: {err}")
         continue
       repo_update.load_config()
 
@@ -60,20 +60,20 @@ class repo_update(JobServerPlugin):
       
       try:
         params = job['params']
-      except:
+      except (KeyError, TypeError):
         log.error("Repo Update with no repo_id, cannot parse params.")
         self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
         continue
       try:
         self.repoList[params['repo_id']] = job['id']
-      except:
+      except (KeyError, TypeError):
         log.error("Repo Update Job Failed, corrupted params")
         self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
         continue
     if not os.path.exists(self.repoDir):
       try:
         os.makedirs(self.repoDir, exist_ok=True)
-      except:
+      except OSError:
         log.error("unable to make repodir:" + self.repoDir)
         # no repo is being synced yet, so fail every job we claimed.
         for jid in self.repoList.values():
@@ -94,7 +94,7 @@ class repo_update(JobServerPlugin):
         # instantiate the sub module and pass it the repo.
         try:
           repo = response.json()
-        except:
+        except ValueError:
           log.error("Unable to parse response.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -114,8 +114,8 @@ class repo_update(JobServerPlugin):
         
         try:
           repo_update = update_klass(self.js)
-        except:
-          log.error(f"Unable to instantiate UpdateRepo class on {repo['ostype']}")
+        except Exception as err:
+          log.error(f"Unable to instantiate UpdateRepo class on {repo['ostype']}: {err}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         repo_update.repo = repo

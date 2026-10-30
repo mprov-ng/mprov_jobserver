@@ -638,3 +638,23 @@ def test_an_error_reply_removes_nothing(js, dirs, no_interfaces, kind, worker):
   plugin = worker(js, dirs)
   assert not plugin.hostsChanged
   assert len(list((mprov / kind).iterdir())) == 2
+
+
+def test_dns_leaves_out_only_the_bmc_with_missing_fields(js, dirs, no_interfaces, capsys):
+  # one bad BMC used to drop every BMC of the network
+  js.session.routes.update({
+    "networks/?managedns=True": [NETWORK],
+    "networkinterfaces/?network=cluster-net": [],
+    "systembmcs/?network=3&detail": [
+      {"ipaddress": "10.0.0.51", "mac": "aa:bb:cc:00:01:01", "system": {"hostname": "node01-bmc"}},
+      {"ipaddress": "10.0.0.52", "mac": "aa:bb:cc:00:01:02", "system": None},
+      {"ipaddress": "10.0.0.53", "mac": "aa:bb:cc:00:01:03", "system": {"hostname": "node03-bmc"}},
+    ],
+    "switches/?network=cluster-net": [],
+  })
+  _, hosts = run_dns(js, dirs)
+  assert [line.split() for line in config_lines(hosts)] == [
+    ["10.0.0.51", "node01-bmc.cluster.local"],
+    ["10.0.0.53", "node03-bmc.cluster.local"],
+  ]
+  assert "[W] dnsmasq/dns: leaving a BMC on network cluster-net out of DNS" in capsys.readouterr().out

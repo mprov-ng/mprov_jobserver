@@ -520,3 +520,15 @@ def test_an_existing_entity_json_is_made_private(js, plugin, tmp_path, monkeypat
   plugin.runScript = lambda filename: modes.append(stat.S_IMODE(os.stat(ent).st_mode))
   plugin.handle_jobs()
   assert modes and all(mode == 0o600 for mode in modes), [oct(m) for m in modes]
+
+
+def test_config_params_that_arent_a_mapping_are_ignored_with_a_warning(js, plugin, monkeypatch, capsys):
+  argv(monkeypatch, "-i", "compute")
+  data = entity()
+  data["systemgroups"][0]["name"] = "gpu"
+  data["systemgroups"][0]["config_params"] = "- just\n- a list\n"
+  js.session.routes["systemimages/compute/"] = data
+  plugin.handle_jobs()
+  # the group's params are skipped, the rest still merge
+  assert plugin.entities[0]["config_params"] == {"a": "distro", "b": "distro", "c": "entity"}
+  assert "ignoring system group gpu's config_params" in capsys.readouterr().out
