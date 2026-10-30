@@ -1,6 +1,7 @@
 
 import requests
 import socket
+from mprov_jobserver.tls import ca_bundle
 import uuid
 import yaml, os, sys, glob, time
 class MProvScript():
@@ -12,6 +13,8 @@ class MProvScript():
   config_data = {}
   mprovURL = "http://127.0.0.1:8080/"
   apikey = ""
+  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
+  caBundle = ""
   heartbeatInterval = 10
   runonce = True
   sessionOk = False
@@ -69,8 +72,17 @@ class MProvScript():
 
     # connect to the mPCC
     try:
+      self.caBundle = ca_bundle(self.caBundle)
+    except FileNotFoundError as err:
+      print(f"Error: {err}.", file=sys.stderr)
+      return False
+    if self.caBundle:
+      self.session.verify = self.caBundle
+    try:
       response = self.session.get(self.mprovURL, stream=True)
-    except:
+    except Exception as err:
+      # say why: "Communication error" alone hid certificate problems (#102)
+      print(f"Error: unable to reach the mPCC at {self.mprovURL}: {err}", file=sys.stderr)
       print("Error: Communication error to the server.  Retrying.", file=sys.stderr)
       self.sessionOk = False
       time.sleep(self.heartbeatInterval)

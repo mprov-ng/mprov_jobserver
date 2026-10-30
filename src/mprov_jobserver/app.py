@@ -4,6 +4,7 @@ import importlib
 import yaml
 import time
 import requests
+from mprov_jobserver.tls import ca_bundle
 import sys
 import socket
 import platform
@@ -31,6 +32,8 @@ class JobServer ():
   running_threads = {}
   config_data = {}
   apikey = ""
+  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
+  caBundle = ""
   sessionOk = False
   id = -1
   runonce = False
@@ -137,6 +140,7 @@ class JobServer ():
       except:
         print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
         sys.exit(1)
+    self.use_ca_bundle()
 
   def load_plugins(self):
     if self.jobmodules is None:
@@ -435,6 +439,18 @@ class JobServer ():
     print("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
 
+  def use_ca_bundle(self):
+    # verify the mPCC's certificate against the configured caBundle or the
+    # OS bundle (#102).  An admin's REQUESTS_CA_BUNDLE still wins, as it
+    # does for any requests program.
+    try:
+      self.caBundle = ca_bundle(self.caBundle)
+    except FileNotFoundError as err:
+      print(f"Error: {err}; set global caBundle to the mPCC's CA certificate file.", file=sys.stderr)
+      sys.exit(1)
+    if self.caBundle:
+      self.session.verify = self.caBundle
+
   def startSession(self):
     
     self.session.headers.update({
@@ -445,7 +461,11 @@ class JobServer ():
     # test connectivity
     try:
       response = self.session.get(self.mprovURL, stream=True)
-    except:
+    except Exception as err:
+      # say why: "Communication error" alone hid certificate problems (#102)
+      print(f"Error: unable to reach the mPCC at {self.mprovURL}: {err}", file=sys.stderr)
+      if isinstance(err, requests.exceptions.SSLError):
+        print("Error: if the mPCC's certificate is from a site or self-signed CA, set global caBundle to that CA's certificate file.", file=sys.stderr)
       print("Error: Communication error to the server.  Retrying.", file=sys.stderr)
       self.sessionOk = False
       time.sleep(10)

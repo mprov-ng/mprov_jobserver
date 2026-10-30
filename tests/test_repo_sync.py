@@ -195,3 +195,12 @@ def test_a_single_configured_repo_id_is_a_list_of_one(js, tmp_path):
   plugin = repo_sync(js)
   assert plugin.load_config() is True
   assert plugin.repoList == ["4"]
+
+
+def test_the_mirror_trusts_the_job_servers_ca(js, plugin, sh):
+  # the CA the job server verifies the mPCC with (#102)
+  js.caBundle = "/etc/mprov/mpcc-ca.pem"
+  js.session.routes["repos/5/"] = {"id": 5, "version": 3, "hosted_by": []}
+  plugin.handle_jobs()
+  [args] = sh.wget_calls
+  assert "--ca-certificate=/etc/mprov/mpcc-ca.pem" in args

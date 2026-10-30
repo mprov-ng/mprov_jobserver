@@ -497,7 +497,11 @@ class image_update(JobServerPlugin):
 
         # create a config file to /tmp for our script-runner instance.
         localConfig = [dict()]
-        localConfig[0]['global'] = self.js.config_data['global']
+        # a copy: this changed the job server's own global settings too
+        localConfig[0]['global'] = dict(self.js.config_data['global'])
+        # the host's CA file isn't in the image; the job server in there
+        # uses the image's own OS bundle (#102)
+        localConfig[0]['global'].pop('caBundle', None)
         print(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True

@@ -313,6 +313,24 @@ def test_script_runner_config_is_runonce_script_runner(js, plugin, images, comma
   assert "- !include plugins/*.yaml" in seen["config"]
 
 
+def test_the_image_config_leaves_out_the_hosts_ca_bundle(js, plugin, images, commands, monkeypatch):
+  # the host's CA file isn't in the image (#102); and the job server's own
+  # global settings stay as they were
+  js.config_data["global"]["caBundle"] = "/etc/mprov/mpcc-ca.pem"
+  seen = {}
+  def system(cmd):
+    if cmd.endswith("/tmp/mprov/script-runner.sh"):
+      seen["config"] = (images / "compute/tmp/mprov/jobserver.yaml").read_text()
+    return commands(cmd)
+  monkeypatch.setattr(os, "system", system)
+  pending_build(js)
+  plugin.handle_jobs()
+  config = yaml.load(seen["config"].replace("- !include", "# !include"), Loader=yaml.SafeLoader)
+  assert "caBundle" not in config[0]["global"]
+  assert js.config_data["global"]["caBundle"] == "/etc/mprov/mpcc-ca.pem"
+  assert js.config_data["global"]["jobmodules"] == ["image-update", "mprov-webserver"]
+
+
 def test_root_ssh_keys_are_written_into_the_image(js, plugin, images, commands, monkeypatch):
   """
   The distro's rootsshkeys must land inside the image tree with ssh-usable

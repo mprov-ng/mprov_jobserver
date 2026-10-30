@@ -118,6 +118,7 @@ class FakeJobServer:
     self.config_data = {}
     self.jobmodules = []
     self.apikey = "test-key"
+    self.caBundle = None
     self.runonce = False
     self.running = True
     self.loadmon = True

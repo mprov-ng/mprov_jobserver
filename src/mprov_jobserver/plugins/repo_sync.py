@@ -129,6 +129,9 @@ class repo_sync(JobServerPlugin):
           '-P', self.repoDir,
           f"{self.js.mprovURL}osrepos/{repo}/"
         ]
+        # the CA the job server trusts for the mPCC (#102)
+        if self.js.caBundle:
+          wgetArgs.insert(0, f"--ca-certificate={self.js.caBundle}")
         print(" ".join(wgetArgs))
         sh.wget(wgetArgs)
          
