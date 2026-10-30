@@ -1,3 +1,11 @@
 [build-system]
 requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
+
+# CI lint (#187): errors only, i.e. code that can't run (syntax errors,
+# undefined names, misused comparisons), not style.  Widen deliberately.
+[tool.ruff]
+extend-exclude = ["openwiki"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

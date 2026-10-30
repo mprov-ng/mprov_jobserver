@@ -1,0 +1,45 @@
+name: Lint
+# Runs on every PR and push to main, without waiting for the image build
+# that runs the tests (dockerimage-dev.yml) (#187).
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      # Agent instructions only; they can't affect the lint.
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      # Agent instructions only; they can't affect the lint.
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # errors only; the rules are in pyproject.toml
+      - name: Ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.17.3
+          ruff check --output-format github .
+
+      # The job server's own scripts.  Not wait-for-it.sh (vendored from
+      # upstream) or templates/image-update/script-runner.sh (a Jinja
+      # template, not shell until it's rendered).
+      - name: ShellCheck
+        run: |
+          shellcheck --version
+          shellcheck -S error install_mprov_jobserver.sh start_server.sh gen_changelog.sh repack_image
