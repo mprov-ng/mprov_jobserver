@@ -80,6 +80,7 @@ class repo_update(JobServerPlugin):
     # create an empty robots.txt file.
     with open(f'{self.repoDir}/robots.txt', 'w') as fp:
       pass
+    workers = []
     for repo,jid in self.repoList.items():
       # grab the repo from the mPCC
         
@@ -119,8 +120,17 @@ class repo_update(JobServerPlugin):
         repo_update.repoDir = self.repoDir
         repo_update.jobid = jid
         repo_update.start()
+        workers.append(repo_update)
       else: 
         print(f'Error: bad http request: {response.status_code}')
         print(self.js.mprovURL + query)
         self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         continue
+
+    # The repos sync in parallel, but this run waits for all of them.  It
+    # used to return straight away, so the next heartbeat started a new run,
+    # and if that claimed a new job it listed every RUNNING repo-update job
+    # on this server, the ones still syncing too, and started a second
+    # reposync of each (#157).  Each worker sets its own job's status.
+    for worker in workers:
+      worker.join()

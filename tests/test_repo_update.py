@@ -66,6 +66,7 @@ JOBS = "jobs/?jobserver=1&module=repo-update&status=2"
 def update(js, tmp_path, commands, monkeypatch):
   # Run the ostype sub-module in the test's thread, so it's done when handle_jobs() returns.
   monkeypatch.setattr(UpdateRepo, "start", lambda self: self.handle_jobs())
+  monkeypatch.setattr(UpdateRepo, "join", lambda self, timeout=None: None)
   plugin = repo_update(js)
   plugin.repoDir = str(tmp_path / "repos")
   return plugin
@@ -149,3 +150,24 @@ def test_ostype_module_that_cant_start_fails_the_job(js, update, commands, monke
   update.handle_jobs()
   assert job_states(js) == [(3, 21)]
   assert commands.run == []
+
+
+def test_run_waits_for_every_repo_it_started(js, tmp_path, monkeypatch):
+  # returning while the reposyncs ran let the next heartbeat start a second
+  # reposync of each repo still syncing (#157); they still run in parallel
+  import threading
+  both_running = threading.Barrier(2, timeout=5)
+  finished = []
+  def sync(self):
+    both_running.wait()   # times out unless the two repos sync at once
+    finished.append(self.jobid)
+  monkeypatch.setattr(UpdateRepo, "handle_jobs", sync)
+  js.session.routes.update({
+    JOBS: [{"id": 21, "params": {"repo_id": 5}}, {"id": 22, "params": {"repo_id": 6}}],
+    "repos/5/": dict(REPO, ostype="rhel"),
+    "repos/6/": dict(REPO, id=6, ostype="rhel"),
+  })
+  plugin = repo_update(js)
+  plugin.repoDir = str(tmp_path / "repos")
+  plugin.handle_jobs()
+  assert sorted(finished) == [21, 22]
