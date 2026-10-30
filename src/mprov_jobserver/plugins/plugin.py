@@ -20,6 +20,21 @@ def path_is_under(path, root):
   return path == root or path.startswith(root + os.sep)
 
 
+def mounts_under(path, mountinfo='/proc/self/mountinfo'):
+  # Mount points at or below path, deepest first.  An image build
+  # bind-mounts the host's /dev, /proc, /run and /sys into the image tree;
+  # while they're there, packing the tree would archive the host's and
+  # deleting it would delete through them (#183).
+  found = []
+  with open(mountinfo) as f:
+    for line in f:
+      # field 5 is the mount point, with spaces and the like octal-escaped
+      point = line.split()[4].encode().decode('unicode_escape')
+      if path_is_under(point, path):
+        found.append(point)
+  return sorted(found, key=len, reverse=True)
+
+
 def mark_mprov_dir(dirpath):
   with open(os.path.join(dirpath, MPROV_MARKER), 'w') as marker:
     marker.write('mprov owns this directory\n')

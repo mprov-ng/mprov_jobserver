@@ -11,6 +11,12 @@ import stat
 from pathlib import Path
 # import pprint
 
+def slug_of(value):
+  # A related object as the mPCC nests it: an object with a slug, or just
+  # the slug once the nesting is deeper than the serializer's depth (#146).
+  return value['slug'] if isinstance(value, dict) else value
+
+
 class script_runner(JobServerPlugin):
   jobModule = 'script-runner'
   scriptTmpDir="/tmp/mprov-script-runner/"
@@ -137,39 +143,39 @@ class script_runner(JobServerPlugin):
     else:
       query="systems/?self" #?hostname=" + entityId
     print(self.js.mprovURL + query)
-    response = self.js.session.get( self.js.mprovURL + query)
+    # If the image or system we were asked for can't be loaded, stop and say
+    # so.  This used to fall back to the nads image's scripts: an image build
+    # that got a 5xx ran nads' image-gen scripts in the image it was building
+    # and carried on, and with -s the fallback had no 'systemimage' and
+    # crashed.  exit() only ended this thread, so runonce still exited 0 (#156).
+    what = f"system image '{entityId}'" if sysimage else "this system (systems/?self)"
     try:
-      entity = response.json()
-      if response.status_code != 200:
-        print(f"code: {response.status_code}")
-        raise Exception()
-    except:
-      # if this response was bad, try to grab the nads image 
-      query="systemimages/nads/"
-      print(self.js.mprovURL + query)
-    
-      response = self.js.session.get( self.js.mprovURL + query )
+      response = self.js.session.get( self.js.mprovURL + query)
+    except requests.RequestException as err:
+      return self.entityFailed(f"Error: unable to reach the mPCC for {what}: {err}")
+    entity = None
+    if response.status_code == 200:
       try:
         entity = response.json()
-      except: 
-        print("Error: Unable to get information from mPCC.")
-        exit(1)
-
-    if entity == None:
-      print("Error: Entity Not loaded.")
-      exit(1)
+      except ValueError:
+        pass
+    if entity is None:
+      return self.entityFailed(f"Error: unable to load {what} from the mPCC: {response.status_code} {response.text[:200]}")
 
     # some clean up of the entity
     if type(entity) == list:
       if len(entity) == 1:
         entity = entity[0]
+    if not isinstance(entity, dict):
+      return self.entityFailed(f"Error: the mPCC's reply for {what} isn't one entity, cannot continue.")
     if system :
+      if not isinstance(entity.get('systemimage'), dict):
+        return self.entityFailed(f"Error: {what} has no system image, so it has no scripts to run.")
       entity['osdistro'] = entity['systemimage']['osdistro']
     # pprint.pprint(entity)
 
     if "name" not in entity and "hostname" not in entity:
-      print("Error: Corrupted entity found, cannot continue.")
-      exit(1)
+      return self.entityFailed("Error: Corrupted entity found, cannot continue.")
 
     # merge the scripts and config_params from distro -> system groups ->
     # image -> system.  The mPCC does the merge and serves it as `config`;
@@ -194,6 +200,13 @@ class script_runner(JobServerPlugin):
     # print(scriptDeps)
     # resolve our dependancies
     scriptDeps=self.depResolve(scriptDeps)
+    if scriptDeps is None:
+      # depResolve() said why (a missing or cyclic dependency).  Running
+      # some of them in a guessed order is worse than running none (#146).
+      print("Error: unable to order the scripts by their dependencies, not running any scripts.")
+      self.failed = True
+      self.set_job_failure()
+      return
     # print(scripts)
 
     # make sure our local tmp dir exists.  the entity file we write there
@@ -265,6 +278,14 @@ class script_runner(JobServerPlugin):
     if not failures:
       print("script-runner complete.")
 
+  def entityFailed(self, message):
+    # the run fails, and runonce exits nonzero; nothing has run yet and
+    # /etc/nologin hasn't been created, so there's nothing to undo.
+    print(message)
+    self.failed = True
+    self.set_job_failure()
+    return False
+
   def mpccMerge(self, entity, scriptMode):
     '''
     Use the merge the mPCC serves as the entity's `config` (#269): its
@@ -303,11 +324,10 @@ class script_runner(JobServerPlugin):
         print(f"Error: script '{slug}' is in the mPCC's config but not in the entity.")
         self.scriptResults[slug] = "error: not found in the entity"
         continue
-      scriptType = script['scriptType']
-      if (scriptType['slug'] if isinstance(scriptType, dict) else scriptType) != scriptMode:
+      if slug_of(script['scriptType']) != scriptMode:
         continue
       # dependsOn is a list of objects or of slugs, depending on the nesting
-      scriptDeps[slug] = [dep['slug'] if isinstance(dep, dict) else dep for dep in script['dependsOn']]
+      scriptDeps[slug] = [slug_of(dep) for dep in script['dependsOn']]
       scripts[slug] = script
     return scripts, scriptDeps, config['config_params']
 
@@ -327,42 +347,29 @@ class script_runner(JobServerPlugin):
     # osdistro scripts first
     if entity['osdistro']['scripts'] is not None:
       for script in entity['osdistro']['scripts']:
-        deps=[]
-        if script['scriptType']['slug'] != scriptMode:
+        # with -s the distro is nested deeper (system -> image -> distro), so
+        # scriptType and dependsOn can be slugs instead of objects (#146).
+        if slug_of(script['scriptType']) != scriptMode:
           continue
-        if len(script['dependsOn']) > 0:
-          # we have deps.
-          for dep in script['dependsOn']:
-            deps.append(dep['slug'])
-        scriptDeps[script['slug']] = deps
+        scriptDeps[script['slug']] = [slug_of(dep) for dep in script['dependsOn']]
         scripts[script['slug']] = script
 
     # then group scripts
     for group in entity['systemgroups']:
       if group['scripts'] is not None:
         for script in group['scripts']:
-          deps=[]
-          if script['scriptType']['slug'] != scriptMode:
+          if slug_of(script['scriptType']) != scriptMode:
             continue
-          if len(script['dependsOn']) > 0:
-            # we have deps.
-            for dep in script['dependsOn']:
-              print(dep)
-              deps.append(dep)
-          scriptDeps[script['slug']] = deps
+          # these were used as given, so objects broke depResolve() (#146)
+          scriptDeps[script['slug']] = [slug_of(dep) for dep in script['dependsOn']]
           scripts[script['slug']] = script
 
     # finally lay over the entity scirpts.
     if entity['scripts'] is not None:
       for script in entity['scripts']:
-        deps=[]
-        if script['scriptType']['slug'] != scriptMode:
+        if slug_of(script['scriptType']) != scriptMode:
           continue
-        if len(script['dependsOn']) > 0:
-          # we have deps.
-          for dep in script['dependsOn']:
-            deps.append(dep['slug'])
-        scriptDeps[script['slug']] = deps
+        scriptDeps[script['slug']] = [slug_of(dep) for dep in script['dependsOn']]
         scripts[script['slug']] = script
 
     yaml_merged={}

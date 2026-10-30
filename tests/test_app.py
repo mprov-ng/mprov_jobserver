@@ -142,19 +142,35 @@ def test_register_400_drops_the_session(server):
 
 
 @pytest.mark.parametrize("body", [json.dumps({"msg": "boom"}), {"msg": "boom"}])
-def test_register_500_reports_the_message_and_exits(server, capsys, body):
-  # double-encoded today, an object after mprov_control_center#268 (#155)
+def test_register_500_reports_the_message_and_retries(server, capsys, body):
+  # double-encoded today, an object after mprov_control_center#268 (#155).
+  # It used to exit, a restart loop for as long as the mPCC failed (#159).
+  server.session.write_routes[("POST", "jobservers/")] = (500, body)
+  server.register_server()
+  out = capsys.readouterr().out
+  assert 'The mPCC said: "boom"' in out
+  assert "try again on the next heartbeat" in out
+  assert server.id == 5
+
+
+def test_register_500_without_a_message_retries(server, capsys):
+  server.session.write_routes[("POST", "jobservers/")] = (500, b"Internal Server Error")
+  server.register_server()
+  out = capsys.readouterr().out
+  assert "raw response: Internal Server Error" in out
+  assert "try again on the next heartbeat" in out
+  assert server.id == 5
+
+
+@pytest.mark.parametrize("body", [json.dumps({"msg": "Error locating jobmodule: nosuch"}),
+                                  {"msg": "Error locating jobmodule: nosuch"}])
+def test_register_exits_on_an_unknown_job_module(server, capsys, body):
+  # the 500 the mPCC sends for a job module it doesn't know: a config
+  # error that won't fix itself, so it still stops the job server
   server.session.write_routes[("POST", "jobservers/")] = (500, body)
   with pytest.raises(SystemExit):
     server.register_server()
-  assert 'The mPCC said: "boom"' in capsys.readouterr().out
-
-
-def test_register_500_without_a_message_exits(server, capsys):
-  server.session.write_routes[("POST", "jobservers/")] = (500, b"Internal Server Error")
-  with pytest.raises(SystemExit):
-    server.register_server()
-  assert "raw response: Internal Server Error" in capsys.readouterr().out
+  assert 'The mPCC said: "Error locating jobmodule: nosuch"' in capsys.readouterr().out
 
 
 def test_no_register_flag_skips_registration(server):
@@ -312,6 +328,40 @@ def test_runonce_runs_each_module_once_and_waits_for_it(server, monkeypatch):
   assert Recorder.ran == [server]
   # runonce doesn't heartbeat
   assert server.session.writes == []
+
+
+def test_unregistered_server_starts_modules_only_once_registered(server, monkeypatch):
+  # the first registration failed (an mPCC 500): with id -1 the plugins
+  # would claim jobs for job server -1, so start() registers first (#159)
+  monkeypatch.setattr(mprov_jobserver.plugins, "recorder_mod",
+                      types.SimpleNamespace(recorder_mod=Recorder), raising=False)
+  Recorder.ran = []
+  server.jobmodules = ["recorder-mod"]
+  server.config_data = {}
+  server.runonce = False
+  server.heartbeatInterval = 1
+  server.id = -1
+  server.highLoad = False
+  server.loadmon = False
+  server.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "database is locked"})
+  ticks = []
+
+  def sleep(s):
+    ticks.append(len(Recorder.ran))
+    if len(ticks) == 2:
+      # the mPCC is back
+      server.session.write_routes[("POST", "jobservers/")] = {"pk": 9}
+    if len(ticks) == 4:
+      server.running = False
+  monkeypatch.setattr(app.time, "sleep", sleep)
+  assert server.start() == 0
+  # nothing ran while unregistered; registered on the third heartbeat, then
+  # ran (and again on each heartbeat after, as a finished module does)
+  assert ticks[:2] == [0, 0]
+  assert server.id == 9
+  assert Recorder.ran and set(map(id, Recorder.ran)) == {id(server)}
+  # one heartbeat per tick, also on the one that registered
+  assert len([w for w in server.session.writes if w[1] == "jobservers/"]) == 4
 
 
 class ScriptRunnerModule:

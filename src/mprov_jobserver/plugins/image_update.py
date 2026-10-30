@@ -1,9 +1,10 @@
 import importlib
-from .plugin import JobServerPlugin
+from .plugin import JobServerPlugin, mounts_under
 import os
 import stat
 import subprocess
 import sys
+import tempfile
 import json
 import time
 import urllib.parse
@@ -107,6 +108,40 @@ class image_update(JobServerPlugin):
       return False
     for tmp, final in pulled:
       os.replace(tmp, final)
+    return True
+
+  def packImage(self, busybox, imgDir, dest):
+    # Pack imgDir into the gzipped tar at dest.  tar and gzip run as two
+    # processes so both exit statuses are checked: in a shell pipeline only
+    # gzip's counts, and a tar that failed partway gave a truncated image
+    # (#216).  The archive is written to a temporary file in the image store
+    # (outside imgDir, so it isn't packed into itself) and moved into place
+    # only when both succeeded.  False if anything failed.
+    tmp = None
+    try:
+      fd, tmp = tempfile.mkstemp(dir=self.imageDir, prefix='.' + basename(dest) + '.', suffix='.pack')
+      with os.fdopen(fd, 'wb') as out:
+        tar = subprocess.Popen([busybox, 'tar', 'c', '-C' + imgDir, '-f', '-', './'], stdout=subprocess.PIPE)
+        gzip = subprocess.Popen(['gzip', '-1', '-c'], stdin=tar.stdout, stdout=out)
+        # so tar gets SIGPIPE if gzip dies, instead of blocking on a full pipe
+        tar.stdout.close()
+        gzipStatus = gzip.wait()
+        tarStatus = tar.wait()
+      if tarStatus != 0 or gzipStatus != 0:
+        print(f"Error: packing {imgDir} failed: tar exited {tarStatus}, gzip exited {gzipStatus}")
+        os.unlink(tmp)
+        return False
+      # mkstemp makes it 0600; images are served to nodes, as before from /tmp
+      os.chmod(tmp, 0o644)
+      os.replace(tmp, dest)
+    except OSError as err:
+      print(f"Error: packing {imgDir} failed: {err}")
+      if tmp is not None:
+        try:
+          os.unlink(tmp)
+        except FileNotFoundError:
+          pass
+      return False
     return True
 
   def updateImageJobservers(self):
@@ -214,7 +249,23 @@ class image_update(JobServerPlugin):
         #   if response.status_code <= 199 or response.status_code >= 300:
         #     print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
 
+  def unmountStaleBinds(self):
+    # A build killed with the job server (on a bare-metal install; a
+    # container's mounts go with the container) leaves the host's dev,
+    # proc, run and sys bound into its image tree (#183).  Nothing else
+    # builds images here, so once at start-up, unmount those.
+    if not os.path.isdir(self.imageDir):
+      return
+    for point in mounts_under(self.imageDir):
+      inImage = os.path.dirname(os.path.dirname(point)) == os.path.realpath(self.imageDir)
+      if inImage and os.path.basename(point) in ("dev", "proc", "run", "sys"):
+        print(f"Warn: unmounting {point}, left by an image build that didn't finish.")
+        if subprocess.run(["umount", point]).returncode != 0:
+          subprocess.run(["umount", "-l", point])
+
   def handle_jobs(self):
+    if self.js.firstrun:
+      self.unmountStaleBinds()
     # try:
     self.updateImageJobservers()
     # except Exception as e:
@@ -487,11 +538,19 @@ class image_update(JobServerPlugin):
           print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
 
 
+        # script-runner.sh unmounts the host's dev, proc, run and sys from
+        # the image; if any is still there, tar would pack the host's (#183)
+        mounted = mounts_under(imgDir)
+        if mounted:
+          print(f"Error: not packing {imgDir}, something is still mounted in it: {', '.join(mounted)}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
+
         # package the filesystem into an initramfs
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
         os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
-        if os.system(busybox + ' tar c -C' + imgDir + ' -f - ./ | gzip -1 -c > /tmp/' + imageDetails['slug'] + '.img'):
+        if not self.packImage(busybox, imgDir, imgDir + '/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -499,7 +558,6 @@ class image_update(JobServerPlugin):
         lapsed = endTime - startTime
         print("Image generated in " + str(lapsed) + " seconds.")
         print("Image saved to "+  imgDir + '/' + imageDetails['slug'] + '.img')
-        os.system('mv /tmp/' + imageDetails['slug'] + '.img ' + imgDir + '/' )
 
 
         # update the 'jobservers' field to be us, so that the 

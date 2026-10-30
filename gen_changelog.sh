@@ -11,8 +11,9 @@ if [ "$previous_tag" != 0 ];then
     git log ${current_tag}...${previous_tag} --pretty=format:'*  %s [View](https://github.com/mprov-ng/mprov_jobserver/commit/%H)' --reverse | grep -v Merge
     printf "\n\n"
 else
-    tag_date=$(git log -1 --pretty=format:'%ad' --date=short ${previous_tag})
-    printf "## ${previous_tag} (${tag_date})\n\n"
+    # no previous tag: everything up to current_tag, headed with it
+    tag_date=$(git log -1 --pretty=format:'%ad' --date=short ${current_tag})
+    printf "## ${current_tag} (${tag_date})\n\n"
     git log ${current_tag} --pretty=format:'*  %s [View](https://github.com/mprov-ng/mprov_jobserver/commit/%H)' --reverse | grep -v Merge
 fi
 previous_tag=${current_tag}

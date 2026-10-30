@@ -25,7 +25,7 @@ class dnsmasq(JobServerPlugin):
   undionlyImg = ''
   dnsmasqUser=''
   dnsmasqBinary="/usr/sbin/dnsmasq"
-  threads = []
+  dnsmasqPidFile="/var/run/dnsmasq.pid"
   ipxe_files = ['undionly.kpxe', 'snponly.efi', 'snponly_ipv4.efi']
   firstRun=True
 
@@ -110,6 +110,10 @@ class dnsmasq(JobServerPlugin):
 
   def handle_jobs(self):
     self.firstRun = self.js.firstrun
+    # this run's workers (a class-level list was shared by every run and
+    # grew on every heartbeat)
+    dnsThread = None
+    dhcpThread = None
     # we can also run the DNS thread
     if self.enableDNS:
       # grab any DNS jobs.
@@ -123,7 +127,6 @@ class dnsmasq(JobServerPlugin):
         dnsThread.dnsmasqConfDir = self.dnsmasqConfDir
         dnsThread.mprovDnsmasqDir = self.mprovDnsmasqDir
         dnsThread.start()
-        self.threads.append(dnsThread)
 
     # and finally the DHCP thread
     if self.enableDHCP:
@@ -132,8 +135,7 @@ class dnsmasq(JobServerPlugin):
       jobquery = "&module=[\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
       # print(jobquery)
       if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1") and not self.firstRun:
-        pass # no jobs.
-        self.enableDHCP = False
+        pass # no jobs, so no DHCP worker this pass
       else:
         dhcpThread = DnsmasqDHCPConfig(self.js)
         dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
@@ -142,13 +144,17 @@ class dnsmasq(JobServerPlugin):
         
         dhcpThread.enableTFTP = self.enableTFTP
         dhcpThread.start()
-        self.threads.append(dhcpThread)
     # wait for DNS and DHCP to finish.
-    for thread in self.threads:
-      thread.join()
+    for thread in (dnsThread, dhcpThread):
+      if thread is not None:
+        thread.join()
 
     # Based on our settings, let's start up the submodules for dnsmasq.
-    if(self.enableDNS or self.enableDHCP):
+    # With DNS on, the config module runs every pass (it also keeps dnsmasq
+    # running); DHCP alone only brings it in when the DHCP worker had work.
+    # This used to be `self.enableDHCP = False` in the no-jobs branch, which
+    # read as if DHCP got switched off (#163).
+    if self.enableDNS or dhcpThread is not None:
       
       # DNS or DHCP is on, so let's run the config module
       # the config module for dnsmasq will also be responsible for
@@ -158,6 +164,16 @@ class dnsmasq(JobServerPlugin):
       confThread.mprovDnsmasqDir = self.mprovDnsmasqDir
       confThread.tftproot = self.tftproot
       confThread.dnsmasqUser = self.dnsmasqUser
+      confThread.dnsmasqBinary = self.dnsmasqBinary
+      confThread.dnsmasqPidFile = self.dnsmasqPidFile
+      # what the workers changed decides restart, reload or nothing (#108);
+      # how they did decides their jobs' status (#179).  A worker that
+      # crashed never set completed.
+      workers = [t for t in (dnsThread, dhcpThread) if t is not None]
+      confThread.mainChanged = any(t.mainChanged for t in workers)
+      confThread.hostsChanged = any(t.hostsChanged for t in workers)
+      confThread.dnsOk = None if dnsThread is None else dnsThread.completed
+      confThread.dhcpOk = None if dhcpThread is None else dhcpThread.completed
       confThread.start()
       confThread.join() # wait for the conf to finish.
 

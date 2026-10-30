@@ -134,12 +134,39 @@ def test_system_mode_uses_the_systems_image_distro(js, plugin, monkeypatch):
   assert plugin.entities[0]["hostname"] == "node01"
 
 
-def test_unknown_image_falls_back_to_nads(js, plugin, monkeypatch):
+@pytest.mark.parametrize("reply", [(404, None), (500, {"detail": "boom"}), b"<html>Bad Gateway</html>"])
+def test_image_that_cant_be_loaded_fails_the_run(js, plugin, monkeypatch, capsys, reply):
+  # it fell back to the nads image's scripts, and ran them in the image
+  # being built (#156)
   argv(monkeypatch, "-i", "gone")
-  js.session.routes.update({"systemimages/gone/": (404, None), "systemimages/nads/": entity(slug="nads")})
-  plugin.handle_jobs()
-  assert ("GET", "systemimages/nads/") in js.session.requests
-  assert plugin.ran
+  js.session.routes["systemimages/gone/"] = reply
+  assert plugin.handle_jobs() is False
+  assert ("GET", "systemimages/nads/") not in js.session.requests
+  assert plugin.ran == []
+  assert plugin.failed is True
+  assert "unable to load system image 'gone'" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("reply", [(404, {"msg": "Unknown System", "ip": "10.0.0.9"}),
+                                   entity(hostname="node01", systemimage=None)])
+def test_system_that_cant_be_loaded_fails_the_run(js, plugin, monkeypatch, reply):
+  # an unknown system (404), or one without an image: the nads fallback
+  # crashed on the missing 'systemimage' and runonce still exited 0 (#156)
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = reply
+  assert plugin.handle_jobs() is False
+  assert plugin.ran == []
+  assert plugin.failed is True
+
+
+def test_mpcc_unreachable_fails_the_run(js, plugin, monkeypatch):
+  import requests
+  argv(monkeypatch, "-i", "compute")
+  def down(url, **kw):
+    raise requests.ConnectionError("refused")
+  js.session.get = down
+  assert plugin.handle_jobs() is False
+  assert plugin.failed is True
 
 
 def test_refuses_to_run_outside_runonce(js, plugin, monkeypatch):
@@ -159,12 +186,11 @@ def test_bad_arguments_run_nothing(js, plugin, monkeypatch, args):
 
 
 def test_entity_load_failure_never_creates_nologin(js, plugin, monkeypatch):
-  # neither the image nor the nads fallback loads: handle_jobs() exits(1),
-  # and it must not have locked anyone out on the way (#173).
+  # the image doesn't load: the run fails, and it must not have locked
+  # anyone out on the way (#173).
   argv(monkeypatch, "-i", "gone")
-  js.session.routes.update({"systemimages/gone/": (404, None), "systemimages/nads/": (404, None)})
-  with pytest.raises(SystemExit):
-    plugin.handle_jobs()
+  js.session.routes["systemimages/gone/"] = (404, None)
+  assert plugin.handle_jobs() is False
   assert plugin.nologin == []
 
 
@@ -184,9 +210,8 @@ def test_nologin_is_lifted_when_the_scripts_region_fails(js, plugin, monkeypatch
   assert plugin.nologin == [("touch", "/etc/nologin"), ("unlink", "/etc/nologin")]
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="group scripts' dependsOn are objects (depth 3), but they're used as slugs (#146)")
 def test_group_script_dependencies(js, plugin, monkeypatch):
+  # group scripts' dependsOn are objects (depth 3), but were used as slugs (#146)
   argv(monkeypatch, "-i", "compute")
   data = entity()
   data["systemgroups"][0]["scripts"] = [script("group-tool", depends=[script("base")])]
@@ -195,9 +220,8 @@ def test_group_script_dependencies(js, plugin, monkeypatch):
   assert plugin.ran.index("base") < plugin.ran.index("group-tool")
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="with -s, distro scripts' dependsOn are slugs (depth 4), but they're read as objects (#146)")
 def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
+  # with -s, distro scripts' dependsOn are slugs (depth 4), but were read as objects (#146)
   argv(monkeypatch, "-s")
   system = entity(scripts=[])
   system["hostname"] = "node01"
@@ -209,13 +233,34 @@ def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
   assert plugin.ran.index("base") < plugin.ran.index("tool")
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="an unresolvable dependency makes depResolve() return None, which handle_jobs() iterates (#146)")
-def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch):
+@pytest.mark.parametrize("scripts", [
+  [script("tool", depends=[{"slug": "missing"}])],                                    # nobody provides it
+  [script("a", depends=[{"slug": "b"}]), script("b", depends=[{"slug": "a"}])],        # a cycle
+])
+def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch, scripts):
+  # depResolve() returned None, which handle_jobs() then iterated (#146)
   argv(monkeypatch, "-i", "compute")
-  js.session.routes["systemimages/compute/"] = entity(scripts=[script("tool", depends=[{"slug": "missing"}])])
+  js.session.routes["systemimages/compute/"] = entity(scripts=scripts)
   plugin.handle_jobs()
   assert plugin.ran == []
+  assert plugin.failed is True
+  # nothing ran, so nobody was locked out either
+  assert plugin.nologin == []
+
+
+def test_system_mode_distro_script_type_as_a_slug(js, plugin, monkeypatch):
+  # at depth 4 the scriptType can be a slug too, not an object (post-boot: -b)
+  argv(monkeypatch, "-s", "-b")
+  system = entity(scripts=[])
+  system["hostname"] = "node01"
+  del system["name"]
+  base = dict(script("base", stype="post-boot"), scriptType="post-boot")
+  tool = dict(script("tool", depends=["base"], stype="post-boot"), scriptType="post-boot")
+  system["systemgroups"] = []
+  system["systemimage"] = {"osdistro": dict(system.pop("osdistro"), scripts=[base, tool])}
+  js.session.routes["systems/?self"] = system
+  plugin.handle_jobs()
+  assert plugin.ran == ["base", "tool"]
 
 
 # script failures propagate (#174)

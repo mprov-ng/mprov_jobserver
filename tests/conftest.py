@@ -167,10 +167,41 @@ class Commands:
   def matching(self, text):
     return [cmd for cmd in self.run if text in cmd]
 
+  def popen(self, args, stdin=None, stdout=None, **kwargs):
+    """
+    subprocess.Popen for an argument list: recorded joined with spaces, like
+    an os.system command.  A process writing to a file writes b"PACKED".
+    """
+    return FakeProcess(self, " ".join(args), stdout)
+
+
+class FakeProcess:
+  def __init__(self, commands, cmd, stdout):
+    commands.run.append(cmd)
+    self.returncode = 1 if any(f in cmd for f in commands.fail) else 0
+    if stdout == subprocess.PIPE:
+      self.stdout = FakePipe()
+    else:
+      self.stdout = None
+      if hasattr(stdout, "write"):
+        stdout.write(b"PACKED")
+
+  def wait(self):
+    return self.returncode
+
+
+class FakePipe:
+  def close(self):
+    pass
+
 
 @pytest.fixture
 def commands(monkeypatch):
-  """ Let the plugin "run" shell commands, and record them.  Use after no_processes. """
+  """
+  Let the plugin "run" shell commands (os.system) and processes
+  (subprocess.Popen), and record them.  Use after no_processes.
+  """
   recorder = Commands()
   monkeypatch.setattr(os, "system", recorder)
+  monkeypatch.setattr(subprocess, "Popen", recorder.popen)
   return recorder

@@ -157,7 +157,17 @@ class JobServer ():
         self.startSession()
       else:
         if(counter == self.heartbeatInterval):
-          for mod in self.jobmodules:
+          # Not registered yet (the first registration failed, e.g. an mPCC
+          # 500): without an id the plugins would claim jobs for job server
+          # -1, so register first and start them once we have one (#159).
+          retried = False
+          if self.register and not self.runonce and self.id == -1:
+            self.register_server()
+            retried = True
+          waiting = self.register and not self.runonce and self.id == -1
+          if waiting:
+            print("Error: not registered with the mPCC yet, job modules wait until we are.")
+          for mod in ([] if waiting else self.jobmodules):
             # first check if the thread is done running.
             if mod in self.running_threads: 
               # check if this thread is still running
@@ -183,7 +193,7 @@ class JobServer ():
               self.running_threads[mod].start()
               
           #print(".", sep=None)
-          if not self.runonce:
+          if not self.runonce and not retried:
             self.register_server()
           counter=0
         counter+=1
@@ -350,9 +360,18 @@ class JobServer ():
         if result is None or 'msg' not in result:
           print("Error: And we were unable to load json from the response.")
           print(f"Error: so here is the raw response: {response.text}")
-          sys.exit(1)
+          print("Error: will try again on the next heartbeat.")
+          return
         print(f"Error: The mPCC said: \"{result['msg']}\"")
-        sys.exit(1)
+        # The one 500 the mPCC sends on purpose: a job module in our config
+        # it doesn't know.  That won't fix itself, so stop loudly.  Any other
+        # 500 may pass, and exiting made a restart loop for as long as the
+        # mPCC was failing; try again on the next heartbeat (#159).
+        if str(result['msg']).startswith("Error locating jobmodule"):
+          print("Error: check the jobmodules in your config against the mPCC's job modules.", file=sys.stderr)
+          sys.exit(1)
+        print("Error: will try again on the next heartbeat.")
+        return
 
     result = self.reply_object(response)
     if result is None or 'pk' not in result:
