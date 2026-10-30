@@ -119,7 +119,7 @@ def test_reboots_after_registering_when_set_to(js, plugin, host, frames, command
 def test_failed_registration_doesnt_reboot(js, plugin, host, frames, commands):
   plugin.reboot = True
   frames.append(lldp_frame())
-  js.session.write_routes[("POST", "/systems/register")] = (400, {})
+  js.session.write_routes[("POST", "systems/register")] = (400, {})
   assert plugin.handle_jobs() is False
   assert commands.run == []
 

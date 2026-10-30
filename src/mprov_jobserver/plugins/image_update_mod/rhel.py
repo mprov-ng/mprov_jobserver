@@ -56,7 +56,7 @@ class UpdateImage(JobServerPlugin):
     #   sys.exit(1)
     #res = super().load_config()
     # Register our OS Type with the mPCC. ? Or should this be a fixture?
-    ostypeurl = f"{self.js.mprovURL}/ostypes/"
+    ostypeurl = f"{self.js.mprovURL}ostypes/"
     data = { "slug": "rhel", "name": "Yum/DNF Based Linux" }
     response = self.js.session.post(ostypeurl, data=json.dumps(data))
     if response.status_code != 200:
@@ -133,7 +133,7 @@ class UpdateImage(JobServerPlugin):
 #       repofileContents=f"""
 # [baseos]
 # name= {imageDetails['osdistro']['name']}- mProv
-# baseurl={self.js.mprovURL}/osrepos/{imageDetails['osdistro']['baserepo']['id']}/
+# baseurl={self.js.mprovURL}osrepos/{imageDetails['osdistro']['baserepo']['id']}/
 # gpgcheck=0
 # enabled=1
 
@@ -201,7 +201,7 @@ class UpdateImage(JobServerPlugin):
       print(repo['name'])
       if repo['managed'] :
         # we are managed, so point the repo to the mPCC
-        repourl = f"{self.js.mprovURL}/osrepos/{repo['id']}/"
+        repourl = f"{self.js.mprovURL}osrepos/{repo['id']}/"
       else:
         # otherwise, just set the url to the url in the repo.
         repourl = repo['repo_package_url']
