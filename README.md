@@ -40,6 +40,9 @@ Here is an example for a good first jobserver config:
     # this is the interval which this jobserver will check in with the mPCC
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.
+    # for an https mprovURL whose certificate is from a site or self-signed CA:
+    # the CA's certificate file.  Unset, the OS's CA bundle is used.
+    # caBundle: '/etc/mprov/mpcc-ca.pem'
     myaddress: 'mprov.local.cluster' # set this to the address of this jobserver.
     jobmodules:
       # set the jobmodules you want to run here.
