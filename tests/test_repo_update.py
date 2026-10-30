@@ -232,3 +232,24 @@ def test_the_shipped_config_turns_it_on():
   import yaml, importlib.resources
   text = (importlib.resources.files("mprov_jobserver") / "plugins" / "repo-update.yaml").read_text()
   assert yaml.safe_load(text)[0]["repo-update"]["newestOnly"] is True
+
+
+
+# registering as the repo's host after mirroring (#274)
+
+@pytest.mark.parametrize("reply", [(400, {"hosted_by": ["bad"]}), (404, None), (500, {})])
+def test_a_refused_host_registration_fails_the_job(plugin, js, monkeypatch, capsys, reply):
+  monkeypatch.setattr(os, "system", lambda cmd: 0)
+  js.session.write_routes[("PATCH", "repos/5/")] = reply
+  plugin.handle_jobs()
+  assert js.job_updates_by_id[-1][1:] == (3, 9)
+  assert f"the mPCC answered {reply[0]}" in capsys.readouterr().out
+
+
+def test_an_unreachable_mpcc_fails_the_job(plugin, js, monkeypatch):
+  monkeypatch.setattr(os, "system", lambda cmd: 0)
+  def down(*args, **kwargs):
+    raise ConnectionError("refused")
+  js.session.patch = down
+  plugin.handle_jobs()
+  assert js.job_updates_by_id[-1][1:] == (3, 9)
