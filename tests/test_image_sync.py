@@ -173,3 +173,13 @@ def test_image_deleted_from_the_mpcc_is_skipped(js, plugin, images):
   serve_files(js)
   plugin.handle_jobs()
   assert (images / "compute" / "compute.img").exists()
+
+
+def test_configured_image_list_is_made_of_strings(js, tmp_path):
+  # compared with directory names by the sweep, like repo_sync's (#235)
+  js.jobmodules = ["image-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"image-sync": {"dataRoot": str(root), "imageDir": str(root / "images"), "imageList": ["compute", 2024]}}
+  plugin = image_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.imageList == ["compute", "2024"]

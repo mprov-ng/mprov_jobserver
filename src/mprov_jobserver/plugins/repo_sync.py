@@ -23,6 +23,13 @@ class repo_sync(JobServerPlugin):
       sys.exit(1)
     if not super().load_config():
       return False
+    # A configured repoList is compared with directory names, so make it
+    # strings: YAML reads `repoList: [4, 5]` as ints, and the sweep below then
+    # deleted (and the next pass re-fetched) every repo on the list (#235).
+    if self.repoList is not None:
+      if not isinstance(self.repoList, list):
+        self.repoList = [self.repoList]
+      self.repoList = [str(entry) for entry in self.repoList]
     # The sweep at the end of handle_jobs deletes directories under
     # repoDir, so refuse to start unless repoDir sits inside a data
     # root the operator declared (#171).
