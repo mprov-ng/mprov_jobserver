@@ -64,6 +64,12 @@ class JobServerPlugin(threading.Thread):
   failed = False
 
 
+  def claimedModules(self):
+    # The job modules whose jobs this plugin claims.  When its thread ends,
+    # the job server fails any of them it left RUNNING (#180); a plugin that
+    # claims other modules' jobs (dnsmasq) says so here.
+    return [self.jobModule] if self.jobModule else []
+
   def set_job_running(self):
     # This function can be overridden, especially if you are processing specific jobID's.
     return self.js.update_job_status(self.jobModule, 2) # RUNNING = 2

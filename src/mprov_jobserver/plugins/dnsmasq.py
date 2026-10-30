@@ -1,8 +1,8 @@
-from .dnsmasq_mod.config import DnsmasqConfig
+from .dnsmasq_mod.config import DnsmasqConfig, DNS_MODULES, DHCP_MODULES
 from .dnsmasq_mod.dns import DnsmasqDNSConfig
 from .dnsmasq_mod.dhcp import DnsmasqDHCPConfig
 from .plugin import JobServerPlugin
-import sh, os, sys, shutil, tempfile
+import sh, os, sys, shutil, tempfile, json
 
 # class to handle dnsmaq generation.
 # This class can job modules:
@@ -107,6 +107,10 @@ class dnsmasq(JobServerPlugin):
       shutil.copyfile(built, f"{self.tftproot}/{name}")
     except Exception as e:
       print(f"Error: Unable to copy {built} -> {self.tftproot}/{name}: {e}")
+
+  def claimedModules(self):
+    # the DNS and DHCP/PXE jobs this plugin claims, not "dnsmasq" (#180)
+    return json.loads(DNS_MODULES) + json.loads(DHCP_MODULES)
 
   def handle_jobs(self):
     self.firstRun = self.js.firstrun
