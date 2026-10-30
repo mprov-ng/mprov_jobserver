@@ -68,17 +68,25 @@ class repo_sync(JobServerPlugin):
     # so here we should have either a hard coded config list of repos, 
     # or a list of all repos grabbed from the server.
     # print(self.repoList)
-    for repo in self.repoList: 
+    # over a copy: a deleted repo is removed from the list as we go, which
+    # skipped the next one (#141)
+    for repo in list(self.repoList):
       # grab the MPCC version for this repo.
       # if MPCC 404's the repo was deleted.  Remove from our repoList
       # print an error, and move on.  File deletion happens below.
       print(f"Syncing repo {repo}")
       response = self.js.session.get( self.js.mprovURL + 'repos/' + str(repo) + '/')
-      if(response.status_code == "404" ):
+      # an int: comparing with the string "404" never matched, so a deleted
+      # repo's null reply crashed the whole pass (#141)
+      if response.status_code == 404:
         # repo not found in the MPCC, must have been removed, delete it locally.
         self.repoList.remove(repo)
-        print("Error: repo '" + repo + "' was not found on the MPCC, removing locally." )
+        print(f"Error: repo '{repo}' was not found on the MPCC, removing locally.")
         print("Error: Consider removing it from your config.")
+        continue
+      if response.status_code != 200:
+        # anything else may be passing; try this repo again next pass.
+        print(f"Error: the mPCC answered {response.status_code} for repo {repo}, skipping it this pass.")
         continue
 
       mpccVersion = response.json()['version']

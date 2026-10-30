@@ -67,17 +67,25 @@ class image_sync(JobServerPlugin):
     # so here we should have either a hard coded config list of images, 
     # or a list of all images grabbed from the server.
     print(self.imageList)
-    for image in self.imageList: 
+    # over a copy: a deleted image is removed from the list as we go, which
+    # skipped the next one (#141)
+    for image in list(self.imageList):
       # grab the MPCC version for this image.
       # if MPCC 404's the image was deleted.  Remove from our imageList
       # print an error, and move on.  File deletion happens below.
       print(f"Syncing images for {image}")
       response = self.js.session.get( self.js.mprovURL + 'systemimages/' + image + '/')
-      if(response.status_code == "404" ):
+      # an int: comparing with the string "404" never matched, so a deleted
+      # image's null reply crashed the whole pass (#141)
+      if response.status_code == 404:
         # image not found in the MPCC, must have been removed, delete it locally.
         self.imageList.remove(image)
         print("Error: Image '" + image + "' was not found on the MPCC, removing locally." )
         print("Error: Consider removing it from your config.")
+        continue
+      if response.status_code != 200:
+        # anything else may be passing; try this image again next pass.
+        print(f"Error: the mPCC answered {response.status_code} for image {image}, skipping it this pass.")
         continue
 
       mpccVersion = response.json()['version']

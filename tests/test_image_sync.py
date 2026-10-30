@@ -165,14 +165,28 @@ def test_needs_the_webserver(js):
     image_sync(js).load_config()
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="image_sync compares status_code with the string \"404\", so a deleted image crashes the sync (#141)")
 def test_image_deleted_from_the_mpcc_is_skipped(js, plugin, images):
+  # the 404 check compared with the string "404", so the null reply crashed
+  # the pass; and removing from the list while looping skipped the next (#141)
   plugin.imageList = ["gone", "compute"]
+  mark_owned(images / "gone")
   js.session.routes.update({"systemimages/gone/": (404, None), "systemimages/compute/": image(jobservers=[1])})
   serve_files(js)
   plugin.handle_jobs()
   assert (images / "compute" / "compute.img").exists()
+  # what we had of the deleted image is cleaned up
+  assert not (images / "gone").exists()
+
+
+def test_mpcc_error_on_an_image_keeps_it_for_the_next_pass(js, plugin, images):
+  plugin.imageList = ["flaky", "compute"]
+  mark_owned(images / "flaky")
+  js.session.routes.update({"systemimages/flaky/": (500, None), "systemimages/compute/": image(jobservers=[1])})
+  serve_files(js)
+  plugin.handle_jobs()
+  assert (images / "compute" / "compute.img").exists()
+  # an error that may pass is not a deletion: the image stays on disk
+  assert (images / "flaky").exists()
 
 
 def test_configured_image_list_is_made_of_strings(js, tmp_path):

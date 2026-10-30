@@ -22,7 +22,8 @@ def tlv(tlv_type, payload):
 
 def lldp_frame(switch=b"leaf01", port=b"\x05Ethernet1/5"):
   # Port ID TLVs start with a subtype byte (5 = interface name).
-  payload = (tlv(1, b"\x04" + bytes(6)) + tlv(2, port) + tlv(3, b"\x00\x78")
+  # port=None leaves the Port ID TLV out.
+  payload = (tlv(1, b"\x04" + bytes(6)) + (tlv(2, port) if port is not None else b"") + tlv(3, b"\x00\x78")
              + tlv(5, switch) + tlv(0, b""))
   return bytes.fromhex("0180c200000e") + bytes.fromhex("020000000001") + struct.pack("!H", LLDP_PROTO_ID) + payload
 
@@ -129,14 +130,26 @@ def test_refuses_to_run_outside_runonce(js, plugin, host):
   assert js.session.writes == []
 
 
-@pytest.mark.xfail(strict=True, reason="getLLDP() returns True without a switch and port, so nads registers None (#149)")
 def test_no_lldp_doesnt_register(js, plugin, host, frames):
-  plugin.handle_jobs()
+  # getLLDP() said True without a switch and port, so nads registered None (#149)
+  assert plugin.handle_jobs() is False
   assert register_writes(js) == []
 
 
-@pytest.mark.xfail(strict=True, reason="the Port ID's subtype byte is kept when the port has no '/' (#149)")
 def test_port_without_a_slash(js, plugin, host, frames):
+  # the subtype byte was only dropped along with everything before a '/' (#149)
   frames.append(lldp_frame(port=b"\x05swp12"))
   plugin.handle_jobs()
   assert register_writes(js)[0]["port"] == "swp12"
+
+
+def test_port_given_as_a_mac_address(js, plugin, host, frames):
+  frames.append(lldp_frame(port=b"\x03" + bytes.fromhex("0c42a1b2c3d4")))
+  plugin.handle_jobs()
+  assert register_writes(js)[0]["port"] == "0c:42:a1:b2:c3:d4"
+
+
+def test_switch_without_a_port_doesnt_register(js, plugin, host, frames):
+  frames.append(lldp_frame(port=None))
+  assert plugin.handle_jobs() is False
+  assert register_writes(js) == []
