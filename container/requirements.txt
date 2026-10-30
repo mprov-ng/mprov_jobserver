@@ -1,0 +1,23 @@
+# Exact versions for the job server container image only, used as pip
+# constraints by the Dockerfile so every build gets the same packages
+# (#166).  Dependabot proposes updates to this file.  The package's own
+# requirements (../requirements.txt) only set floors, because the package
+# is also installed into node images next to the distro's python packages.
+certifi==2026.10.23
+charset-normalizer==3.5.2
+distro==1.9.0
+dnspython==2.9.0
+idna==3.20
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+netifaces==0.11.0
+psutil==7.2.2
+py-dmidecode==0.1.3
+pyparted==3.11.7
+pyroute2==0.8.1
+python-slugify==9.1.3
+PyYAML==6.0.3
+requests==2.34.2
+sh==2.4.0
+text-unidecode==1.3
+urllib3==2.8.0

@@ -1,5 +1,6 @@
-# Keep the GitHub Actions used by the workflows up to date.  All action
-# updates come as one pull request a week.
+# Keep the GitHub Actions used by the workflows, and the container's python
+# packages, up to date.  Each ecosystem's updates come as one pull request a
+# week.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -8,5 +9,15 @@ updates:
       interval: "weekly"
     groups:
       github-actions:
+        patterns:
+          - "*"
+  # The job server container's pinned python dependencies (#166).  Only
+  # container/: the package's own requirements.txt keeps its floors.
+  - package-ecosystem: "pip"
+    directory: "/container"
+    schedule:
+      interval: "weekly"
+    groups:
+      container-python:
         patterns:
           - "*"

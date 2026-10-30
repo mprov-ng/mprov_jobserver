@@ -46,7 +46,9 @@ RUN dnf -y install python3.11-pip python3.11-devel
 # or, if we are running in CI, pull it from pypi.
 # RUN mkdir -p /tmp/dist
 COPY dist/ /tmp/dist/
-RUN if [ -e /tmp/dist/*.whl ]; then pip3 uninstall -y mprov-jobserver; pip3 install  /tmp/dist/*.whl; else pip3 --no-cache-dir install mprov_jobserver pyyaml requests jinja2; fi; 
+# the exact dependency versions for this image (#166)
+COPY container/requirements.txt /tmp/container-requirements.txt
+RUN if [ -e /tmp/dist/*.whl ]; then pip3 uninstall -y mprov-jobserver; pip3 install -c /tmp/container-requirements.txt /tmp/dist/*.whl; else pip3 --no-cache-dir install -c /tmp/container-requirements.txt mprov_jobserver pyyaml requests jinja2; fi; 
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \
