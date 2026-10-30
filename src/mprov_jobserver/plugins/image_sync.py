@@ -1,6 +1,6 @@
 import shutil
 from threading import local
-from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_marked_dir
+from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_marked_dir, addjs_version
 import os
 import json
 import sys
@@ -150,8 +150,17 @@ class image_sync(JobServerPlugin):
         data = {
           'slug': image,
           'jobservers': [self.js.id],
+          **addjs_version(self.js, ourVersion),
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
+        if response.status_code == 409:
+          # the image moved past the version we have since our GET: we're
+          # not a host, and without the entry the next pass fetches it (#248)
+          print(f"Warn: not hosting image {image}: the mPCC has it past our version {ourVersion}; we'll fetch it again.")
+          imgVersions.pop(image, None)
+          with open(self.imageDir + '/image-versions', "w") as vfile:
+            vfile.write(json.dumps(imgVersions))
+          continue
         print(f"Image {image} updated.")
       
 

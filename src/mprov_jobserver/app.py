@@ -37,6 +37,8 @@ class JobServer ():
   register = True
   highLoad = False
   firstrun = True
+  # what the mPCC said it supports in its last registration reply (#248)
+  features = frozenset()
   # jobmodules that ran and failed in runonce mode, checked before exiting (#174)
   failed_runonce_modules = []
 
@@ -381,6 +383,10 @@ class JobServer ():
 
     # grab our id from the MPCC
     self.id = result['pk']
+    # and what it supports, read on every heartbeat so a downgraded mPCC
+    # stops getting what it no longer understands (#248).  No key: none.
+    features = result.get('features')
+    self.features = frozenset(f for f in features if isinstance(f, str)) if isinstance(features, list) else frozenset()
 
     print("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 

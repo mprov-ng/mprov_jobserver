@@ -35,6 +35,18 @@ def mounts_under(path, mountinfo='/proc/self/mountinfo'):
   return sorted(found, key=len, reverse=True)
 
 
+def addjs_version(js, version):
+  # The version to send with an image ?addjs PATCH, as a dict to merge into
+  # its data: {"version": version} if the mPCC listed "addjs-version" in its
+  # registration reply, else nothing.  That mPCC refuses (409) to make us a
+  # host of an image that has moved past our version
+  # (mprov_control_center#396).  An mPCC from before that would write a
+  # version it's sent onto the image, so it never gets one (#248).
+  if 'addjs-version' in getattr(js, 'features', ()):
+    return {'version': version}
+  return {}
+
+
 def mark_mprov_dir(dirpath):
   with open(os.path.join(dirpath, MPROV_MARKER), 'w') as marker:
     marker.write('mprov owns this directory\n')
