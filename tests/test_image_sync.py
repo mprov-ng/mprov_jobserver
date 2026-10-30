@@ -187,3 +187,13 @@ def test_mpcc_error_on_an_image_keeps_it_for_the_next_pass(js, plugin, images):
   assert (images / "compute" / "compute.img").exists()
   # an error that may pass is not a deletion: the image stays on disk
   assert (images / "flaky").exists()
+
+
+def test_configured_image_list_is_made_of_strings(js, tmp_path):
+  # compared with directory names by the sweep, like repo_sync's (#235)
+  js.jobmodules = ["image-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"image-sync": {"dataRoot": str(root), "imageDir": str(root / "images"), "imageList": ["compute", 2024]}}
+  plugin = image_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.imageList == ["compute", "2024"]

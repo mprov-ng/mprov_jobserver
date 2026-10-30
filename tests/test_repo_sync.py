@@ -165,3 +165,33 @@ def test_mpcc_error_on_a_repo_keeps_it_for_the_next_pass(js, plugin, sh):
   assert len(sh.wget_calls) == 1
   # an error that may pass is not a deletion: the repo stays on disk
   assert os.path.exists(f"{plugin.repoDir}/4")
+
+
+@pytest.mark.parametrize("configured", [[4, 5], ["4", "5"], [4, "5"]])
+def test_configured_repo_ids_are_kept_through_the_sweep(js, tmp_path, sh, configured):
+  # YAML reads `repoList: [4, 5]` as ints, which never matched the
+  # directory names, so every pass deleted and re-mirrored them (#235)
+  js.jobmodules = ["repo-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"repo-sync": {"dataRoot": str(root), "repoDir": str(root / "repos"), "repoList": configured}}
+  plugin = repo_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.repoList == ["4", "5"]
+  mark_owned(f"{plugin.repoDir}/4")
+  mark_owned(f"{plugin.repoDir}/5")
+  with open(f"{plugin.repoDir}/repo-versions", "w") as f:
+    f.write('{"4": 3, "5": 3}')
+  js.session.routes.update({"repos/4/": {"id": 4, "version": 3, "hosted_by": [1]},
+                            "repos/5/": {"id": 5, "version": 3, "hosted_by": [1]}})
+  plugin.handle_jobs()
+  assert os.path.exists(f"{plugin.repoDir}/4") and os.path.exists(f"{plugin.repoDir}/5")
+  assert sh.wget_calls == []
+
+
+def test_a_single_configured_repo_id_is_a_list_of_one(js, tmp_path):
+  js.jobmodules = ["repo-sync", "mprov-webserver"]
+  root = tmp_path / "mprov"
+  js.config_data = {"repo-sync": {"dataRoot": str(root), "repoDir": str(root / "repos"), "repoList": 4}}
+  plugin = repo_sync(js)
+  assert plugin.load_config() is True
+  assert plugin.repoList == ["4"]

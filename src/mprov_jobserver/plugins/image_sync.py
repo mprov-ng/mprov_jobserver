@@ -22,6 +22,13 @@ class image_sync(JobServerPlugin):
       sys.exit(1)
     if not super().load_config():
       return False
+    # A configured imageList is compared with directory names, so make it
+    # strings: YAML reads `imageList: [4, 5]` as ints, and the sweep below then
+    # deleted (and the next pass re-fetched) every image on the list (#235).
+    if self.imageList is not None:
+      if not isinstance(self.imageList, list):
+        self.imageList = [self.imageList]
+      self.imageList = [str(entry) for entry in self.imageList]
     # The sweep at the end of handle_jobs deletes directories under
     # imageDir, so refuse to start unless imageDir sits inside a data
     # root the operator declared (#171).
