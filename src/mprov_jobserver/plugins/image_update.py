@@ -1,5 +1,5 @@
 import importlib
-from .plugin import JobServerPlugin
+from .plugin import JobServerPlugin, mounts_under
 import os
 import stat
 import subprocess
@@ -249,7 +249,23 @@ class image_update(JobServerPlugin):
         #   if response.status_code <= 199 or response.status_code >= 300:
         #     print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
 
+  def unmountStaleBinds(self):
+    # A build killed with the job server (on a bare-metal install; a
+    # container's mounts go with the container) leaves the host's dev,
+    # proc, run and sys bound into its image tree (#183).  Nothing else
+    # builds images here, so once at start-up, unmount those.
+    if not os.path.isdir(self.imageDir):
+      return
+    for point in mounts_under(self.imageDir):
+      inImage = os.path.dirname(os.path.dirname(point)) == os.path.realpath(self.imageDir)
+      if inImage and os.path.basename(point) in ("dev", "proc", "run", "sys"):
+        print(f"Warn: unmounting {point}, left by an image build that didn't finish.")
+        if subprocess.run(["umount", point]).returncode != 0:
+          subprocess.run(["umount", "-l", point])
+
   def handle_jobs(self):
+    if self.js.firstrun:
+      self.unmountStaleBinds()
     # try:
     self.updateImageJobservers()
     # except Exception as e:
@@ -521,6 +537,14 @@ class image_update(JobServerPlugin):
         else:
           print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
 
+
+        # script-runner.sh unmounts the host's dev, proc, run and sys from
+        # the image; if any is still there, tar would pack the host's (#183)
+        mounted = mounts_under(imgDir)
+        if mounted:
+          print(f"Error: not packing {imgDir}, something is still mounted in it: {', '.join(mounted)}")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
 
         # package the filesystem into an initramfs
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
