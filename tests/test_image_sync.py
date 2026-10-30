@@ -207,3 +207,16 @@ def test_adding_itself_sends_only_its_own_id(js, plugin, images):
   plugin.handle_jobs()
   [(method, path, data)] = js.session.writes
   assert (method, path, data["jobservers"]) == ("PATCH", "systemimages/compute/?addjs", [1])
+
+
+def test_sync_sends_its_version_and_refetches_on_409(js, plugin, images):
+  # (#248) the version goes only to an mPCC that checks it; a 409 means the
+  # image moved on, so it isn't hosted and is fetched again next pass
+  js.features = frozenset({"addjs-version"})
+  js.session.routes.update({"images/": [{"slug": "compute"}], "systemimages/compute/": image(jobservers=[7])})
+  js.session.write_routes[("PATCH", "systemimages/compute/?addjs")] = (409, {"detail": "moved on", "version": 4})
+  serve_files(js)
+  plugin.handle_jobs()
+  [(method, path, data)] = js.session.writes
+  assert data["version"] == 3
+  assert "compute" not in versions(images)

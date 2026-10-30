@@ -918,3 +918,88 @@ def test_adding_itself_as_host_sends_only_its_own_id(js, plugin, images):
   plugin.updateImageJobservers()
   [(method, path, data)] = js.session.writes
   assert (method, path, data["jobservers"]) == ("PATCH", "systemimages/compute/?addjs", [1])
+
+
+# The version we have goes with ?addjs once the mPCC says it checks it; a
+# 409 means the image moved past it (#248, mprov_control_center#396).
+
+ADDJS = ("PATCH", "systemimages/compute/?addjs")
+
+
+def addjs_data(js):
+  [data] = [d for m, p, d in js.session.writes if (m, p) == ADDJS]
+  return data
+
+
+@pytest.mark.parametrize("features, sent", [(frozenset(), False), (frozenset({"addjs-version"}), True)])
+def test_version_is_sent_only_to_an_mpcc_that_checks_it(js, plugin, images, features, sent):
+  # an mPCC from before the check writes a version it's sent onto the image
+  js.features = features
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
+  plugin.updateImageJobservers()
+  assert ("version" in addjs_data(js)) == sent
+  if sent:
+    assert addjs_data(js)["version"] == 4
+
+
+def test_stale_version_isnt_hosted_and_is_fetched_again(js, plugin, images):
+  js.features = frozenset({"addjs-version"})
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
+  js.session.write_routes[ADDJS] = (409, {"detail": "Image compute is at version 5, not 4.", "version": 5})
+  plugin.updateImageJobservers()
+  # no record of having it, so the next pass fetches it
+  assert "compute" not in json.loads((images / "image-versions").read_text())
+
+
+@pytest.fixture
+def boot_files(images, monkeypatch):
+  # updateBootFiles() links the image's kernel and initramfs next to it
+  def link(self):
+    for name in ("compute.vmlinuz", "compute.initramfs"):
+      os.symlink("boot/" + name, images / "compute" / name)
+  monkeypatch.setattr(UpdateImage, "updateBootFiles", link)
+
+
+def test_build_that_lost_its_version_is_removed_and_fails(js, plugin, images, commands, boot_files):
+  # the image was rebuilt while we built it: what we built is the wrong
+  # version, so it's taken down and the job fails; nothing registers it
+  js.features = frozenset({"addjs-version"})
+  pending_build(js)
+  (images / "image-versions").write_text(json.dumps({"compute": 3}))
+  js.session.write_routes[ADDJS] = (409, {"detail": "Image compute is at version 5, not 4.", "version": 5})
+  plugin.handle_jobs()
+  assert addjs_data(js)["version"] == 4
+  assert job_states(js) == [(3, 9)]
+  assert [p.name for p in (images / "compute").iterdir() if p.name.startswith("compute.")] == []
+  assert "compute" not in json.loads((images / "image-versions").read_text())
+
+
+def test_removal_keeps_what_a_newer_pull_put_in_place(js, plugin, images, commands, boot_files):
+  # between publishing and the 409, a pull replaced the image with the
+  # newer version and recorded it: that must survive
+  js.features = frozenset({"addjs-version"})
+  pending_build(js)
+  real_patch = js.session.patch
+  def newer_pull_then_409(url, data=None, **kw):
+    if "?addjs" in url:
+      tmp = images / "compute" / ".compute.img.pull"
+      tmp.write_bytes(b"NEWER")
+      os.replace(tmp, images / "compute" / "compute.img")
+      (images / "image-versions").write_text(json.dumps({"compute": 5}))
+      js.session.write_routes[ADDJS] = (409, {"detail": "moved on", "version": 5})
+    return real_patch(url, data=data, **kw)
+  js.session.patch = newer_pull_then_409
+  plugin.handle_jobs()
+  assert (images / "compute" / "compute.img").read_bytes() == b"NEWER"
+  # only the files this build made went
+  assert not (images / "compute" / "compute.vmlinuz").is_symlink()
+  assert json.loads((images / "image-versions").read_text()) == {"compute": 5}
+  assert job_states(js) == [(3, 9)]
+
+
+def test_build_without_the_check_is_hosted_as_before(js, plugin, images, commands, boot_files):
+  pending_build(js)
+  plugin.handle_jobs()
+  assert "version" not in addjs_data(js)
+  assert job_states(js) == [(4, 9)]
+  assert (images / "compute" / "compute.img").exists()

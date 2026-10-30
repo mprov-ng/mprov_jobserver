@@ -1,5 +1,5 @@
 import importlib
-from .plugin import JobServerPlugin, mounts_under
+from .plugin import JobServerPlugin, mounts_under, addjs_version
 import os
 import stat
 import subprocess
@@ -63,19 +63,71 @@ class image_update(JobServerPlugin):
       image_update.load_config()
     return super().load_config()
 
-  def addAsHost(self, image, imageData):
-    # tell the mPCC we host this image too.  Only our id: the mPCC merges it
-    # into the image's current hosts.  Sending the list from our GET put back
-    # every host a rebuild had cleared since (#248, mprov_control_center#396).
+  def addAsHost(self, image, version):
+    # tell the mPCC we host this image too, at the version we have.  Only our
+    # id: the mPCC merges it into the image's current hosts.  Sending the list
+    # from our GET put back every host a rebuild had cleared since (#248,
+    # mprov_control_center#396).
     # no needs_rebuild: we only add ourselves when the image doesn't need
     # one, and sending False would clear a rebuild asked for since our GET (#226).
+    # False if the mPCC says the image has moved past our version (only an
+    # mPCC that checks it, see addjs_version()); we're not a host then.
     data = {
       'slug': image,
       'jobservers': [self.js.id],
+      **addjs_version(self.js, version),
     }
     response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
+    if response.status_code == 409:
+      print(f"Warn: not hosting image {image}: the mPCC has it past our version {version}; we'll fetch it again.")
+      return False
     if response.status_code <= 199 or response.status_code >= 300:
       print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
+    return True
+
+  def publishedFiles(self, imgDir, slug):
+    # The image, kernel and initramfs this build just put in imgDir, by path
+    # and the (device, inode) of the file itself (the kernel and initramfs
+    # are symlinks; lstat, not the file they point to).
+    published = {}
+    for name in (slug + '.img', slug + '.vmlinuz', slug + '.initramfs'):
+      path = imgDir + '/' + name
+      try:
+        st = os.lstat(path)
+        published[path] = (st.st_dev, st.st_ino)
+      except FileNotFoundError:
+        pass
+    return published
+
+  def unpublish(self, published, slug, version):
+    # Remove what this build published, but only files that are still the
+    # ones it made: a pull of the newer version replaces them with new files
+    # (os.replace), which are left alone.  Likewise the version entry goes
+    # only if it isn't newer than what we built.  Nothing here registers
+    # anything with the mPCC.
+    for path, ident in published.items():
+      try:
+        st = os.lstat(path)
+      except FileNotFoundError:
+        continue
+      if (st.st_dev, st.st_ino) != ident:
+        print(f"Notice: leaving {path}, it was replaced since this build.")
+        continue
+      os.unlink(path)
+    try:
+      with open(self.imageDir + '/image-versions', "r") as vfile:
+        imgVersions = json.loads(vfile.read())
+    except (OSError, ValueError):
+      return
+    if slug in imgVersions and imgVersions[slug] <= version:
+      self.forgetVersion(imgVersions, slug)
+
+  def forgetVersion(self, imgVersions, image):
+    # we don't have this image's current version after all; without an
+    # entry the next pass fetches it again.
+    imgVersions.pop(image, None)
+    with open(self.imageDir + '/image-versions', "w") as vfile:
+      vfile.write(json.dumps(imgVersions))
 
   def pullImage(self, image):
     # Pull the image, its initramfs and its kernel from another job server,
@@ -218,7 +270,8 @@ class image_update(JobServerPlugin):
         imgVersions[image] = 0
       if imgVersions[image] == imageData['version']:
         # our image version matches, tell the mPCC about us.
-        self.addAsHost(image, imageData)
+        if not self.addAsHost(image, imgVersions[image]):
+          self.forgetVersion(imgVersions, image)
         continue
       # check our version against the mPCC version
       if imgVersions[image] != imageData['version']:
@@ -231,7 +284,8 @@ class image_update(JobServerPlugin):
           imgVersions[image] = imageData['version']
           with open(self.imageDir + '/image-versions', "w") as vfile:
             vfile.write(json.dumps(imgVersions))
-          self.addAsHost(image, imageData)
+          if not self.addAsHost(image, imgVersions[image]):
+            self.forgetVersion(imgVersions, image)
         # else:
         #   # if our version doesn't match, and there are no jobservers, submit an image-update job to the mPCC
         #   data = {
@@ -557,15 +611,28 @@ class image_update(JobServerPlugin):
         print("Image saved to "+  imgDir + '/' + imageDetails['slug'] + '.img')
 
 
+        # what this build published, so a 409 below removes exactly these and
+        # never a newer file a pull or another build has put there since
+        published = self.publishedFiles(imgDir, imageDetails['slug'])
+
         # update the 'jobservers' field to be us, so that the 
         data = {
           'slug': imageDetails['slug'],
           'needs_rebuild': False,
           'jobservers':[
             self.js.id,
-          ]
+          ],
+          **addjs_version(self.js, imageDetails['version']),
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
+        if response.status_code == 409:
+          # the image was rebuilt (its version moved on) while we built it,
+          # so what we built is the wrong version: don't host it, take it
+          # down, and fail the job; the newer rebuild job builds it (#248).
+          print(f"Error: image {imageDetails['slug']} moved past version {imageDetails['version']} while we built it; removing what this build published.")
+          self.unpublish(published, imageDetails['slug'], imageDetails['version'])
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
         with open(self.imageDir + '/image-versions', "r") as vfile:
           # grab the version info into a var
           try:

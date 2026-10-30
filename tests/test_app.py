@@ -440,3 +440,35 @@ def test_runonce_still_exits_zero_when_everything_succeeds(server, monkeypatch, 
   assert server.failed_runonce_modules == []
   # runonce doesn't heartbeat and reports no failure
   assert server.session.patches == []
+
+
+# what the mPCC supports, from its registration reply (#248)
+
+@pytest.mark.parametrize("reply, features", [
+  (json.dumps({"pk": 9, "features": ["addjs-version"]}), {"addjs-version"}),  # double-encoded
+  ({"pk": 9, "features": ["addjs-version", "something-new"]}, {"addjs-version", "something-new"}),
+  ({"pk": 9}, set()),                                  # an mPCC from before it
+  ({"pk": 9, "features": "addjs-version"}, set()),     # not a list
+  ({"pk": 9, "features": ["addjs-version", 7, None]}, {"addjs-version"}),
+])
+def test_register_reads_the_mpccs_features(server, reply, features):
+  server.session.write_routes[("POST", "jobservers/")] = reply
+  server.register_server()
+  assert server.features == features
+
+
+def test_features_go_when_the_mpcc_stops_listing_them(server):
+  # a downgraded mPCC: the next heartbeat stops us sending what it can't take
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 9, "features": ["addjs-version"]}
+  server.register_server()
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 9}
+  server.register_server()
+  assert server.features == set()
+
+
+def test_a_failed_heartbeat_keeps_the_last_features(server):
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 9, "features": ["addjs-version"]}
+  server.register_server()
+  server.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "boom"})
+  server.register_server()
+  assert server.features == {"addjs-version"}
