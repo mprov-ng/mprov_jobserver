@@ -9,6 +9,7 @@ fixture), so the tests check the commands and the files written.
 import copy
 import json
 import os
+import shlex
 import stat
 import subprocess
 import types
@@ -69,7 +70,8 @@ def fake_wget(monkeypatch):
   def call(self, cmd):
     rc = record(self, cmd)
     if rc == 0 and "wget " in cmd and " -O " in cmd:
-      with open(cmd.split(" -O ")[1].split()[0], "wb") as f:
+      args = shlex.split(cmd)
+      with open(args[args.index("-O") + 1], "wb") as f:
         f.write(fake.body)
     return rc
   monkeypatch.setattr(Commands, "__call__", call)

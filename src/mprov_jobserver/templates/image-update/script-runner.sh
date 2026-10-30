@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# grab some params
+# grab some params; the job server passes them shell-quoted, and they're
+# used in double quotes below, so any path or slug stays one word (#184)
 IMGDIR={{ imgDir }}
 IMAGE={{ image }}
 
@@ -12,8 +13,8 @@ IMAGE={{ image }}
 cleanup() {
   for i in sys run proc dev
   do
-    if mountpoint -q ${IMGDIR}/${i}; then
-      umount ${IMGDIR}/${i} || umount -l ${IMGDIR}/${i}
+    if mountpoint -q "${IMGDIR}/${i}"; then
+      umount "${IMGDIR}/${i}" || umount -l "${IMGDIR}/${i}"
     fi
   done
 }
@@ -25,10 +26,12 @@ trap 'exit 129' HUP
 
 for i in `echo "dev proc run sys"`
 do
-  mount -o bind /$i ${IMGDIR}/${i}
+  mount -o bind "/$i" "${IMGDIR}/${i}"
 done 
 
 # chroot into our IMGDIR and run the jobserver.
-chroot $IMGDIR /bin/bash -c "/usr/local/bin/mprov_jobserver -c /tmp/mprov/jobserver.yaml -r -d -i $IMAGE"
+# the slug goes in as an argument, not as part of the -c string, so the
+# inner bash never parses it
+chroot "$IMGDIR" /bin/bash -c '/usr/local/bin/mprov_jobserver -c /tmp/mprov/jobserver.yaml -r -d -i "$1"' bash "$IMAGE"
 # the image build fails if a script failed, so keep the job server's status (#221)
 exit $?
