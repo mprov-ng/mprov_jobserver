@@ -74,6 +74,18 @@ class UpdateRepo(JobServerPlugin):
       ],
     }
     log.debug(json.dumps(data))
-    response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
+    # without this the repo is mirrored but has no host in the mPCC, so
+    # nothing is sent here for it: that's a failed job, not a success (#274)
+    try:
+      response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
+      ok = 199 < response.status_code < 300
+      why = f"the mPCC answered {response.status_code}"
+    except Exception as err:
+      ok = False
+      why = str(err)
+    if not ok:
+      log.error(f"repo {self.repo['id']} is mirrored, but it couldn't be registered as hosted here: {why}")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      return
     self.js.update_job_status(self.jobModule, 4, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
     return 
