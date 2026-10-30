@@ -264,8 +264,15 @@ class JobServer ():
       queryURL = self.mprovURL + 'jobs/' + str(jobid) + '/'
     elif jobquery != "":
       queryURL = self.mprovURL + 'jobs/?' + jobquery
+    elif status == 2:
+      # claiming: only this module's pending jobs.  search= matched any
+      # status and any job server (a substring search, at that), so a module
+      # took over jobs other job servers were running, and the poll fetched
+      # the module's whole history (#112).
+      queryURL = self.mprovURL + 'jobs/?module=' + job_module + '&status=1'
     else:
-      queryURL = self.mprovURL + 'jobs/?search=' + job_module
+      # finishing: only the jobs of this module we're running (#112)
+      queryURL = self.mprovURL + 'jobs/?jobserver=' + str(self.id) + '&module=' + job_module + '&status=2'
     response = self.session.get( queryURL )
     if response.status_code <= 199 or response.status_code >=300:
 
