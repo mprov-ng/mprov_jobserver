@@ -1,4 +1,3 @@
-from http import server
 import os
 from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer

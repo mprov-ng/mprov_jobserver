@@ -2,7 +2,6 @@
 # build repos from RHEL based (yum/dnf) systems.
 import os
 import shlex
-from urllib.parse import urlparse
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import json
 from mprov_jobserver.log import get_logger
@@ -18,7 +17,7 @@ class UpdateRepo(JobServerPlugin):
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
     # if 'repo-server' not in self.js.jobmodules:
-    #   print("Configuration Error: you MUST run repo-server on repo-upate/repo-delete nodes!")
+    #   print("Configuration Error: you MUST run repo-server on repo-update/repo-delete nodes!")
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
@@ -33,16 +32,13 @@ class UpdateRepo(JobServerPlugin):
 
 
   def handle_jobs(self):
-    if self.repo == None:
+    if self.repo is None:
       log.error("repo was empty.")
       return
     log.info(f"Running rhel repo update for repo {self.repo['id']}")
     repoDetails = self.repo
     log.debug(repoDetails['repo_package_url'])
     
-    # let's do some extraction
-    parsed_uri = urlparse(repoDetails['repo_package_url'])
-    pathDepth = parsed_uri.path.count("/") - 1
 
     # try to make the directory for this repo.
     os.makedirs(f"{self.repoDir}/{self.repo['id']}", exist_ok=True)

@@ -1,5 +1,4 @@
 import shutil
-from threading import local
 from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_marked_dir
 import os
 import json

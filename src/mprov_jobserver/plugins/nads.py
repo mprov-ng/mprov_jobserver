@@ -1,5 +1,3 @@
-from ipaddress import IPv4Network
-import ipaddress
 import os
 from .plugin import JobServerPlugin
 import time
@@ -13,15 +11,13 @@ Parts for LLDP parsing are borrowed from https://github.com/GoozeyX/lldp.discove
 
 """
 import netifaces
-import fcntl, struct
 
 from ctypes import c_char, c_short, Structure
 from fcntl import ioctl
-from socket import socket, htons, inet_ntoa
-from socket import AF_PACKET, AF_INET, SOCK_DGRAM, SOCK_RAW
-from socket import gaierror
+from socket import socket, htons
+from socket import AF_PACKET, SOCK_RAW
 
-from struct import pack, unpack
+from struct import unpack
 
 from dmidecode import DMIDecode
 from pyroute2 import IPDB
@@ -292,7 +288,7 @@ class nads(JobServerPlugin):
         # ignore all errors here because we really don't care.
         pass
     
-    if lldpRes == False:
+    if lldpRes is False:
 
       return False
 

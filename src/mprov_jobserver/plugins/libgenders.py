@@ -1,8 +1,5 @@
-import shutil
-from threading import local
 from .plugin import JobServerPlugin
 import os
-import json
 import sys
 from slugify import slugify
 from mprov_jobserver.log import get_logger
@@ -53,7 +50,7 @@ class libgenders(JobServerPlugin):
     # get a list of all nodes.
     response = self.js.session.get( self.js.mprovURL + 'systems/')
     if not self.checkHTTPStatus(response.status_code):
-      log.error("Unable to get a list of sysetms from the mPCC.")
+      log.error("Unable to get a list of systems from the mPCC.")
       self.set_job_failure()
       return
     nodes = response.json()
@@ -76,7 +73,7 @@ class libgenders(JobServerPlugin):
     # get a list of all os distros.
     response = self.js.session.get ( self.js.mprovURL + 'distros/')
     if not self.checkHTTPStatus(response.status_code):
-      log.error("Unable to get a list of OS Distrubutions from the mPCC.")
+      log.error("Unable to get a list of OS Distributions from the mPCC.")
       self.set_job_failure()
       return    
     distros = response.json()

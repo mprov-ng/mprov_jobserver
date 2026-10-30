@@ -43,7 +43,7 @@ class image_update(JobServerPlugin):
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
     if 'mprov-webserver' not in self.js.jobmodules:
-      log.error("Configuration error: you MUST run mprov-webserver on image-upate/image-delete nodes!")
+      log.error("Configuration error: you MUST run mprov-webserver on image-update/image-delete nodes!")
       log.error("image-update/delete nodes are SOURCE nodes for images!")
       log.error("and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)
@@ -344,7 +344,7 @@ class image_update(JobServerPlugin):
       jobs = response.json()
       if len(jobs):
         self.threadOk = False
-        log.info(f"Dependant Jobs Present, waiting for them to finish.")
+        log.info(f"Dependent Jobs Present, waiting for them to finish.")
         return
     except:
       log.warning("Unable to parse reply, trying to continue anyway.")
@@ -359,7 +359,7 @@ class image_update(JobServerPlugin):
       jobs = response.json()
       if len(jobs):
         self.threadOk = False
-        log.info(f"Dependant Jobs Present, waiting for them to finish.")
+        log.info(f"Dependent Jobs Present, waiting for them to finish.")
         return
     except:
       log.warning("Unable to parse reply, trying to continue anyway.")
@@ -465,7 +465,7 @@ class image_update(JobServerPlugin):
         image_update.start()
 
         image_update.join()
-        if image_update.threadOk != True:
+        if image_update.threadOk is not True:
           continue
         # run image-gen scripts.
     
@@ -612,7 +612,7 @@ class image_update(JobServerPlugin):
         if hasattr(image_update, 'updateBootFiles') and callable(getattr(image_update, 'updateBootFiles', None)):
           image_update.updateBootFiles() # You can call it
           # it fails the job itself; don't pack and register the image (#144).
-          if image_update.threadOk != True:
+          if image_update.threadOk is not True:
             continue
         else:
           log.info(f"{imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")

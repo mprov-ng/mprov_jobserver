@@ -1,6 +1,5 @@
 from time import sleep
 import threading
-import sys
 import os
 from mprov_jobserver.log import get_logger
 

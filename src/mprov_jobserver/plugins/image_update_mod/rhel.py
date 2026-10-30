@@ -1,9 +1,7 @@
 # This sub-module of the image-update job module
 import os
-from urllib.parse import urlparse
 from slugify import slugify
 import json
-import distro
 import shutil
 import re
 import shlex
@@ -56,7 +54,7 @@ class UpdateImage(JobServerPlugin):
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
     # if 'repo-server' not in self.js.jobmodules:
-    #   print("Configuration Error: you MUST run repo-server on repo-upate/repo-delete nodes!")
+    #   print("Configuration Error: you MUST run repo-server on repo-update/repo-delete nodes!")
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
@@ -154,9 +152,6 @@ class UpdateImage(JobServerPlugin):
     # would move every other plugin's working directory too (#129).  Every
     # path below is absolute.
     os.makedirs(imgDir, exist_ok=True)
-    # grab the repo rpm
-    url = urlparse(baseURL)
-    file = os.path.basename(url.path)
 #     print()
 #     if imageDetails['osdistro']['baserepo']['managed']:
 #       # locally managed repo, let's just generate a repo file and point it.
@@ -201,7 +196,6 @@ class UpdateImage(JobServerPlugin):
 
     # install the extra repository packages on the system image
     log.info("Installing extra repos...")
-    repostr = ""
     repos = []
 
     # pull in the repos from the image.
@@ -278,13 +272,13 @@ class UpdateImage(JobServerPlugin):
     # install gpg keys for the distro into the installroot
     log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"')
     if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"'):
-      log.error("unable to genergate image filesystem.")
+      log.error("unable to generate image filesystem.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return 
     # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
     # if os.system(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"'):
-    #   print("Error: unable to genergate image filesystem.")
+    #   print("Error: unable to generate image filesystem.")
     #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
     #   self.threadOk = False
     #   return 
@@ -296,7 +290,7 @@ class UpdateImage(JobServerPlugin):
       log.info(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
       if os.system(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
 
-        log.error("unable to genergate image filesystem.")
+        log.error("unable to generate image filesystem.")
         self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         self.threadOk = False
         return

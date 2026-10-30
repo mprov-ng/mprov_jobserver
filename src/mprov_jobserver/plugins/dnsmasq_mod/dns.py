@@ -79,7 +79,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
                
     def handle_jobs(self):
 
-        # get the network informatioin
+        # get the network information
         response = self.js.session.get( self.js.mprovURL + 'networks/?managedns=True')
         response_ok = response.status_code == 200 and isinstance(response.json(), list)
         data = {

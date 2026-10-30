@@ -1,8 +1,5 @@
 import importlib
-from urllib import response
-from urllib.parse import urlparse
 from .plugin import JobServerPlugin
-import sys
 import os
 
 
@@ -23,7 +20,7 @@ class repo_update(JobServerPlugin):
 
   def load_config(self):
     # if 'mprov-webserver' not in self.js.jobmodules:
-    #   print("Configuration Error: you MUST run mprov-webserver on repo-upate/repo-delete nodes!")
+    #   print("Configuration Error: you MUST run mprov-webserver on repo-update/repo-delete nodes!")
     #   print("                   : repo-update/delete nodes are SOURCE nodes for repos!")
     #   print("                   : and need a way to serve repos! Job Module Halted!!!")
     #   sys.exit(1)
@@ -83,7 +80,7 @@ class repo_update(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         return
     # create an empty robots.txt file.
-    with open(f'{self.repoDir}/robots.txt', 'w') as fp:
+    with open(f'{self.repoDir}/robots.txt', 'w'):
       pass
     workers = []
     for repo,jid in self.repoList.items():
@@ -101,7 +98,7 @@ class repo_update(JobServerPlugin):
           log.error("Unable to parse response.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
-        if repo['ostype'] == None:
+        if repo['ostype'] is None:
           log.error(f"Repo {repo['id']} doesn't have an OS type set.  Exiting.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue

@@ -32,7 +32,7 @@ class DnsmasqDHCPConfig(JobServerPlugin):
     def load_config(self):
         return True
     def handle_jobs(self):
-        # get the network informatioin
+        # get the network information
         response = self.js.session.get( self.js.mprovURL + 'networks/?isdhcp=True')
         response_ok = response.status_code == 200 and isinstance(response.json(), list)
         # print(self.enableTFTP)
