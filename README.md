@@ -47,6 +47,9 @@ Here is an example for a good first jobserver config:
     # tagged [E], [W], [I] or [D] and the module; under systemd, journald also
     # gets the level, so `journalctl -p warning -u mprov_jobserver` works.
     # logLevel: info
+    # this host's id for the mPCC, so a rename keeps its registration.  Unset,
+    # a random one is made and kept in host-id next to this file.
+    # hostId: 'rack4-js01'
     # logTimestamps: True # stamp lines yourself; journald and docker already do.
     myaddress: 'mprov.local.cluster' # set this to the address of this jobserver.
     jobmodules:

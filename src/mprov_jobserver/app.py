@@ -15,6 +15,7 @@ from .plugins.plugin import JobServerPlugin
 import mprov_jobserver.plugins
 import glob
 import multiprocessing
+import uuid
 from mprov_jobserver.log import get_logger, configure as log_configure
 
 log = get_logger(__name__)
@@ -74,6 +75,10 @@ class JobServer ():
   apikey = ""
   # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
   caBundle = ""
+  # this host's stable id for the mPCC; unset, a random one is kept in
+  # host-id next to the config file (#113)
+  hostId = ""
+  _hostIdValue = None
   # how much the log says (error, warning, info, debug), and whether lines
   # carry a timestamp; journald and docker stamp lines themselves (#104)
   logLevel = "info"
@@ -436,6 +441,13 @@ class JobServer ():
       else:
         log.info("load back to normal.")
       self.highLoad = highLoad
+    # the mPCC knows us by this id, if it says it can, instead of by our
+    # name, so a rename or another host with our name doesn't take over or
+    # split our registration (#113)
+    if 'host-id' in self.features:
+      hostId = self.host_id()
+      if hostId:
+        data['host_id'] = hostId
     # print(self.config_data)
     if 'mprov-webserver' in self.config_data:
     # if  self.config_data['mprov-webserver']:
@@ -458,6 +470,12 @@ class JobServer ():
     if response.status_code == 400:
         log.error("Server returned error 400. Make sure your specified jobmodules exist.")
         self.sessionOk = False
+        return
+    if response.status_code == 409:
+        # our name is registered by another job server (another host id)
+        result = self.reply_object(response) or {}
+        log.error(f"the mPCC refused our registration: {result.get('detail', response.text)}")
+        log.error("give this host a unique name (or check hostId); will try again on the next heartbeat.")
         return
     if response.status_code == 500:
         log.error("The mPCC had an internal server error.")
@@ -493,6 +511,43 @@ class JobServer ():
 
     log.info("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
+
+  def host_id(self):
+    '''
+    This host's stable id for the mPCC (#113): the global hostId if set,
+    else the one in host-id next to the config file (/etc/mprov/host-id),
+    made on first use from a random uuid4.  Not /etc/machine-id: in the
+    container image it's baked in at build time, so every container from
+    one image has the same one.  None if there's no id and none can be
+    saved; the job server then registers by its name, as before.
+    '''
+    if self._hostIdValue is not None:
+      return self._hostIdValue or None
+    value = str(self.hostId or "").strip()
+    if not value:
+      path = os.path.join(os.path.dirname(os.path.abspath(self.configfile)), 'host-id')
+      try:
+        with open(path) as idfile:
+          value = idfile.read().strip()
+      except FileNotFoundError:
+        pass
+      except OSError as err:
+        log.warning(f"unable to read the host id in {path}: {err}")
+      if not value:
+        value = str(uuid.uuid4())
+        try:
+          with open(path, 'w') as idfile:
+            idfile.write(value + "\n")
+          os.chmod(path, 0o644)
+          log.info(f"this host's id for the mPCC is {value}, saved in {path}.")
+        except OSError as err:
+          log.warning(f"unable to save a host id in {path}: {err}; registering by name.")
+          value = ""
+    if len(value) > 64:
+      log.error(f"the host id {value!r} is longer than 64 characters; registering by name.")
+      value = ""
+    self._hostIdValue = value
+    return value or None
 
   def use_ca_bundle(self):
     # verify the mPCC's certificate against the configured caBundle or the
