@@ -5,8 +5,19 @@ from slugify import slugify
 import json
 import distro
 import shutil
+import re
+import shlex
 
 from mprov_jobserver.plugins.plugin import JobServerPlugin
+
+# Values from mPCC records go into shell commands here, so they're checked
+# or quoted first: a value that's fine as data but odd as shell syntax
+# mustn't change the command (#184).
+# a kernel module name, as dracut and modinfo take it
+MODULE_NAME = re.compile(r'[A-Za-z0-9_-]+')
+# a distro version, as dnf's --releasever takes it (e.g. 9, 8.10)
+DISTRO_VERSION = re.compile(r'[0-9]+(\.[0-9]+)*')
+
 
 class UpdateImage(JobServerPlugin):
   imageDetails = None
@@ -32,7 +43,12 @@ class UpdateImage(JobServerPlugin):
     # dracut stops at a built-in or unknown module and leaves out every
     # driver listed after it (#206), so keep only the ones that are a module
     # for every kernel in the image.
-    mods = [mod for mod in initial_mods.replace(',', ' ').split() if mod]
+    mods = []
+    for mod in initial_mods.replace(',', ' ').split():
+      if MODULE_NAME.fullmatch(mod):
+        mods.append(mod)
+      else:
+        print(f"Leaving {mod!r} out of the initramfs: not a kernel module name.")
     try:
       kernels = os.listdir(f"{imgDir}/lib/modules")
     except OSError:
@@ -42,7 +58,7 @@ class UpdateImage(JobServerPlugin):
     for mod in mods:
       if mod in keep:
         continue
-      if all(os.system(f"chroot {imgDir} modinfo -k {kernel} -n {mod} >/dev/null 2>&1") == 0 for kernel in kernels):
+      if all(os.system(f"chroot {shlex.quote(imgDir)} modinfo -k {shlex.quote(kernel)} -n {mod} >/dev/null 2>&1") == 0 for kernel in kernels):
         keep.append(mod)
       else:
         print(f"Leaving {mod} out of the initramfs: it's built in, or not a module of the image's kernel.")
@@ -51,8 +67,9 @@ class UpdateImage(JobServerPlugin):
   def updateBootFiles(self):
     # update the dracut image one last time.
     imgDir = self.imageDir + '/' + self.imageDetails['slug']
+    qimg = shlex.quote(imgDir)
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, self.imageDetails['osdistro']['initial_mods']))}\""
+    cmd=f"chroot {qimg} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, self.imageDetails['osdistro']['initial_mods']))}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")
@@ -64,6 +81,7 @@ class UpdateImage(JobServerPlugin):
 
     imageDetails = self.imageDetails
     imgDir = self.imageDir + '/' + self.imageDetails['slug']
+    qimg = shlex.quote(imgDir)
 
     baseURL=imageDetails['osdistro']['baserepo']['repo_package_url']
     print(baseURL)
@@ -170,23 +188,28 @@ class UpdateImage(JobServerPlugin):
     disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
     for drepo in disable_repos:
       try:
-        os.system(f"dnf -y --installroot {imgDir} config-manager --disable {drepo}")
+        os.system(f"dnf -y --installroot {qimg} config-manager --disable {drepo}")
       except:
         pass
 
     ######
 
     ver= str(imageDetails['osdistro']['version'])
+    if not DISTRO_VERSION.fullmatch(ver):
+      print(f"Error: the OS distro's version {ver!r} isn't a version number (like 9 or 8.10).")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
     # run a clean on yum, in the image only: a plain `dnf clean all` here
     # wiped the job server's own dnf cache on every build (#164)
-    if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
+    if os.system('dnf --installroot=' + qimg + ' -y clean all'):
       print("Error: unable to clear all dnf metadata.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     # install gpg keys for the distro into the installroot
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck install "*-gpg-keys"'):
+    print('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"')
+    if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"'):
       print("Error: unable to genergate image filesystem.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
@@ -199,11 +222,11 @@ class UpdateImage(JobServerPlugin):
     #   return 
       
     # build the filesystem.
-    print('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-    if os.system('dnf -y --installroot=' + imgDir + ' --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+    print('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+    if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
       # if this fails, lets try something slightly different...
-      print(f'chroot {imgDir} dnf -y --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-      if os.system(f'chroot {imgDir} dnf -y --releasever=' + str(imageDetails['osdistro']['version'])  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+      print(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+      if os.system(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
 
         print("Error: unable to genergate image filesystem.")
         self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
@@ -214,7 +237,7 @@ class UpdateImage(JobServerPlugin):
     disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
     for drepo in disable_repos:
       try:
-        os.system(f"chroot {imgDir} dnf -y --disable config-manager {drepo}")
+        os.system(f"chroot {qimg} dnf -y --disable config-manager {drepo}")
       except:
         pass
 
@@ -226,17 +249,17 @@ class UpdateImage(JobServerPlugin):
       pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch glibc-langpack-en"
       
 
-    print(f'chroot {imgDir} dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
-    if os.system(f'chroot {imgDir}  dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+    print(f'chroot {qimg} dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       # if this fails, let's try to rebuild the rpm db
-      if os.system(f'chroot {imgDir} rpm --rebuilddb'):
+      if os.system(f'chroot {qimg} rpm --rebuilddb'):
         print("Error unable to install required packages into image filesystem")
         self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         self.threadOk = False
         return
       else:
         # we succeeded so try to run the original command again.
-        if os.system(f'chroot {imgDir}  dnf -y  --releasever=' + str(imageDetails['osdistro']['version'])  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+        if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
           # still failed, uh... let's die.
           print("Error: Unable to use dnf for some reason.  Bailing.")
           print("Error: No image generated.")
@@ -245,17 +268,17 @@ class UpdateImage(JobServerPlugin):
           return
 
     # set up a version lock on the kernel
-    os.system(f'chroot {imgDir} dnf -y versionlock kernel*')
+    os.system(f'chroot {qimg} dnf -y versionlock kernel*')
 
     shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
     
     if float(imageDetails['osdistro']['version']) < 9 :
-      os.system(f'chroot {imgDir} alternatives --set python3 /usr/bin/python3.8')
-      os.system(f'chroot {imgDir} alternatives --set python /usr/bin/python3.8')
-      os.system(f'chroot {imgDir} alternatives --set pip3 /usr/bin/pip3.8')
+      os.system(f'chroot {qimg} alternatives --set python3 /usr/bin/python3.8')
+      os.system(f'chroot {qimg} alternatives --set python /usr/bin/python3.8')
+      os.system(f'chroot {qimg} alternatives --set pip3 /usr/bin/pip3.8')
 
     # pip install some stuff
-    if os.system(f"chroot {imgDir} pip3 install sh pyparted==3.11.7 requests"):
+    if os.system(f"chroot {qimg} pip3 install sh pyparted==3.11.7 requests"):
       print("Error uanble to install pip packages into image filesystem")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
@@ -273,32 +296,32 @@ class UpdateImage(JobServerPlugin):
       except:
         pass
 
-    if os.system('ls -1 ' + imgDir + '/boot/vmlinuz-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.vmlinuz'): 
+    if os.system('ls -1 ' + qimg + '/boot/vmlinuz-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + qimg + '/' + imageDetails['slug'] + '.vmlinuz'): 
       print("Error: unable to copy kernel image.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
-    if os.system('ls -1 ' + imgDir + '/boot/initramfs-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + imgDir + '/' + imageDetails['slug'] + '.initramfs'): 
+    if os.system('ls -1 ' + qimg + '/boot/initramfs-* | grep -v rescue | sort -r | head -n1 | xargs -I{} ln -sf {} ' + qimg + '/' + imageDetails['slug'] + '.initramfs'): 
       print("Error: unable to copy initramfs.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
 
-    if os.system('rm -f ' + imgDir + '/dev/ram0; mknod -m 600 ' + imgDir + '/dev/ram0 b 1 0'):
+    if os.system('rm -f ' + qimg + '/dev/ram0; mknod -m 600 ' + qimg + '/dev/ram0 b 1 0'):
       print('Error: trying to make /dev/ram0')
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
     
-    if os.system('rm -f ' + imgDir + '/dev/initrd; mknod -m 400 ' + imgDir + '/dev/initrd b 1 250'):
+    if os.system('rm -f ' + qimg + '/dev/initrd; mknod -m 400 ' + qimg + '/dev/initrd b 1 250'):
       print('Error: trying to make /dev/ram0')
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
       
     print(f"Regenerating initial ramdisk... ")
-    cmd=f"chroot {imgDir} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, imageDetails['osdistro']['initial_mods']))}\""
+    cmd=f"chroot {qimg} dracut --regenerate-all -f --mdadmconf --force-add mdraid --add-drivers sd_mod --add-drivers \"{' '.join(self.realModules(imgDir, imageDetails['osdistro']['initial_mods']))}\""
     print(cmd)
     if os.system(cmd):
       print("Error: Unable to dracut a new initramfs.")

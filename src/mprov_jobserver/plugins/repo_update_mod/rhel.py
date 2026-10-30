@@ -1,6 +1,7 @@
 # This sub-module of the repo_update job module, will sync and 
 # build repos from RHEL based (yum/dnf) systems.
 import os
+import shlex
 from urllib.parse import urlparse
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import json
@@ -50,7 +51,10 @@ class UpdateRepo(JobServerPlugin):
     #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
     # the --installroot option here allows us to override dnf's stupid download locking and allows
     # us to parallelize reposync properly-ish.
-    if os.system(f"dnf reposync --repofrompath {self.repo['id']},\"{self.repo['repo_package_url']}\" --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
+    # the URL is a free-text field in the mPCC: quoted, it can't change the
+    # command, whatever it holds (#184).  The repo id is the integer pk.
+    repoFromPath = shlex.quote(f"{self.repo['id']},{self.repo['repo_package_url']}")
+    if os.system(f"dnf reposync --repofrompath {repoFromPath} --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
       print("Error: unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return

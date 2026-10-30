@@ -171,3 +171,23 @@ def test_run_waits_for_every_repo_it_started(js, tmp_path, monkeypatch):
   plugin.repoDir = str(tmp_path / "repos")
   plugin.handle_jobs()
   assert sorted(finished) == [21, 22]
+
+
+@pytest.mark.parametrize("url", [
+  'https://mirror.example/rocky/9/BaseOS/x86_64/os/',
+  'https://mirror.example/repo"; touch /tmp/pwned; echo "',
+  "https://mirror.example/$(id)/os/",
+  "https://mirror.example/with space/os/",
+])
+def test_the_repo_url_stays_one_argument(plugin, js, monkeypatch, url):
+  # a free-text field in the mPCC, so it's quoted, never part of the shell
+  # syntax (#184)
+  import shlex
+  commands = []
+  monkeypatch.setattr(os, "system", lambda cmd: commands.append(cmd) or 0)
+  plugin.repo["repo_package_url"] = url
+  plugin.handle_jobs()
+  [cmd] = commands
+  args = shlex.split(cmd)
+  assert args[args.index("--repofrompath") + 1] == f"5,{url}"
+  assert args[0:2] == ["dnf", "reposync"]
