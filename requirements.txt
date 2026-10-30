@@ -1,12 +1,12 @@
-pyyaml  # https://pypi.org/project/PyYAML/ - MIT
-jinja2 # https://pypi.org/project/Jinja2/ - 3 Clause BSD
-requests
+pyyaml>=5.4.1  # https://pypi.org/project/PyYAML/ - MIT
+jinja2>=2.11.3 # https://pypi.org/project/Jinja2/ - 3 Clause BSD
+requests>=2.22.0
 python-slugify
 py-dmidecode
 netifaces
 pyparted==3.11.7
 sh
 pyroute2==0.8.1
-dnspython
+dnspython>=2.0
 distro
 psutil
