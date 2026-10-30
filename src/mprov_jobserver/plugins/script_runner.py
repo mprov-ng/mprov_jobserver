@@ -183,7 +183,14 @@ class script_runner(JobServerPlugin):
     merged = self.mpccMerge(entity, scriptMode)
     if merged is None:
       merged = self.layerMerge(entity, scriptMode)
+    # read before config_params is replaced by the merge: the lists from
+    # every layer count, not just the most specific one (#110)
+    disabled = self.disabledScripts(entity, merged[2])
     scripts, scriptDeps, entity['config_params'] = merged
+    if not self.dropDisabled(scripts, scriptDeps, disabled):
+      self.failed = True
+      self.set_job_failure()
+      return
 
     # add the mprovURL to the entity. 
     entity['mprovURL'] = self.js.mprovURL
@@ -285,6 +292,74 @@ class script_runner(JobServerPlugin):
     self.failed = True
     self.set_job_failure()
     return False
+
+  def layerParams(self, layer):
+    ''' A layer's own config_params as a dict (YAML text, a dict, or a list of mappings), or {}. '''
+    params = layer.get('config_params') if isinstance(layer, dict) else None
+    if isinstance(params, str):
+      try:
+        params = yaml.safe_load(params)
+      except yaml.YAMLError:
+        return {}
+    if isinstance(params, list):
+      flat = {}
+      for entry in params:
+        if isinstance(entry, dict):
+          flat.update(entry)
+      params = flat
+    return params if isinstance(params, dict) else {}
+
+  def disabledScripts(self, entity, merged_params):
+    '''
+    The script slugs listed under disable_scripts in any layer's
+    config_params (distro, system groups, image, system), combined (#110):
+    a node can switch off a script its group runs while it tests another.
+    A single slug may be given as a string.
+    '''
+    layers = [('the OS distro', entity.get('osdistro'))]
+    image = entity.get('systemimage')
+    if isinstance(image, dict):
+      layers += [(f"system group {g.get('name')}", g) for g in image.get('systemgroups') or [] if isinstance(g, dict)]
+      layers.append((f"system image {image.get('name')}", image))
+    layers += [(f"system group {g.get('name')}", g) for g in entity.get('systemgroups') or [] if isinstance(g, dict)]
+    layers.append((f"{entity.get('hostname') or entity.get('name')}", entity))
+    sources = [(name, self.layerParams(layer)) for name, layer in layers]
+    sources.append(("the merged config", merged_params if isinstance(merged_params, dict) else {}))
+    disabled = []
+    for name, params in sources:
+      value = params.get('disable_scripts')
+      if value is None:
+        continue
+      if isinstance(value, str):
+        value = [value]
+      if not isinstance(value, list) or not all(isinstance(slug, str) for slug in value):
+        log.warning(f"ignoring disable_scripts in {name}'s config_params: it isn't a list of script slugs")
+        continue
+      for slug in value:
+        if slug.strip() and slug.strip() not in disabled:
+          disabled.append(slug.strip())
+    return disabled
+
+  def dropDisabled(self, scripts, scriptDeps, disabled):
+    '''
+    Leave the disabled scripts out of this run.  False if a script that
+    still runs depends on one: running it without what it needs is worse
+    than not running (#110).
+    '''
+    for slug in disabled:
+      if slug in scripts:
+        log.info(f"skipping {slug} (disable_scripts)")
+        del scripts[slug]
+        scriptDeps.pop(slug, None)
+      else:
+        log.warning(f"disable_scripts names {slug}, which isn't in this run")
+    ok = True
+    for slug, deps in scriptDeps.items():
+      for dep in deps:
+        if dep in disabled:
+          log.error(f"script {slug} depends on {dep}, which disable_scripts turns off; not running any scripts.")
+          ok = False
+    return ok
 
   def mpccMerge(self, entity, scriptMode):
     '''
