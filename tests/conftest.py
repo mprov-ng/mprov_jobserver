@@ -75,7 +75,11 @@ class FakeSession:
 
   def _path(self, url):
     assert url.startswith(MPROV_URL), f"request outside the mPCC: {url}"
-    return url[len(MPROV_URL):]
+    path = url[len(MPROV_URL):]
+    # mprovURL ends with "/": a path that starts with one too makes "//",
+    # which only works where the web server merges slashes (#115)
+    assert not path.startswith("/"), f"double slash in mPCC URL: {url}"
+    return path
 
   def _response(self, route):
     if isinstance(route, tuple):

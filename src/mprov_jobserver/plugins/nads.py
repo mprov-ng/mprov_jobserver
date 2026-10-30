@@ -302,7 +302,7 @@ class nads(JobServerPlugin):
 
     # if we got LLDP, tell the MPCC who we are, or better put, send it our switch, port, and mac.
     # and let it sort it out.
-    query = '/systems/register'
+    query = 'systems/register'
 
     # grab our DMIDecode information
     dmi = DMIDecode()

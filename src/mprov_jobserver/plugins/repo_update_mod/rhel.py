@@ -20,7 +20,7 @@ class UpdateRepo(JobServerPlugin):
     #   sys.exit(1)
     #res = super().load_config()
     # Register our OS Type with the mPCC. ? Or should this be a fixture?
-    ostypeurl = f"{self.js.mprovURL}/ostypes/"
+    ostypeurl = f"{self.js.mprovURL}ostypes/"
     data = { "slug": "rhel", "name": "Yum/DNF Based Linux" }
     response = self.js.session.post(ostypeurl, data=json.dumps(data))
     if response.status_code != 200:
