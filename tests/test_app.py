@@ -695,7 +695,7 @@ def test_a_name_held_by_another_job_server_is_reported_and_retried(server, tmp_p
   host_id_server(server, tmp_path)
   server.session.write_routes[("POST", "jobservers/")] = (409, {"detail": "name js01 is registered by another job server"})
   server.register_server()
-  err = capsys.readouterr().err
-  assert "name js01 is registered by another job server" in err
+  out = capsys.readouterr().out
+  assert "[E] app: the mPCC refused our registration: name js01 is registered by another job server" in out
   # nothing else changes; the next heartbeat tries again
   assert server.id == 5 and server.sessionOk

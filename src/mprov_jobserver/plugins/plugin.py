@@ -2,6 +2,9 @@ from time import sleep
 import threading
 import sys
 import os
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 # Marker file mprov writes into every directory it creates inside a
 # configured sync directory.  The end-of-sync sweep may only delete
@@ -124,7 +127,7 @@ class JobServerPlugin(threading.Thread):
           getattr(self, config_entry)
           setattr(self, config_entry, self.js.config_data[self.jobModule][config_entry])
         except:
-          print("Error: Unknown config entry " + config_entry + " in " + self.jobModule)
+          log.error("Unknown config entry " + config_entry + " in " + self.jobModule)
     return True
 
   def handle_jobs(self):
@@ -149,7 +152,7 @@ class JobServerPlugin(threading.Thread):
       return
 
     
-    print(self.jobModule + ": Sleeping 15 seconds to simulate work.  Override 'handle_jobs()' to do something useful.")
+    log.debug(self.jobModule + ": Sleeping 15 seconds to simulate work.  Override 'handle_jobs()' to do something useful.")
     sleep(15)
     
     # Update our jobs with success or failure

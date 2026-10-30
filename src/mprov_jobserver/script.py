@@ -4,6 +4,9 @@ import socket
 from mprov_jobserver.tls import ca_bundle
 import uuid
 import yaml, os, sys, glob, time
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 class MProvScript():
   '''
   This class is a template that can be used by scripts run
@@ -28,7 +31,7 @@ class MProvScript():
 
     # start a session
     if not self.startSession():
-      print("Error: Unable to communicate with the mPCC.")
+      log.error("Unable to communicate with the mPCC.")
       sys.exit(1)
 
   def yaml_include(self, loader, node):
@@ -41,7 +44,7 @@ class MProvScript():
     yaml.add_constructor("!include", self.yaml_include)
     
     if not(os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK)):
-      print("Error: Unable to find a working config file.")
+      log.error("Unable to find a working config file.")
       sys.exit(1)
 
     with open(self.configfile, "r") as yamlfile:
@@ -74,7 +77,7 @@ class MProvScript():
     try:
       self.caBundle = ca_bundle(self.caBundle)
     except FileNotFoundError as err:
-      print(f"Error: {err}.", file=sys.stderr)
+      log.error(f"{err}.")
       return False
     if self.caBundle:
       self.session.verify = self.caBundle
@@ -82,8 +85,8 @@ class MProvScript():
       response = self.session.get(self.mprovURL, stream=True)
     except Exception as err:
       # say why: "Communication error" alone hid certificate problems (#102)
-      print(f"Error: unable to reach the mPCC at {self.mprovURL}: {err}", file=sys.stderr)
-      print("Error: Communication error to the server.  Retrying.", file=sys.stderr)
+      log.error(f"unable to reach the mPCC at {self.mprovURL}: {err}")
+      log.error("Communication error to the server.  Retrying.")
       self.sessionOk = False
       time.sleep(self.heartbeatInterval)
       return False

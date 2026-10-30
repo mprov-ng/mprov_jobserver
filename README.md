@@ -43,6 +43,11 @@ Here is an example for a good first jobserver config:
     # for an https mprovURL whose certificate is from a site or self-signed CA:
     # the CA's certificate file.  Unset, the OS's CA bundle is used.
     # caBundle: '/etc/mprov/mpcc-ca.pem'
+    # how much to log: error, warning, info (the default) or debug.  Each line is
+    # tagged [E], [W], [I] or [D] and the module; under systemd, journald also
+    # gets the level, so `journalctl -p warning -u mprov_jobserver` works.
+    # logLevel: info
+    # logTimestamps: True # stamp lines yourself; journald and docker already do.
     myaddress: 'mprov.local.cluster' # set this to the address of this jobserver.
     jobmodules:
       # set the jobmodules you want to run here.

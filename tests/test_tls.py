@@ -114,7 +114,7 @@ def test_the_job_server_says_why_it_cant_connect(mpcc, no_os_ca, capsys):
   url, _ = mpcc
   server = job_server(url, "")
   assert not server.startSession()
-  err = capsys.readouterr().err
+  err = capsys.readouterr().out
   assert f"unable to reach the mPCC at {url}" in err
   assert "CERTIFICATE_VERIFY_FAILED" in err
   assert "set global caBundle" in err
@@ -140,4 +140,4 @@ def test_mprov_script_says_why_it_cant_connect(mpcc, no_os_ca, capsys, monkeypat
   monkeypatch.setattr(script_module.time, "sleep", lambda s: None)
   url, _ = mpcc
   assert not mprov_script(url, "").startSession()
-  assert "CERTIFICATE_VERIFY_FAILED" in capsys.readouterr().err
+  assert "CERTIFICATE_VERIFY_FAILED" in capsys.readouterr().out

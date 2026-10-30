@@ -1,6 +1,9 @@
 from .plugin import JobServerPlugin, mounts_under
 import os
 import shutil
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 class image_delete(JobServerPlugin):
   jobModule = 'image-delete'
@@ -38,7 +41,7 @@ class image_delete(JobServerPlugin):
       # a bad job fails by itself; the ones after it still run (#158)
       path = self.image_path(job.get('params'))
       if path is None:
-        print(f"Error: image-delete job {job['id']} doesn't name an image (params: {job.get('params')!r}), not deleting anything.")
+        log.error(f"image-delete job {job['id']} doesn't name an image (params: {job.get('params')!r}), not deleting anything.")
         self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
         continue
       imageId = os.path.basename(path)
@@ -50,27 +53,27 @@ class image_delete(JobServerPlugin):
             # rmtree would delete through them (#183)
             mounted = mounts_under(path)
             if mounted:
-              print(f"Error: not deleting {path}, something is still mounted in it: {', '.join(mounted)}")
+              log.error(f"not deleting {path}, something is still mounted in it: {', '.join(mounted)}")
               self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
               continue
             # the path seems there.  Kill it.
             try:
               shutil.rmtree(path)
             except OSError as err:
-              print(f"Error: unable to delete {path}: {err}")
+              log.error(f"unable to delete {path}: {err}")
               self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
               continue
             self.js.update_job_status(self.jobModule, 4, jobid=job['id'])
           else:
-            print("Error: image has no directory:" + path)
+            log.error("image has no directory:" + path)
             self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
 
         else:
-          print("Error: imageDir doesn't exist: " + self.imageDir)
+          log.error("imageDir doesn't exist: " + self.imageDir)
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
 
       else:
-        print("Error: Recieved image-delete job for image we don't host. HuH?")
+        log.error("Recieved image-delete job for image we don't host. HuH?")
         self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
 
 

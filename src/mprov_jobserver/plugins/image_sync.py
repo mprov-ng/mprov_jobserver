@@ -4,6 +4,9 @@ from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_mar
 import os
 import json
 import sys
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 class image_sync(JobServerPlugin):
   jobModule = 'image-sync'
@@ -16,9 +19,9 @@ class image_sync(JobServerPlugin):
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
     if 'mprov-webserver' not in self.js.jobmodules:
-      print("Configuration Error: you MUST run mprov-webserver on image-sync nodes!")
-      print("                   : image-sync nodes are SOURCE nodes for images!")
-      print("                   : and need a way to serve images! Job Module Halted!!!")
+      log.error("Configuration error: you MUST run mprov-webserver on image-sync nodes!")
+      log.error("image-sync nodes are SOURCE nodes for images!")
+      log.error("and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)
     if not super().load_config():
       return False
@@ -33,8 +36,8 @@ class image_sync(JobServerPlugin):
     # imageDir, so refuse to start unless imageDir sits inside a data
     # root the operator declared (#171).
     if not self.dataRoot or not path_is_under(self.imageDir, self.dataRoot):
-      print("Configuration Error: image-sync imageDir '" + str(self.imageDir) + "' must be inside dataRoot '" + str(self.dataRoot) + "'.")
-      print("                   : Refusing to run: the end-of-sync sweep deletes directories under imageDir.")
+      log.error("Configuration error: image-sync imageDir '" + str(self.imageDir) + "' must be inside dataRoot '" + str(self.dataRoot) + "'.")
+      log.error("Refusing to run: the end-of-sync sweep deletes directories under imageDir.")
       sys.exit(1)
     return True
 
@@ -66,26 +69,26 @@ class image_sync(JobServerPlugin):
     
     # so here we should have either a hard coded config list of images, 
     # or a list of all images grabbed from the server.
-    print(self.imageList)
+    log.debug(self.imageList)
     # over a copy: a deleted image is removed from the list as we go, which
     # skipped the next one (#141)
     for image in list(self.imageList):
       # grab the MPCC version for this image.
       # if MPCC 404's the image was deleted.  Remove from our imageList
       # print an error, and move on.  File deletion happens below.
-      print(f"Syncing images for {image}")
+      log.info(f"Syncing images for {image}")
       response = self.js.session.get( self.js.mprovURL + 'systemimages/' + image + '/')
       # an int: comparing with the string "404" never matched, so a deleted
       # image's null reply crashed the whole pass (#141)
       if response.status_code == 404:
         # image not found in the MPCC, must have been removed, delete it locally.
         self.imageList.remove(image)
-        print("Error: Image '" + image + "' was not found on the MPCC, removing locally." )
-        print("Error: Consider removing it from your config.")
+        log.error("Image '" + image + "' was not found on the MPCC, removing locally.")
+        log.error("Consider removing it from your config.")
         continue
       if response.status_code != 200:
         # anything else may be passing; try this image again next pass.
-        print(f"Error: the mPCC answered {response.status_code} for image {image}, skipping it this pass.")
+        log.error(f"the mPCC answered {response.status_code} for image {image}, skipping it this pass.")
         continue
 
       mpccVersion = response.json()['version']
@@ -133,7 +136,7 @@ class image_sync(JobServerPlugin):
             with open(self.imageDir + '/' + image + '/' + image + '.vmlinuz', 'wb') as localFile:
               for chunk in remoteImage.iter_content(chunk_size=8192):
                 localFile.write(chunk)
-        print(f"Image {image} download complete. Updating versions")        
+        log.info(f"Image {image} download complete. Updating versions")        
         # file download complete.  Update our version
         imgVersions[image] = mpccVersion
         ourVersion = mpccVersion
@@ -141,7 +144,7 @@ class image_sync(JobServerPlugin):
           vfile.write(json.dumps(imgVersions))
       if self.js.id not in currJobServers:
         # tell the MPCC we can host this file
-        print(f"Adding ourself to mPCC for image {image}")
+        log.info(f"Adding ourself to mPCC for image {image}")
         # Only our id: the mPCC merges it into the image's current hosts.
         # Sending the list from our GET put back every host a rebuild had
         # cleared since (#248, mprov_control_center#396).
@@ -156,16 +159,16 @@ class image_sync(JobServerPlugin):
         if response.status_code == 409:
           # the image moved past the version we have since our GET: we're
           # not a host, and without the entry the next pass fetches it (#248)
-          print(f"Warn: not hosting image {image}: the mPCC has it past our version {ourVersion}; we'll fetch it again.")
+          log.warning(f"not hosting image {image}: the mPCC has it past our version {ourVersion}; we'll fetch it again.")
           imgVersions.pop(image, None)
           with open(self.imageDir + '/image-versions', "w") as vfile:
             vfile.write(json.dumps(imgVersions))
           continue
-        print(f"Image {image} updated.")
+        log.info(f"Image {image} updated.")
       
 
     # Clean up any directories that are not in our imageList.
-    print("Scanning for haning images... " + self.imageDir)
+    log.info("Scanning for haning images... " + self.imageDir)
     for entry in os.listdir(self.imageDir):
       # print(entry)
       entryPath = self.imageDir + '/' + entry
@@ -176,10 +179,10 @@ class image_sync(JobServerPlugin):
           # But only if we own it: without our marker this directory is
           # somebody else's data and we must never delete it (#171).
           if not is_mprov_marked_dir(entryPath):
-            print("Warn: leaving unowned directory alone (no mprov marker): " + entryPath)
+            log.warning("leaving unowned directory alone (no mprov marker): " + entryPath)
             continue
           #print("rm -rf " + entryPath)
-          print("Warn: Removed unknown image directory: " + entryPath)
+          log.warning("Removed unknown image directory: " + entryPath)
           shutil.rmtree(entryPath)
 
         
