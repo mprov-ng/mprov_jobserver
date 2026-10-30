@@ -142,6 +142,19 @@ def unpack_lldp_frame(eth_payload):
     
 
 
+def port_id(tlv_payload):
+    """
+    The port from a Port ID TLV's payload.  It starts with a one-byte
+    subtype (IEEE 802.1AB), which isn't part of the port: 5 is an
+    interface name (e.g. b"\\x05swp12"), and 3 a MAC address, given as 6
+    raw bytes.
+    """
+    subtype, port = tlv_payload[:1], tlv_payload[1:]
+    if subtype == b"\x03" and len(port) == 6:
+        return ':'.join('%02x' % b for b in port)
+    return port.decode('utf-8')
+
+
 class ifreq(Structure):
     """ C-compatible `ifreq` struct """
     _fields_ = [("ifr_ifrn", c_char * 16),
@@ -159,6 +172,9 @@ class nads(JobServerPlugin):
 
   def getLLDP(self):
     startTime = time.time()
+    # what an earlier interface half-answered doesn't count for this one
+    self.port = None
+    self.switch = None
 
     # setup a capture socket.
     capture_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))
@@ -194,7 +210,7 @@ class nads(JobServerPlugin):
           if tlv_type == LLDP_TLV_DEVICE_NAME:
             self.switch= tlv_payload.decode('utf-8')
           elif tlv_type == LLDP_TLV_TYPE_PORTID:
-            self.port = tlv_payload.decode('utf-8')
+            self.port = port_id(tlv_payload)
 
           # exit our loops, we have what we came for.
           if  self.port is not None and self.switch is not None:
@@ -210,6 +226,7 @@ class nads(JobServerPlugin):
       # if we get here and don't have a port and a switch name,
       # we cannot continue.
       print("Error: Unable to detect switch and port via LLDP")
+      return False
     # if we get here, we're all set.
     return True
 
