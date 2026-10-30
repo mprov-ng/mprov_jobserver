@@ -95,7 +95,7 @@ class dnsmasq(JobServerPlugin):
         print(f"Error: iPXE IPv4 only EFI make command failed. {e}")
         return
       self.copy_ipxe_file(f"{src}/bin-x86_64-efi/snponly.efi", "snponly_ipv4.efi")
-      print("Build Process finished.  Errors appear above.")
+      print("iPXE build finished.")
     except Exception as e:
       # don't let a failed build end the plugin's thread; it's retried on the next start.
       print(f"Error: unable to build iPXE: {e}")

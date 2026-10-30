@@ -330,7 +330,7 @@ def fake_clone(args, kwargs):
     pathlib.Path(kwargs["_cwd"], "ipxe", "src").mkdir(parents=True)
 
 
-def test_ipxe_build_installs_nothing_at_runtime(js, tmp_path, monkeypatch):
+def test_ipxe_build_installs_nothing_at_runtime(js, tmp_path, monkeypatch, capsys):
   # the tools come with the image; a runtime dnf raced the image builds (#207)
   fake = FakeSh(on={"git": fake_clone, "make": fake_make})
   monkeypatch.setattr(dnsmasq_plugin, "sh", fake)
@@ -340,6 +340,10 @@ def test_ipxe_build_installs_nothing_at_runtime(js, tmp_path, monkeypatch):
 
   assert [name for name, _ in fake.calls] == ["git", "git", "make", "make"]
   assert sorted(p.name for p in tftproot.iterdir()) == ["snponly.efi", "snponly_ipv4.efi", "undionly.kpxe"]
+  # a build that worked doesn't point at errors (#211)
+  out = capsys.readouterr().out
+  assert "iPXE build finished." in out
+  assert "Error" not in out
 
 
 def test_ipxe_build_failure_doesnt_end_the_plugin(js, tmp_path, monkeypatch, capsys):
