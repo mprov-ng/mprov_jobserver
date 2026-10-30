@@ -2,6 +2,9 @@ from .plugin import JobServerPlugin
 import os
 import re
 import shutil
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 # repo-update mirrors each repo into <repoDir>/<repo id>
 REPO_ID = re.compile(r'[0-9]+')
@@ -61,26 +64,26 @@ class repo_delete(JobServerPlugin):
   def delete_stale(self):
     ''' Remove the deleted repos' mirrors.  False if that didn't work out. '''
     if not self.repoDir:
-      print("Error: repo-delete has no repoDir (set it, or repo-update's), not deleting anything.")
+      log.error("repo-delete has no repoDir (set it, or repo-update's), not deleting anything.")
       return False
     if not os.path.isdir(self.repoDir):
       # nothing was ever mirrored here, so nothing to delete
-      print(f"Notice: repo-delete: {self.repoDir} doesn't exist, nothing to delete.")
+      log.info(f"{self.repoDir} doesn't exist, nothing to delete.")
       return True
     # every repo, managed or not: only a repo the mPCC no longer has at all
     # loses its mirror.  Without a real list, delete nothing.
     response = self.js.session.get(self.js.mprovURL + 'repos/')
     repos = response.json() if response.status_code == 200 else None
     if not isinstance(repos, list):
-      print(f"Error: the mPCC answered {response.status_code} for its repo list, not deleting anything.")
+      log.error(f"the mPCC answered {response.status_code} for its repo list, not deleting anything.")
       return False
     known = {str(repo['id']) for repo in repos if isinstance(repo, dict) and 'id' in repo}
     ok = True
     for path in self.stale_repos(known):
       try:
         shutil.rmtree(path)
-        print(f"Removed {path}: its repo was deleted from the mPCC.")
+        log.info(f"Removed {path}: its repo was deleted from the mPCC.")
       except OSError as err:
-        print(f"Error: unable to delete {path}: {err}")
+        log.error(f"unable to delete {path}: {err}")
         ok = False
     return ok

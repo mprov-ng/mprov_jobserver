@@ -4,6 +4,9 @@ from mprov_jobserver.plugins.dnsmasq_mod.dhcp import host_list
 from .service import write_if_changed, remove_stale
 import os, socket, ipaddress, netifaces
 from socket import AF_INET, AF_INET6
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -96,7 +99,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
             # grab the system network interfaces that are on this network.
             response = None
             data_hosts = { 'hosts': [] }
-            print(self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
+            log.debug(self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
             response = self.js.session.get( self.js.mprovURL + 'networkinterfaces/?network=' + network['slug'])
             if self.checkHTTPStatus(response.status_code):
                 data_hosts = {
@@ -107,7 +110,7 @@ class DnsmasqDNSConfig(JobServerPlugin):
             data_hosts['hosts'].extend(self._addSelfToNet(network))
 
             # grab the bmcs that are on this network.
-            print(self.js.mprovURL + f"systembmcs/?network={network['id']}&detail")
+            log.debug(self.js.mprovURL + f"systembmcs/?network={network['id']}&detail")
             response = self.js.session.get(self.js.mprovURL + f"systembmcs/?network={network['id']}&detail")
             if self.checkHTTPStatus(response.status_code):
                 # only do the bmcs if we get some.

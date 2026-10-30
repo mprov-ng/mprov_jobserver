@@ -342,8 +342,8 @@ def test_ipxe_build_installs_nothing_at_runtime(js, tmp_path, monkeypatch, capsy
   assert sorted(p.name for p in tftproot.iterdir()) == ["snponly.efi", "snponly_ipv4.efi", "undionly.kpxe"]
   # a build that worked doesn't point at errors (#211)
   out = capsys.readouterr().out
-  assert "iPXE build finished." in out
-  assert "Error" not in out
+  assert "[I] dnsmasq: iPXE build finished." in out
+  assert "[E]" not in out
 
 
 def test_ipxe_build_failure_doesnt_end_the_plugin(js, tmp_path, monkeypatch, capsys):
@@ -356,7 +356,7 @@ def test_ipxe_build_failure_doesnt_end_the_plugin(js, tmp_path, monkeypatch, cap
   tftproot.mkdir()
   ipxe_plugin(js, tftproot).build_ipxe()
 
-  assert "Error: unable to build iPXE: disk full" in capsys.readouterr().out
+  assert "[E] dnsmasq: unable to build iPXE: disk full" in capsys.readouterr().out
   assert list(tftproot.iterdir()) == []
 
 

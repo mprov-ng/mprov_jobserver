@@ -3,6 +3,9 @@ from .dnsmasq_mod.dns import DnsmasqDNSConfig
 from .dnsmasq_mod.dhcp import DnsmasqDHCPConfig
 from .plugin import JobServerPlugin
 import sh, os, sys, shutil, tempfile, json
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 # class to handle dnsmaq generation.
 # This class can job modules:
@@ -42,7 +45,7 @@ class dnsmasq(JobServerPlugin):
           buildIpxe = True
 
       if buildIpxe:
-        print("Rebuilding iPXE files, some or all are missing.")
+        log.info("Rebuilding iPXE files, some or all are missing.")
         self.build_ipxe()
     return result
 
@@ -60,45 +63,45 @@ class dnsmasq(JobServerPlugin):
     buildDir = tempfile.mkdtemp(prefix="mprov-ipxe-")
     src = f"{buildDir}/ipxe/src"
     try:
-      print(f"\tCheck out iPXE code to {buildDir}/ipxe/")
+      log.info(f"\tCheck out iPXE code to {buildDir}/ipxe/")
       try:
         sh.git(['clone', 'https://github.com/ipxe/ipxe'], _cwd=buildDir)
         sh.git(['checkout', 'e66552eeede19a91b1a52468a550b58fd031777b'], _cwd=f"{buildDir}/ipxe")
       except Exception as e:
-        print(f"Error: unable to fetch ipxe source.  You may need to copy some files yourself. {e}")
+        log.error(f"unable to fetch ipxe source.  You may need to copy some files yourself. {e}")
         return
 
       # config/local/general.h is included after iPXE's defaults, so it
       # can turn features on and off without patching iPXE's own headers.
       os.makedirs(f"{src}/config/local", exist_ok=True)
-      print("\tEnabling HTTPS...")
+      log.info("\tEnabling HTTPS...")
       with open(f"{src}/config/local/general.h", "w") as f:
         f.write("#define DOWNLOAD_PROTO_HTTPS\n")
 
-      print("\tRunning initial build...")
+      log.info("\tRunning initial build...")
       try:
         sh.make(['-j4', 'bin-x86_64-efi/snponly.efi', 'bin/undionly.kpxe'], _cwd=src)
       except Exception as e:
-        print(f"Error: iPXE make command failed. {e}")
+        log.error(f"iPXE make command failed. {e}")
         return
       self.copy_ipxe_file(f"{src}/bin/undionly.kpxe", "undionly.kpxe")
       self.copy_ipxe_file(f"{src}/bin-x86_64-efi/snponly.efi", "snponly.efi")
 
       # now we will rebuild the EFI version with IPv6 support turned off
-      print("\tTurning off IPv6 for the IPv4 only EFI...")
+      log.info("\tTurning off IPv6 for the IPv4 only EFI...")
       with open(f"{src}/config/local/general.h", "a") as f:
         f.write("#undef NET_PROTO_IPV6\n")
-      print("\tRunning second build...")
+      log.info("\tRunning second build...")
       try:
         sh.make(['-j4', 'bin-x86_64-efi/snponly.efi'], _cwd=src, _out=sys.stdout, _err=sys.stderr)
       except Exception as e:
-        print(f"Error: iPXE IPv4 only EFI make command failed. {e}")
+        log.error(f"iPXE IPv4 only EFI make command failed. {e}")
         return
       self.copy_ipxe_file(f"{src}/bin-x86_64-efi/snponly.efi", "snponly_ipv4.efi")
-      print("iPXE build finished.")
+      log.info("iPXE build finished.")
     except Exception as e:
       # don't let a failed build end the plugin's thread; it's retried on the next start.
-      print(f"Error: unable to build iPXE: {e}")
+      log.error(f"unable to build iPXE: {e}")
     finally:
       shutil.rmtree(buildDir, ignore_errors=True)
 
@@ -106,7 +109,7 @@ class dnsmasq(JobServerPlugin):
     try:
       shutil.copyfile(built, f"{self.tftproot}/{name}")
     except Exception as e:
-      print(f"Error: Unable to copy {built} -> {self.tftproot}/{name}: {e}")
+      log.error(f"Unable to copy {built} -> {self.tftproot}/{name}: {e}")
 
   def claimedModules(self):
     # the DNS and DHCP/PXE jobs this plugin claims, not "dnsmasq" (#180)

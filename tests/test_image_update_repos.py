@@ -44,7 +44,7 @@ def test_a_failed_disable_only_warns(js, plugin, images, commands, capsys):
   commands.fail.append("config-manager --disable")
   pending_build(js)
   plugin.handle_jobs()
-  assert "Warning: unable to disable the image's stock repos appstream." in capsys.readouterr().out
+  assert "[W] image-update/rhel: unable to disable the image's stock repos appstream." in capsys.readouterr().out
   assert job_states(js)[-1][0] == 4
 
 

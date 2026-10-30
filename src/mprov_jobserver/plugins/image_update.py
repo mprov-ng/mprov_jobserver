@@ -17,6 +17,9 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 from os.path import dirname, basename, isfile, join
 import glob
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -40,9 +43,9 @@ class image_update(JobServerPlugin):
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
     if 'mprov-webserver' not in self.js.jobmodules:
-      print("Configuration Error: you MUST run mprov-webserver on image-upate/image-delete nodes!")
-      print("                   : image-update/delete nodes are SOURCE nodes for images!")
-      print("                   : and need a way to serve images! Job Module Halted!!!")
+      log.error("Configuration error: you MUST run mprov-webserver on image-upate/image-delete nodes!")
+      log.error("image-update/delete nodes are SOURCE nodes for images!")
+      log.error("and need a way to serve images! Job Module Halted!!!")
       sys.exit(1)
     # run load config on each sub_module
     modules = glob.glob(join(dirname(__file__) + "/image_update_mod", "*.py"))
@@ -52,14 +55,14 @@ class image_update(JobServerPlugin):
         mod = importlib.import_module(f".image_update_mod.{name}", "mprov_jobserver.plugins")
         update_klass = getattr(mod, 'UpdateImage')
       except BaseException as err:
-        print(f"Error: Unable to import Image Update Module for {name}.")
-        print(f"Exception: {err=}, {type(err)=}")
+        log.error(f"Unable to import Image Update Module for {name}.")
+        log.error(f"Exception: {err=}, {type(err)=}")
         continue
 
       try:
         image_update = update_klass(self.js)
       except:
-        print(f"Error: Unable to instantiate UpdateImage class on {name}")
+        log.error(f"Unable to instantiate UpdateImage class on {name}")
         continue
       image_update.load_config()
     return super().load_config()
@@ -80,10 +83,10 @@ class image_update(JobServerPlugin):
     }
     response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
     if response.status_code == 409:
-      print(f"Warn: not hosting image {image}: the mPCC has it past our version {version}; we'll fetch it again.")
+      log.warning(f"not hosting image {image}: the mPCC has it past our version {version}; we'll fetch it again.")
       return False
     if response.status_code <= 199 or response.status_code >= 300:
-      print(f"Error: mPCC wouldn't let us add ourselves, status code: {response.status_code}")
+      log.error(f"mPCC wouldn't let us add ourselves, status code: {response.status_code}")
     return True
 
   def publishedFiles(self, imgDir, slug):
@@ -112,7 +115,7 @@ class image_update(JobServerPlugin):
       except FileNotFoundError:
         continue
       if (st.st_dev, st.st_ino) != ident:
-        print(f"Notice: leaving {path}, it was replaced since this build.")
+        log.info(f"leaving {path}, it was replaced since this build.")
         continue
       os.unlink(path)
     try:
@@ -149,7 +152,7 @@ class image_update(JobServerPlugin):
             for chunk in remoteImage.iter_content(chunk_size=8192):
               localFile.write(chunk)
     except (requests.RequestException, OSError) as err:
-      print(f"Error: Unable to pull image {image} from another job server, will try again: {err}")
+      log.error(f"Unable to pull image {image} from another job server, will try again: {err}")
       for tmp, _ in pulled:
         try:
           os.unlink(tmp)
@@ -184,14 +187,14 @@ class image_update(JobServerPlugin):
         gzipStatus = gzip.wait()
         tarStatus = tar.wait()
       if tarStatus != 0 or gzipStatus != 0:
-        print(f"Error: packing {imgDir} failed: tar exited {tarStatus}, gzip exited {gzipStatus}")
+        log.error(f"packing {imgDir} failed: tar exited {tarStatus}, gzip exited {gzipStatus}")
         os.unlink(tmp)
         return False
       # mkstemp makes it 0600; images are served to nodes, as before from /tmp
       os.chmod(tmp, 0o644)
       os.replace(tmp, dest)
     except OSError as err:
-      print(f"Error: packing {imgDir} failed: {err}")
+      log.error(f"packing {imgDir} failed: {err}")
       if tmp is not None:
         try:
           os.unlink(tmp)
@@ -207,7 +210,7 @@ class image_update(JobServerPlugin):
     try:
       os.makedirs(self.imageDir, exist_ok=True)
     except OSError as err:
-      print(f"Error: Unable to make imageDir: {self.imageDir}: {err}")
+      log.error(f"Unable to make imageDir: {self.imageDir}: {err}")
       return
 
     # see if we have a image-versions file
@@ -236,13 +239,13 @@ class image_update(JobServerPlugin):
       #if we don't get a good reply, error out of this function only. We'll try again
       # on the next iteration
       if response.status_code <=199 or response.status_code >=300:
-        print("Error: Unable to get a list of images from the mPCC.")
+        log.error("Unable to get a list of images from the mPCC.")
         return
       try: 
         for image in response.json():
           imageList.append(image['slug'])
       except:
-        print("Error: Unable to get a list of images from the mPCC")
+        log.error("Unable to get a list of images from the mPCC")
 
         return
 
@@ -250,15 +253,15 @@ class image_update(JobServerPlugin):
     for image in imageList:
       response = self.js.session.get(f"{self.js.mprovURL}systemimages/{image}/")
       if response.status_code <= 199 or response.status_code >= 300:
-        print(f"Error: Unable to retrieve data for image {image}")
+        log.error(f"Unable to retrieve data for image {image}")
         continue
       try:
         imageData = response.json()
       except:
         imageData = None
-        print(response.text)
+        log.debug(response.text)
       if imageData is None:
-        print(f"Error: Error trying to retrieve data for image {image}")
+        log.error(f"Error trying to retrieve data for image {image}")
         continue
       # print(imageData)
       # print(self.js.id)
@@ -317,7 +320,7 @@ class image_update(JobServerPlugin):
     for point in mounts_under(self.imageDir):
       inImage = os.path.dirname(os.path.dirname(point)) == os.path.realpath(self.imageDir)
       if inImage and os.path.basename(point) in ("dev", "proc", "run", "sys"):
-        print(f"Warn: unmounting {point}, left by an image build that didn't finish.")
+        log.warning(f"unmounting {point}, left by an image build that didn't finish.")
         if subprocess.run(["umount", point]).returncode != 0:
           subprocess.run(["umount", "-l", point])
 
@@ -334,32 +337,32 @@ class image_update(JobServerPlugin):
     response = self.js.session.get( self.js.mprovURL + 'jobs/?&module=repo-update&status=1')
     if response.status_code != 200:
       self.threadOk = False
-      print(f"Error: Unable to check on dependent jobs.")
+      log.error(f"Unable to check on dependent jobs.")
       return
     jobs = {}
     try:
       jobs = response.json()
       if len(jobs):
         self.threadOk = False
-        print(f"image_update.py: Dependant Jobs Present, waiting for them to finish.")
+        log.info(f"Dependant Jobs Present, waiting for them to finish.")
         return
     except:
-      print("WARN: Unable to parse reply, trying to continue anyway.")
+      log.warning("Unable to parse reply, trying to continue anyway.")
     
     response = self.js.session.get( self.js.mprovURL + 'jobs/?&module=repo-update&status=2')
     if response.status_code != 200:
       self.threadOk = False
-      print(f"Error: Unable to check on dependent jobs.")
+      log.error(f"Unable to check on dependent jobs.")
       return
     jobs = {}
     try:
       jobs = response.json()
       if len(jobs):
         self.threadOk = False
-        print(f"image_update.py: Dependant Jobs Present, waiting for them to finish.")
+        log.info(f"Dependant Jobs Present, waiting for them to finish.")
         return
     except:
-      print("WARN: Unable to parse reply, trying to continue anyway.")
+      log.warning("Unable to parse reply, trying to continue anyway.")
     
 
     if self.imageList is None:
@@ -373,13 +376,13 @@ class image_update(JobServerPlugin):
         try:
           params = job['params']
         except: 
-          print("Error: Image Update Job with no imageID present, cannot parse params")
+          log.error("Image Update Job with no imageID present, cannot parse params")
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
           return
         try:
           self.imageList[params['imageId']] = job['id']
         except:
-          print("Error: Image Update Job failed, corrupted params.")
+          log.error("Image Update Job failed, corrupted params.")
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
           return
     else:
@@ -399,7 +402,7 @@ class image_update(JobServerPlugin):
           for job in response.json():
             self.imageList[image] = job['id']
         except:
-          print(f"Error: Unable to read the claimed job for image {image}.")
+          log.error(f"Unable to read the claimed job for image {image}.")
       if len(self.imageList) == 0:
         return # no updates found.
         
@@ -410,7 +413,7 @@ class image_update(JobServerPlugin):
       try:
         os.makedirs(self.imageDir, exist_ok=True)
       except:
-        print("Error: Unable to make imageDir: " + self.imageDir)
+        log.error("Unable to make imageDir: " + self.imageDir)
         # no image is being built yet, so fail every job we claimed (#144).
         for jid in self.imageList.values():
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
@@ -420,7 +423,7 @@ class image_update(JobServerPlugin):
     # fails that image's job and moves on: returning would leave the other
     # claimed jobs running (#220).
     for image,jid in self.imageList.items():
-      print(f"Processing update for image {image}")
+      log.info(f"Processing update for image {image}")
       query = 'systemimages/' + image + '/'
       response = self.js.session.get( self.js.mprovURL + query)
       if response.status_code == 200:
@@ -429,31 +432,31 @@ class image_update(JobServerPlugin):
         try:
           imageDetails = response.json()
         except:
-          print("Error: Unable to parse response.")
+          log.error("Unable to parse response.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         
         try:
           if imageDetails['osdistro'] is None:
-            print(f"Error: No OS Distrubtion set. Not generating image.")
+            log.error(f"No OS Distrubtion set. Not generating image.")
             self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
             continue
-          print(f"..{redacted_image_details(imageDetails)}")
-          print(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
+          log.debug(f"..{redacted_image_details(imageDetails)}")
+          log.debug(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}")
           mod = importlib.import_module(f".image_update_mod.{imageDetails['osdistro']['baserepo']['ostype']['slug']}", "mprov_jobserver.plugins")
           update_klass = getattr(mod, 'UpdateImage')
         except BaseException as err:
           exc_type, exc_obj, exc_tb = sys.exc_info()
           fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-          print("Error: Unable to import Image Update Module.")
-          print(f"Exception: {err=}, {type(err)=}, File={fname}, Line={exc_tb.tb_lineno}")
+          log.error("Unable to import Image Update Module.")
+          log.error(f"Exception: {err=}, {type(err)=}, File={fname}, Line={exc_tb.tb_lineno}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 
         try:
           image_update = update_klass(self.js)
         except:
-          print(f"Error: Unable to instantiate UpdateImage class on {imageDetails['osdistro']['baserepo']['ostype']['slug']}")
+          log.error(f"Unable to instantiate UpdateImage class on {imageDetails['osdistro']['baserepo']['ostype']['slug']}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         image_update.imageDetails = imageDetails
@@ -474,7 +477,7 @@ class image_update(JobServerPlugin):
         # copy in the system resolv.conf
         os.system(f"/bin/cp -f /etc/resolv.conf {qimg}/etc/resolv.conf")
         if os.system(f"chroot {qimg} pip3 --no-cache-dir install --upgrade mprov_jobserver"):
-          print("Error: Unable to install mprov_jobserver python module.")
+          log.error("Unable to install mprov_jobserver python module.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 
@@ -488,7 +491,7 @@ class image_update(JobServerPlugin):
         # this path; refuse to write through it (#169).
         st = os.lstat(mprovDir)
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
-          print(f"Error: {mprovDir} is not a directory owned by this user, failing job.")
+          log.error(f"{mprovDir} is not a directory owned by this user, failing job.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         os.chmod(mprovDir, 0o700)
@@ -502,13 +505,13 @@ class image_update(JobServerPlugin):
         # the host's CA file isn't in the image; the job server in there
         # uses the image's own OS bundle (#102)
         localConfig[0]['global'].pop('caBundle', None)
-        print(localConfig[0]['global']['jobmodules'])
+        log.debug(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True
         try:
           fd = os.open(jobserverYaml, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         except OSError as err:
-          print(f"Error: Unable to create {jobserverYaml}, failing job: {err}")
+          log.error(f"Unable to create {jobserverYaml}, failing job: {err}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         os.fchmod(fd, 0o600)
@@ -536,18 +539,18 @@ class image_update(JobServerPlugin):
                   authkeys.write(imageDetails['osdistro']['rootsshkeys'] )
                 os.chmod(authKeys, 0o600)
               except OSError as err:
-                print(f"Error: Unable to write root authorized_keys into the image, failing job: {err}")
+                log.error(f"Unable to write root authorized_keys into the image, failing job: {err}")
                 self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
                 continue
           
           # set the root pw to the password in the distro
           if 'rootpw' in imageDetails['osdistro']:
             if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
-              print("Setting root password...")
+              log.info("Setting root password...")
               rootpw = imageDetails['osdistro']['rootpw']
               # chpasswd reads one user:password line; a line break would end it early
               if "\n" in rootpw or "\r" in rootpw:
-                print("Error: the OS distro's root password contains a line break, failing job.")
+                log.error("the OS distro's root password contains a line break, failing job.")
                 self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
                 continue
               # feed the password to the chrooted chpasswd over its stdin pipe,
@@ -558,7 +561,7 @@ class image_update(JobServerPlugin):
                                 input=f"root:{rootpw}\n",
                                 text=True).returncode != 0:
                 # don't ship an image with the distro's default root password
-                print("Error: unable to set the image's root password, failing job.")
+                log.error("unable to set the image's root password, failing job.")
                 self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
                 continue
 
@@ -571,7 +574,7 @@ class image_update(JobServerPlugin):
 
           # a failed image-gen script fails the job, and no image is packed (#221)
           if os.system(shlex.quote(imgDir + '/tmp/mprov/script-runner.sh')):
-            print("Error while running image-gen scripts via job server, failing job.")
+            log.error("while running image-gen scripts via job server, failing job.")
             self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
             continue
         finally:
@@ -588,7 +591,7 @@ class image_update(JobServerPlugin):
         os.chmod(busyboxDir, 0o700)
         busybox = busyboxDir + '/busybox'
         if os.system(f"wget -q -O {shlex.quote(busybox)} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
-          print("Error: unable to download busybox")
+          log.error("unable to download busybox")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         # don't run the download unless it is the ELF binary we asked for;
@@ -599,7 +602,7 @@ class image_update(JobServerPlugin):
         except OSError:
           magic = b""
         if magic != b"\x7fELF":
-          print("Error: downloaded busybox is not a valid ELF binary, refusing to run it")
+          log.error("downloaded busybox is not a valid ELF binary, refusing to run it")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         os.chmod(busybox, 0o755)
@@ -612,28 +615,28 @@ class image_update(JobServerPlugin):
           if image_update.threadOk != True:
             continue
         else:
-          print(f"Notice: {imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
+          log.info(f"{imageDetails['osdistro']['baserepo']['ostype']['slug']} does not have updateBootFiles.")
 
 
         # script-runner.sh unmounts the host's dev, proc, run and sys from
         # the image; if any is still there, tar would pack the host's (#183)
         mounted = mounts_under(imgDir)
         if mounted:
-          print(f"Error: not packing {imgDir}, something is still mounted in it: {', '.join(mounted)}")
+          log.error(f"not packing {imgDir}, something is still mounted in it: {', '.join(mounted)}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 
         # package the filesystem into an initramfs
-        print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
+        log.info("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
         if not self.packImage(busybox, imgDir, imgDir + '/' + imageDetails['slug'] + '.img'):
-          print("Error: unable to create initramfs")
+          log.error("unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         endTime = time.time()
         lapsed = endTime - startTime
-        print("Image generated in " + str(lapsed) + " seconds.")
-        print("Image saved to "+  imgDir + '/' + imageDetails['slug'] + '.img')
+        log.info("Image generated in " + str(lapsed) + " seconds.")
+        log.info("Image saved to "+  imgDir + '/' + imageDetails['slug'] + '.img')
 
 
         # what this build published, so a 409 below removes exactly these and
@@ -654,7 +657,7 @@ class image_update(JobServerPlugin):
           # the image was rebuilt (its version moved on) while we built it,
           # so what we built is the wrong version: don't host it, take it
           # down, and fail the job; the newer rebuild job builds it (#248).
-          print(f"Error: image {imageDetails['slug']} moved past version {imageDetails['version']} while we built it; removing what this build published.")
+          log.error(f"image {imageDetails['slug']} moved past version {imageDetails['version']} while we built it; removing what this build published.")
           self.unpublish(published, imageDetails['slug'], imageDetails['version'])
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -675,5 +678,5 @@ class image_update(JobServerPlugin):
         self.js.update_job_status(self.jobModule, 4, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       
       else: 
-          print(f"Error handling job for {image} server returned {response.status_code} for request {self.js.mprovURL + query}")
+          log.error(f"handling job for {image} server returned {response.status_code} for request {self.js.mprovURL + query}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')

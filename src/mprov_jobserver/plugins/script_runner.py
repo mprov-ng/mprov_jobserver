@@ -9,6 +9,9 @@ import yaml
 import socket
 import stat
 from pathlib import Path
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 # import pprint
 
 def slug_of(value):
@@ -58,9 +61,9 @@ class script_runner(JobServerPlugin):
         # keys that exist in the dict, giving us dep free items in t
         t=set(item for vals in dep_dict.values() for item in vals)-set(dep_dict.keys())
         if len(t) > 0:
-          print("Error: Unresolvable Dependancies, make sure it's listed in distro, group, or entity scripts: ")
+          log.error("Unresolvable Dependancies, make sure it's listed in distro, group, or entity scripts: ")
           for ent in t:
-            print("\t '" + ent + "'")
+            log.error("\t '" + ent + "'")
           return None
         # print("t: " + str(t))
         
@@ -69,9 +72,9 @@ class script_runner(JobServerPlugin):
         if prevT == t:
         # if not firstPass and len(t) > 0:
           # possible cyclic dependency?
-          print("Error: Possibe cyclic dependency.")
-          print("depDict: " + str(depDict))
-          print("t: " + str(t))
+          log.error("Possibe cyclic dependency.")
+          log.debug("depDict: " + str(depDict))
+          log.debug("t: " + str(t))
           return None
         # print("t: " +  str(t))
         prevT = t
@@ -96,9 +99,9 @@ class script_runner(JobServerPlugin):
     
     # see if we are being called from a runonce command
     if not self.js.runonce:
-      print("Error: script-runner must be run in a 'runonce' jobserver session.")
+      log.error("script-runner must be run in a 'runonce' jobserver session.")
       return False
-    print("Jobserver Running script-runner...")
+    log.info("Jobserver Running script-runner...")
 
     sysimage=False
     system=False
@@ -113,7 +116,7 @@ class script_runner(JobServerPlugin):
 
     # are -i and -s passed together?
     if '-i' in sys.argv and '-s' in sys.argv:
-      print("Error: -i and -s are mutually exclusive!")
+      log.error("-i and -s are mutually exclusive!")
       self.printHelp()
       return False
 
@@ -128,7 +131,7 @@ class script_runner(JobServerPlugin):
       system = True
       entityId = socket.gethostname()
     else:
-      print("Error: You must specify -i or -s")
+      log.error("You must specify -i or -s")
       self.printHelp()
       return False
     entity = None
@@ -142,7 +145,7 @@ class script_runner(JobServerPlugin):
       query="systemimages/" + entityId + "/"
     else:
       query="systems/?self" #?hostname=" + entityId
-    print(self.js.mprovURL + query)
+    log.debug(self.js.mprovURL + query)
     # If the image or system we were asked for can't be loaded, stop and say
     # so.  This used to fall back to the nads image's scripts: an image build
     # that got a 5xx ran nads' image-gen scripts in the image it was building
@@ -203,7 +206,7 @@ class script_runner(JobServerPlugin):
     if scriptDeps is None:
       # depResolve() said why (a missing or cyclic dependency).  Running
       # some of them in a guessed order is worse than running none (#146).
-      print("Error: unable to order the scripts by their dependencies, not running any scripts.")
+      log.error("unable to order the scripts by their dependencies, not running any scripts.")
       self.failed = True
       self.set_job_failure()
       return
@@ -218,7 +221,7 @@ class script_runner(JobServerPlugin):
     # it and run them as root, so only use a real directory we own (#169).
     workspace = os.lstat(self.scriptTmpDir.rstrip("/") or "/")
     if not stat.S_ISDIR(workspace.st_mode) or workspace.st_uid != os.geteuid():
-      print(f"Error: {self.scriptTmpDir} is not a directory owned by this user, not running any scripts.")
+      log.error(f"{self.scriptTmpDir} is not a directory owned by this user, not running any scripts.")
       self.failed = True
       self.set_job_failure()
       return
@@ -245,7 +248,7 @@ class script_runner(JobServerPlugin):
         threads = []
         for script in step:
           # download the script and thread it out within this step.
-          print(f"Running {scripts[script]['filename']}")
+          log.info(f"Running {scripts[script]['filename']}")
           t = Thread(target=self.runScript, args=(scripts[script]['filename'], ))
           t.start()
           threads.append(t)
@@ -258,8 +261,8 @@ class script_runner(JobServerPlugin):
       if failures:
         self.failed = True
         for name, rc in failures:
-          print(f"Error: script '{name}' failed: {rc}")
-        print(f"script-runner: {len(failures)} script(s) failed.")
+          log.error(f"script '{name}' failed: {rc}")
+        log.info(f"{len(failures)} script(s) failed.")
         self.set_job_failure()
     finally:
       try:
@@ -276,12 +279,12 @@ class script_runner(JobServerPlugin):
         except:
           pass
     if not failures:
-      print("script-runner complete.")
+      log.info("script-runner complete.")
 
   def entityFailed(self, message):
     # the run fails, and runonce exits nonzero; nothing has run yet and
     # /etc/nologin hasn't been created, so there's nothing to undo.
-    print(message)
+    log.error(message)
     self.failed = True
     self.set_job_failure()
     return False
@@ -321,7 +324,7 @@ class script_runner(JobServerPlugin):
       script = found.get(slug)
       if script is None:
         # it would run, but we can't tell what it is or where to get it.
-        print(f"Error: script '{slug}' is in the mPCC's config but not in the entity.")
+        log.error(f"script '{slug}' is in the mPCC's config but not in the entity.")
         self.scriptResults[slug] = "error: not found in the entity"
         continue
       if slug_of(script['scriptType']) != scriptMode:
