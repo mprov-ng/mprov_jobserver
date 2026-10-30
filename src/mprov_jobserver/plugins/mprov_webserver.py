@@ -4,6 +4,9 @@ from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
 import multiprocessing, socket, stat, threading
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 def safe_root(rootDir):
   # The directory to serve, or None if serving it would expose the whole
@@ -56,7 +59,7 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
         and self.server.js is not None and self.server.js.loadmon \
         and self.isImageRequest():
-      print("Not Serving, high load.")
+      log.warning("Not Serving, high load.")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
       return False
 
@@ -113,10 +116,10 @@ class mprov_webserver(JobServerPlugin):
 
   def handle_jobs(self):
     if safe_root(self.rootDir) is None:
-      print(f"Error: mProv Webserver not started: rootDir '{self.rootDir}' is empty, /, or not a directory.  Set rootDir in mprov-webserver.yaml.")
+      log.error(f"mProv Webserver not started: rootDir '{self.rootDir}' is empty, /, or not a directory.  Set rootDir in mprov-webserver.yaml.")
       self.failed = True
       return
-    print(f"Starting mProv Webserver on port {self.serverPort} serving {self.rootDir} ...")
+    log.info(f"Starting mProv Webserver on port {self.serverPort} serving {self.rootDir} ...")
 
     serverInstance = mProvHTTPServer((self.hostName, self.serverPort), mProvHTTPReqestHandler)
     serverInstance.rootDir = self.rootDir
@@ -142,6 +145,6 @@ class mprov_webserver(JobServerPlugin):
       # if serverInstance6 is not None:
       #   serverInstance6.handle_request()
     
-    print("Stopping mProv Webserver.")
+    log.info("Stopping mProv Webserver.")
     
     

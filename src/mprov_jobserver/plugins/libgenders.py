@@ -5,6 +5,9 @@ import os
 import json
 import sys
 from slugify import slugify
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 # the libgenders module is used to generate a genders file for use 
 # with the pdsh command.
@@ -31,7 +34,7 @@ class libgenders(JobServerPlugin):
       with open(self.gendersInclude) as includeFile:
         contents = includeFile.read()
     except Exception as e:
-      print(f"Warning[libgenders]: Unable to read {self.gendersInclude}, not including it: {e}")
+      log.warning(f"Unable to read {self.gendersInclude}, not including it: {e}")
       return f"# Unable to read {self.gendersInclude}: {e}\n"
     if contents and not contents.endswith("\n"):
       contents += "\n"
@@ -46,18 +49,18 @@ class libgenders(JobServerPlugin):
     if(not self.set_job_running()):
       # no jobs to run, just return
       return
-    print("[libgenders] Handling Job")
+    log.info("Handling Job")
     # get a list of all nodes.
     response = self.js.session.get( self.js.mprovURL + 'systems/')
     if not self.checkHTTPStatus(response.status_code):
-      print("Error[libgenders]: Unable to get a list of sysetms from the mPCC.")
+      log.error("Unable to get a list of sysetms from the mPCC.")
       self.set_job_failure()
       return
     nodes = response.json()
     # get a list of all groups. 
     response = self.js.session.get( self.js.mprovURL + 'systemgroups/')
     if not self.checkHTTPStatus(response.status_code):
-      print("Error[libgenders]: Unable to get a list of system groups from the mPCC.")
+      log.error("Unable to get a list of system groups from the mPCC.")
       self.set_job_failure()
       return
     groups = response.json()
@@ -65,7 +68,7 @@ class libgenders(JobServerPlugin):
     # get a list of all the images.
     response = self.js.session.get ( self.js.mprovURL + 'systemimages/')
     if not self.checkHTTPStatus(response.status_code):
-      print("Error[libgenders]: Unable to get a list of system images from the mPCC.")
+      log.error("Unable to get a list of system images from the mPCC.")
       self.set_job_failure()
       return    
     images = response.json()
@@ -73,7 +76,7 @@ class libgenders(JobServerPlugin):
     # get a list of all os distros.
     response = self.js.session.get ( self.js.mprovURL + 'distros/')
     if not self.checkHTTPStatus(response.status_code):
-      print("Error[libgenders]: Unable to get a list of OS Distrubutions from the mPCC.")
+      log.error("Unable to get a list of OS Distrubutions from the mPCC.")
       self.set_job_failure()
       return    
     distros = response.json()
@@ -129,10 +132,10 @@ class libgenders(JobServerPlugin):
           gendersFile.write(line + "\n")
         gendersFile.write(self.read_include())
     except Exception as e:
-        print(f"Error[libgenders]: Unable to write to {self.gendersFile}: {e}")
+        log.error(f"Unable to write to {self.gendersFile}: {e}")
         self.set_job_failure()
         return
     self.set_job_success()
-    print("[libgenders] Job Complete.")
+    log.info("Job Complete.")
 
 

@@ -15,6 +15,46 @@ from .plugins.plugin import JobServerPlugin
 import mprov_jobserver.plugins
 import glob
 import multiprocessing
+from mprov_jobserver.log import get_logger, configure as log_configure
+
+log = get_logger(__name__)
+
+
+def job_subject(job):
+  """ What a job is about, from its params: an image or repo id, or "". """
+  params = job.get('params') if isinstance(job, dict) else None
+  if isinstance(params, dict):
+    for key in ('imageId', 'repo_id'):
+      if params.get(key) not in (None, ""):
+        return f" {params[key]}"
+  return ""
+
+
+def log_job(job_module, job, status):
+  """
+  One line per job transition, in a fixed form a log search (Loki, Grafana)
+  can match: "job 42 image-update compute started", then "succeeded" or
+  "failed" with how long it ran, from the job's start_time (#103).
+  """
+  module = job.get('module') or job_module
+  what = f"job {job['id']} {module}{job_subject(job)}"
+  if status == 2:
+    log.info(f"{what} started")
+    return
+  took = ""
+  try:
+    started = datetime.fromisoformat(str(job.get('start_time')).replace('Z', '+00:00'))
+    if started.tzinfo is None:
+      started = started.replace(tzinfo=timezone.utc)
+    took = f" ({int((datetime.now(timezone.utc) - started).total_seconds())}s)"
+  except ValueError:
+    pass
+  if status == 4:
+    log.info(f"{what} succeeded{took}")
+  elif status == 3:
+    log.error(f"{what} failed{took}")
+  else:
+    log.info(f"{what} set to status {status}")
 
 
 class JobServer ():
@@ -34,6 +74,10 @@ class JobServer ():
   apikey = ""
   # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
   caBundle = ""
+  # how much the log says (error, warning, info, debug), and whether lines
+  # carry a timestamp; journald and docker stamp lines themselves (#104)
+  logLevel = "info"
+  logTimestamps = False
   sessionOk = False
   id = -1
   runonce = False
@@ -49,7 +93,7 @@ class JobServer ():
   failed_runonce_modules = []
 
   def __init__(self, **kwargs):
-    print("mProv Job Server Starting.")
+    log.info("mProv Job Server Starting.")
 
 
     # if we get passed in a config file, let's use that
@@ -78,9 +122,9 @@ class JobServer ():
       self.register = False
 
     # Authenticat to the Control Center and start a session
-    print("mProv Job Server authenticating.")
+    log.info("mProv Job Server authenticating.")
     if not self.startSession():
-        print("Error: Unable to log into mProv Control Center.",file=sys.stderr)
+        log.error("Unable to log into mProv Control Center.")
 
 
     # Load Plugins. (plugins register job modules.)
@@ -112,8 +156,8 @@ class JobServer ():
       self.configfile = os.getcwd() + "/jobserver.yaml"
     # print(self.configfile)
     if not(os.path.isfile(self.configfile) and os.access(self.configfile, os.R_OK)):
-      print("Error: Unable to find a working config file.")
-      print("Try passing one in with the '-c' option.")
+      log.error("Unable to find a working config file.")
+      log.error("Try passing one in with the '-c' option.")
       sys.exit(1)
 
 
@@ -138,13 +182,16 @@ class JobServer ():
             self.config_data['global'][config_entry] += "/"
         setattr(self, config_entry, self.config_data['global'][config_entry])
       except:
-        print("Error: " + config_entry + " is not a valid config entry in 'global'.", file=sys.stderr)
+        log.error("" + config_entry + " is not a valid config entry in 'global'.")
         sys.exit(1)
     self.use_ca_bundle()
+    if not log_configure(self.logLevel, self.logTimestamps):
+      log.error(f"logLevel {self.logLevel!r} isn't one of error, warning, info or debug.")
+      sys.exit(1)
 
   def load_plugins(self):
     if self.jobmodules is None:
-      print("Error: You must specify at least 1 jobmodule!")
+      log.error("You must specify at least 1 jobmodule!")
       sys.exit(1)
     # Load plugins set in the config file.
     for mod in self.jobmodules:
@@ -175,7 +222,7 @@ class JobServer ():
             retried = True
           waiting = self.register and not self.runonce and self.id == -1
           if waiting:
-            print("Error: not registered with the mPCC yet, job modules wait until we are.")
+            log.error("not registered with the mPCC yet, job modules wait until we are.")
           elif not self.orphansChecked:
             # nothing is running yet, so a job the mPCC has as RUNNING here
             # was cut off when this job server last stopped (#94)
@@ -219,9 +266,9 @@ class JobServer ():
         time.sleep(1)
         self.firstrun = False
         if self.runonce:
-          print("Job Server in 'runonce' mode.")
+          log.info("Job Server in 'runonce' mode.")
           self.running = False
-    print("\nJob Server Exiting...")
+    log.info("\nJob Server Exiting...")
     # wait for any jobmodules to complete.
     for mod in self.jobmodules:
         # first check if the thread is done running.
@@ -236,7 +283,7 @@ class JobServer ():
         mod for mod in self.jobmodules
         if mod in self.running_threads and getattr(self.running_threads[mod], "failed", False)]
       if self.failed_runonce_modules:
-        print("Error: Jobmodule(s) failed: " + ", ".join(self.failed_runonce_modules), file=sys.stderr)
+        log.error("Jobmodule(s) failed: " + ", ".join(self.failed_runonce_modules))
         return 1
 
     return 0
@@ -276,14 +323,14 @@ class JobServer ():
     response = self.session.get( queryURL )
     if response.status_code <= 199 or response.status_code >=300:
 
-        print(f"Error: Server returned error {response.status_code}. ",file=sys.stderr)
+        log.error(f"Server returned error {response.status_code}. ")
         return False
     try:
       if (response.json() == [] ):
         return False
     except:
-      print(f"There was an error parsing output from the mPCC.  Output: ")
-      print(f"{response.text}")
+      log.error(f"There was an error parsing output from the mPCC.  Output: ")
+      log.error(f"{response.text}")
       return False
     # print(job_module)
     # print(response.json())
@@ -310,9 +357,10 @@ class JobServer ():
       updateCount += 1
 
       if response.status_code == 400:
-        print("Oops!, JobID: " + str(data['id']))
-        print(response.json())
+        log.error("the mPCC refused the update of job " + str(data['id']) + ":")
+        log.error(response.json())
         continue
+      log_job(job_module, job, status)
 
     return updateCount
     # return True
@@ -335,7 +383,7 @@ class JobServer ():
       response = self.session.get(self.mprovURL + query)
       jobs = response.json() if 199 < response.status_code < 300 else []
     except Exception as err:
-      print(f"Error: unable to look for orphaned jobs: {err}", file=sys.stderr)
+      log.error(f"unable to look for orphaned jobs: {err}")
       return 0
     if not isinstance(jobs, list):
       return 0
@@ -343,7 +391,7 @@ class JobServer ():
     for job in jobs:
       if not isinstance(job, dict) or 'id' not in job:
         continue
-      print(f"Error: failing job {job['id']} ({job.get('module')}): {reason}.", file=sys.stderr)
+      log.error(f"failing job {job['id']} ({job.get('module')}): {reason}.")
       self.update_job_status(job.get('module', ''), 3, jobid=job['id'])
       failed += 1
     return failed
@@ -384,9 +432,9 @@ class JobServer ():
     highLoad = data['one_minute_load'] >= multiprocessing.cpu_count() and self.loadmon
     if highLoad != self.highLoad:
       if highLoad:
-        print(f"Warning: high load ({data['one_minute_load']}), still heartbeating with the load reported.")
+        log.warning(f"high load ({data['one_minute_load']}), still heartbeating with the load reported.")
       else:
-        print("Info: load back to normal.")
+        log.info("load back to normal.")
       self.highLoad = highLoad
     # print(self.config_data)
     if 'mprov-webserver' in self.config_data:
@@ -408,32 +456,32 @@ class JobServer ():
       return
     
     if response.status_code == 400:
-        print("Error: Server returned error 400. Make sure your specified jobmodules exist.",file=sys.stderr)
+        log.error("Server returned error 400. Make sure your specified jobmodules exist.")
         self.sessionOk = False
         return
     if response.status_code == 500:
-        print("Error: The mPCC had an internal server error.")
+        log.error("The mPCC had an internal server error.")
         result = self.reply_object(response)
         if result is None or 'msg' not in result:
-          print("Error: And we were unable to load json from the response.")
-          print(f"Error: so here is the raw response: {response.text}")
-          print("Error: will try again on the next heartbeat.")
+          log.error("And we were unable to load json from the response.")
+          log.error(f"so here is the raw response: {response.text}")
+          log.error("will try again on the next heartbeat.")
           return
-        print(f"Error: The mPCC said: \"{result['msg']}\"")
+        log.error(f"The mPCC said: \"{result['msg']}\"")
         # The one 500 the mPCC sends on purpose: a job module in our config
         # it doesn't know.  That won't fix itself, so stop loudly.  Any other
         # 500 may pass, and exiting made a restart loop for as long as the
         # mPCC was failing; try again on the next heartbeat (#159).
         if str(result['msg']).startswith("Error locating jobmodule"):
-          print("Error: check the jobmodules in your config against the mPCC's job modules.", file=sys.stderr)
+          log.error("check the jobmodules in your config against the mPCC's job modules.")
           sys.exit(1)
-        print("Error: will try again on the next heartbeat.")
+        log.error("will try again on the next heartbeat.")
         return
 
     result = self.reply_object(response)
     if result is None or 'pk' not in result:
-      print("Error: mPCC gave us an invalid reply.")
-      print(response.text)
+      log.error("mPCC gave us an invalid reply.")
+      log.error(response.text)
       return
 
     # grab our id from the MPCC
@@ -443,7 +491,7 @@ class JobServer ():
     features = result.get('features')
     self.features = frozenset(f for f in features if isinstance(f, str)) if isinstance(features, list) else frozenset()
 
-    print("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    log.info("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
 
   def use_ca_bundle(self):
@@ -453,7 +501,7 @@ class JobServer ():
     try:
       self.caBundle = ca_bundle(self.caBundle)
     except FileNotFoundError as err:
-      print(f"Error: {err}; set global caBundle to the mPCC's CA certificate file.", file=sys.stderr)
+      log.error(f"{err}; set global caBundle to the mPCC's CA certificate file.")
       sys.exit(1)
     if self.caBundle:
       self.session.verify = self.caBundle
@@ -470,10 +518,10 @@ class JobServer ():
       response = self.session.get(self.mprovURL, stream=True)
     except Exception as err:
       # say why: "Communication error" alone hid certificate problems (#102)
-      print(f"Error: unable to reach the mPCC at {self.mprovURL}: {err}", file=sys.stderr)
+      log.error(f"unable to reach the mPCC at {self.mprovURL}: {err}")
       if isinstance(err, requests.exceptions.SSLError):
-        print("Error: if the mPCC's certificate is from a site or self-signed CA, set global caBundle to that CA's certificate file.", file=sys.stderr)
-      print("Error: Communication error to the server.  Retrying.", file=sys.stderr)
+        log.error("if the mPCC's certificate is from a site or self-signed CA, set global caBundle to that CA's certificate file.")
+      log.error("Communication error to the server.  Retrying.")
       self.sessionOk = False
       time.sleep(10)
       return
@@ -482,7 +530,7 @@ class JobServer ():
       if self.myaddress != '':
         self.ip_address = self.myaddress
       else:
-        print("Warning: No address set in config, attempting autodetection.  This may not work right...")
+        log.warning("No address set in config, attempting autodetection.  This may not work right...")
         # get the sock from the session
         s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
         # get the address from the socket

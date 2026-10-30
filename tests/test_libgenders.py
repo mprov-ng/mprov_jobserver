@@ -139,7 +139,7 @@ def test_unreadable_include_is_skipped(js, plugin, genders, include, capsys):
   assert ok, out
   assert nodes_with(genders, "all") == ["node01", "node02"]
   assert f"# Unable to read {include}" in genders.read_text()
-  assert "Warning[libgenders]: Unable to read" in capsys.readouterr().out
+  assert "[W] libgenders: Unable to read" in capsys.readouterr().out
   assert js.job_updates[-1][:2] == ("libgenders", 4)
 
 

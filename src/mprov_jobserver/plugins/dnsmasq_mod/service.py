@@ -1,5 +1,8 @@
 import os
 import psutil
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 
 def write_if_changed(path, text):
@@ -41,7 +44,7 @@ def remove_stale(directory, suffix, keep):
             os.unlink(os.path.join(directory, name))
         except FileNotFoundError:
             continue
-        print(f"Removed {os.path.join(directory, name)}: its network is no longer served.")
+        log.info(f"Removed {os.path.join(directory, name)}: its network is no longer served.")
         removed = True
     return removed
 

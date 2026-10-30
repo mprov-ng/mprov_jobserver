@@ -4,6 +4,9 @@ import os
 import signal
 from mprov_jobserver.app import JobServer
 import sys
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 jobServer = None
 
@@ -13,7 +16,7 @@ def exitHandler(signum, frame):
         jobServer.stop()
         
     else:
-        print("jobServer is None?")
+        log.error("jobServer is None?")
         sys.exit(1)
 
 signal.signal(signal.SIGINT, exitHandler)
@@ -36,7 +39,7 @@ def main():
             # say something to the user about editing it.
             for entry in importlib.resources.contents('mprov_jobserver'): 
                 if entry[-4:] == "yaml":
-                    print(entry)
+                    log.info(entry)
 
                     # make the standard config directory
                     os.makedirs('/etc/mprov/', exist_ok=True)
@@ -47,7 +50,7 @@ def main():
                                 os.chmod('/etc/mprov/' + entry, 0o600)
                         
                     except Exception as e:
-                        print(f"Error copying {entry} to /etc/mprov/: {e}")
+                        log.error(f"copying {entry} to /etc/mprov/: {e}")
                         sys.exit(1)
                     
             # that succeeded so let's grab the plugin information
@@ -59,12 +62,12 @@ def main():
                             with open('/etc/mprov/plugins/' + p_entry, 'w') as p_yaml_out_file:
                                 p_yaml_out_file.write(p_yaml_file.read())
                     except:
-                        print('Error copying ' + p_entry + ' to /etc/mprov/plugins/')
+                        log.error('copying ' + p_entry + ' to /etc/mprov/plugins/')
                         sys.exit(1)
             
             # if we make it here, we have copied the config to /etc/mprov/ so prompt the user to go modify it
-            print('A fresh config has been copied to /etc/mprov/  Please go there')
-            print('and edit the .yaml files in that directory to setup your environment.')
+            log.info('A fresh config has been copied to /etc/mprov/  Please go there')
+            log.info('and edit the .yaml files in that directory to setup your environment.')
             sys.exit(1)
             
     jobServer = JobServer(runonce=runonce, configfile=configfile)

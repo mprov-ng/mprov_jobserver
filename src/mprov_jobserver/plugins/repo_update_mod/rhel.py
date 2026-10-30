@@ -5,6 +5,9 @@ import shlex
 from urllib.parse import urlparse
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import json
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 
 class UpdateRepo(JobServerPlugin):
@@ -24,17 +27,17 @@ class UpdateRepo(JobServerPlugin):
     data = { "slug": "rhel", "name": "Yum/DNF Based Linux" }
     response = self.js.session.post(ostypeurl, data=json.dumps(data))
     if response.status_code != 200:
-      print("Error: Error updating OS Type for module.")
+      log.error("Error updating OS Type for module.")
     return True
 
 
   def handle_jobs(self):
     if self.repo == None:
-      print("Error: repo was empty.")
+      log.error("repo was empty.")
       return
-    print(f"Running rhel repo update for repo {self.repo['id']}")
+    log.info(f"Running rhel repo update for repo {self.repo['id']}")
     repoDetails = self.repo
-    print(repoDetails['repo_package_url'])
+    log.debug(repoDetails['repo_package_url'])
     
     # let's do some extraction
     parsed_uri = urlparse(repoDetails['repo_package_url'])
@@ -47,7 +50,7 @@ class UpdateRepo(JobServerPlugin):
     # that would move every other plugin's working directory too, and theirs
     # could move this reposync (#130).  reposync writes to destdir/<repo id>.
     baseURL = repoDetails['repo_package_url']
-    print("Grabbing repository mirror: " + baseURL)
+    log.info("Grabbing repository mirror: " + baseURL)
     #if os.system(f"wget --mirror -nH --cut-dirs={pathDepth} -np -P {self.repo['id']}/ {baseURL}" ):
     # the --installroot option here allows us to override dnf's stupid download locking and allows
     # us to parallelize reposync properly-ish.
@@ -55,7 +58,7 @@ class UpdateRepo(JobServerPlugin):
     # command, whatever it holds (#184).  The repo id is the integer pk.
     repoFromPath = shlex.quote(f"{self.repo['id']},{self.repo['repo_package_url']}")
     if os.system(f"dnf reposync --repofrompath {repoFromPath} --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
-      print("Error: unable to get repo: " + baseURL)
+      log.error("unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return
     
@@ -66,7 +69,7 @@ class UpdateRepo(JobServerPlugin):
         self.js.id,
       ],
     }
-    print(json.dumps(data))
+    log.debug(json.dumps(data))
     response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/', data=json.dumps(data))
     self.js.update_job_status(self.jobModule, 4, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
     return 

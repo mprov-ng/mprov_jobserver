@@ -5,6 +5,9 @@ import os
 import json
 import sys
 import sh
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 class repo_sync(JobServerPlugin):
   jobModule = 'repo-sync'
@@ -17,9 +20,9 @@ class repo_sync(JobServerPlugin):
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
     if 'mprov-webserver' not in self.js.jobmodules:
-      print("Configuration Error: you MUST run mprov-webserver on repo-sync nodes!")
-      print("                   : repo-sync nodes are SOURCE nodes for repos!")
-      print("                   : and need a way to serve repos! Job Module Halted!!!")
+      log.error("Configuration error: you MUST run mprov-webserver on repo-sync nodes!")
+      log.error("repo-sync nodes are SOURCE nodes for repos!")
+      log.error("and need a way to serve repos! Job Module Halted!!!")
       sys.exit(1)
     if not super().load_config():
       return False
@@ -34,8 +37,8 @@ class repo_sync(JobServerPlugin):
     # repoDir, so refuse to start unless repoDir sits inside a data
     # root the operator declared (#171).
     if not self.dataRoot or not path_is_under(self.repoDir, self.dataRoot):
-      print("Configuration Error: repo-sync repoDir '" + str(self.repoDir) + "' must be inside dataRoot '" + str(self.dataRoot) + "'.")
-      print("                   : Refusing to run: the end-of-sync sweep deletes directories under repoDir.")
+      log.error("Configuration error: repo-sync repoDir '" + str(self.repoDir) + "' must be inside dataRoot '" + str(self.dataRoot) + "'.")
+      log.error("Refusing to run: the end-of-sync sweep deletes directories under repoDir.")
       sys.exit(1)
     return True
 
@@ -74,19 +77,19 @@ class repo_sync(JobServerPlugin):
       # grab the MPCC version for this repo.
       # if MPCC 404's the repo was deleted.  Remove from our repoList
       # print an error, and move on.  File deletion happens below.
-      print(f"Syncing repo {repo}")
+      log.info(f"Syncing repo {repo}")
       response = self.js.session.get( self.js.mprovURL + 'repos/' + str(repo) + '/')
       # an int: comparing with the string "404" never matched, so a deleted
       # repo's null reply crashed the whole pass (#141)
       if response.status_code == 404:
         # repo not found in the MPCC, must have been removed, delete it locally.
         self.repoList.remove(repo)
-        print(f"Error: repo '{repo}' was not found on the MPCC, removing locally.")
-        print("Error: Consider removing it from your config.")
+        log.error(f"repo '{repo}' was not found on the MPCC, removing locally.")
+        log.error("Consider removing it from your config.")
         continue
       if response.status_code != 200:
         # anything else may be passing; try this repo again next pass.
-        print(f"Error: the mPCC answered {response.status_code} for repo {repo}, skipping it this pass.")
+        log.error(f"the mPCC answered {response.status_code} for repo {repo}, skipping it this pass.")
         continue
 
       mpccVersion = response.json()['version']
@@ -132,10 +135,10 @@ class repo_sync(JobServerPlugin):
         # the CA the job server trusts for the mPCC (#102)
         if self.js.caBundle:
           wgetArgs.insert(0, f"--ca-certificate={self.js.caBundle}")
-        print(" ".join(wgetArgs))
+        log.debug(" ".join(wgetArgs))
         sh.wget(wgetArgs)
          
-        print(f"repo {repo} download complete. Updating versions")        
+        log.info(f"repo {repo} download complete. Updating versions")        
         # file download complete.  Update our version
         repoVersions[repo] = mpccVersion
         ourVersion = mpccVersion
@@ -143,7 +146,7 @@ class repo_sync(JobServerPlugin):
           vfile.write(json.dumps(repoVersions))
       if self.js.id not in currJobServers:
         # tell the MPCC we can host this file
-        print(f"Adding ourself to mPCC for repo {repo}")
+        log.info(f"Adding ourself to mPCC for repo {repo}")
         jobservers = []
         for jobserver in currJobServers:
           jobservers.append(jobserver)
@@ -154,11 +157,11 @@ class repo_sync(JobServerPlugin):
           'hosted_by': jobservers,
         }
         response = self.js.session.patch(self.js.mprovURL + 'repos/' + str(data['id']) + '/?addjs', data=json.dumps(data))
-        print(f"repo {repo} updated.")
+        log.info(f"repo {repo} updated.")
       
 
     # Clean up any directories that are not in our repoList.
-    print("Scanning for hanging repos... " + self.repoDir)
+    log.info("Scanning for hanging repos... " + self.repoDir)
     # print(self.repoList)
     for entry in os.listdir(self.repoDir):
       # print(entry)
@@ -170,10 +173,10 @@ class repo_sync(JobServerPlugin):
           # But only if we own it: without our marker this directory is
           # somebody else's data and we must never delete it (#171).
           if not is_mprov_marked_dir(entryPath):
-            print("Warn: leaving unowned directory alone (no mprov marker): " + entryPath)
+            log.warning("leaving unowned directory alone (no mprov marker): " + entryPath)
             continue
           #print("rm -rf " + entryPath)
-          print("Warn: Removed unknown repo directory: " + entryPath)
+          log.warning("Removed unknown repo directory: " + entryPath)
           shutil.rmtree(entryPath)
 
         

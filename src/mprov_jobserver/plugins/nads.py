@@ -25,6 +25,9 @@ from struct import pack, unpack
 
 from dmidecode import DMIDecode
 from pyroute2 import IPDB
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 ## Magic constants from `/usr/include/linux/if_ether.h`:
 ETH_P_ALL = 0x0003
@@ -182,7 +185,7 @@ class nads(JobServerPlugin):
 
     # enable promiscuous mode on the interface. 
     promiscuous_mode(self.provIntf, capture_sock, True)
-    print("Start at: " + str(startTime))
+    log.info("Start at: " + str(startTime))
     # grab some traffic and process it for LLDP
     while(time.time() < (startTime + self.maxLLDPWait)):
       # print("Current: " + str(time.time()))
@@ -225,7 +228,7 @@ class nads(JobServerPlugin):
     if self.port is None or self.switch is None:
       # if we get here and don't have a port and a switch name,
       # we cannot continue.
-      print("Error: Unable to detect switch and port via LLDP")
+      log.error("Unable to detect switch and port via LLDP")
       return False
     # if we get here, we're all set.
     return True
@@ -245,7 +248,7 @@ class nads(JobServerPlugin):
   def handle_jobs(self):
     # see if we are being called from a runonce command
     if not self.js.runonce:
-      print("Error: script-runner must be run in a 'runonce' jobserver session.")
+      log.error("script-runner must be run in a 'runonce' jobserver session.")
       return False
     
     # Because Intel.... turn off the card intercepting LLDP packets, if i40e is used.
@@ -268,12 +271,12 @@ class nads(JobServerPlugin):
       # check if the interface is operationally up.
       if ipdb.interfaces[iface].operstate != "UP":
         continue
-      print(f"Attempting LLDP Capture on {iface}")
+      log.info(f"Attempting LLDP Capture on {iface}")
       self.provIntf = iface
       try:
         lldpRes = self.getLLDP()
       except Exception as e:
-        print(f"{e}")
+        log.warning(f"LLDP capture on {iface} failed: {e}")
         lldpRes = False
       if lldpRes:
         # grab the mac of the prov interface.
@@ -313,15 +316,15 @@ class nads(JobServerPlugin):
       'model': dmi.model(),
       'mac': self.mac,
     }
-    print("Attempting to register with MPCC...")
-    print(data)
+    log.info("Attempting to register with MPCC...")
+    log.debug(data)
     response = self.js.session.post(f"{self.js.mprovURL}{query}", data=json.dumps(data))
     if response.status_code == 200:
-      print("We were able to register.")
+      log.info("We were able to register.")
       # Issue  a reboot if we are supposed to.
       if self.reboot:
         os.system("/sbin/reboot")
       return True
-    print("There was a problem registering with the MPCC.")
+    log.error("There was a problem registering with the MPCC.")
 
     return False

@@ -8,6 +8,9 @@ import subprocess
 import psutil
 import signal
 from .service import write_if_changed, running_dnsmasq
+from mprov_jobserver.log import get_logger
+
+log = get_logger(__name__)
 
 DNS_MODULES = '["dns-update","dns-delete"]'
 DHCP_MODULES = '["pxe-update","dhcp-update","pxe-delete","dhcp-delete"]'
@@ -87,7 +90,7 @@ class DnsmasqConfig(JobServerPlugin):
                 continue
             status = 4 if workerOk and dnsmasqOk else 3
             if status == 3:
-                print(f"Error: failing the running {modules} jobs: " + ("dnsmasq didn't start." if workerOk else "generating the config failed."))
+                log.error(f"failing the running {modules} jobs: " + ("dnsmasq didn't start." if workerOk else "generating the config failed."))
             jobquery = "&jobserver=" + str(self.js.id) + "&module=" + modules
             self.js.update_job_status(self.jobModule, status, jobquery=jobquery + "&status=2")
 
@@ -103,19 +106,19 @@ class DnsmasqConfig(JobServerPlugin):
         '''
         proc = running_dnsmasq(self.dnsmasqBinary, self.dnsmasqPidFile)
         if proc is not None and self.mainChanged:
-            print("dnsmasq's main config changed, restarting dnsmasq.")
+            log.info("dnsmasq's main config changed, restarting dnsmasq.")
             try:
                 proc.terminate()
                 proc.wait(timeout=10)
             except psutil.TimeoutExpired:
-                print("Warning: dnsmasq didn't stop on SIGTERM, killing it.")
+                log.warning("dnsmasq didn't stop on SIGTERM, killing it.")
                 proc.kill()
                 proc.wait(timeout=5)
             except psutil.NoSuchProcess:
                 pass
             proc = None
         elif proc is not None and self.hostsChanged:
-            print("dnsmasq's hosts changed, reloading them (SIGHUP).")
+            log.info("dnsmasq's hosts changed, reloading them (SIGHUP).")
             try:
                 proc.send_signal(signal.SIGHUP)
             except psutil.NoSuchProcess:
@@ -125,6 +128,6 @@ class DnsmasqConfig(JobServerPlugin):
             # the jobserver is run in a container.
             result = subprocess.run([f"{self.dnsmasqBinary}", "--log-facility=-", f"--pid-file={self.dnsmasqPidFile}"])
             if result.returncode != 0:
-                print(f"Error: {self.dnsmasqBinary} failed to start (exit {result.returncode}).")
+                log.error(f"{self.dnsmasqBinary} failed to start (exit {result.returncode}).")
                 return False
         return True
