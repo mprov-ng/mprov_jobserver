@@ -3,6 +3,8 @@
 # (#166).  Dependabot proposes updates to this file.  The package's own
 # requirements (../requirements.txt) only set floors, because the package
 # is also installed into node images next to the distro's python packages.
+# pyparted and pyroute2 aren't listed here: the package pins them exactly
+# itself, and a second pin here can only disagree with it (#253).
 certifi==2026.10.23
 charset-normalizer==3.5.2
 distro==1.9.0
@@ -13,8 +15,6 @@ MarkupSafe==3.0.4
 netifaces==0.11.0
 psutil==7.2.2
 py-dmidecode==0.1.3
-pyparted==3.11.7
-pyroute2==0.8.1
 python-slugify==9.1.3
 PyYAML==6.0.3
 requests==2.34.2

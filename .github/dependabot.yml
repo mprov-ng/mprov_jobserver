@@ -17,6 +17,12 @@ updates:
     directory: "/container"
     schedule:
       interval: "weekly"
+    # The package's requirements.txt pins these two exactly, so an update
+    # here can't install (#253).  pyroute2 0.9 also needs Python >= 3.9,
+    # and Rocky 8 images run 3.8 (#111).
+    ignore:
+      - dependency-name: "pyparted"
+      - dependency-name: "pyroute2"
     groups:
       container-python:
         patterns:
