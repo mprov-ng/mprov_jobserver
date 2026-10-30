@@ -145,10 +145,23 @@ def test_needs_the_webserver(js):
     repo_sync(js).load_config()
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="repo_sync compares status_code with the string \"404\", so a deleted repo crashes the sync (#141)")
 def test_repo_deleted_from_the_mpcc_is_skipped(js, plugin, sh):
+  # the 404 check compared with the string "404", so the null reply crashed
+  # the pass; and removing from the list while looping skipped the next (#141)
   plugin.repoList = ["4", "5"]
+  mark_owned(f"{plugin.repoDir}/4")
   js.session.routes.update({"repos/4/": (404, None), "repos/5/": {"id": 5, "version": 3, "hosted_by": [1]}})
   plugin.handle_jobs()
   assert len(sh.wget_calls) == 1
+  # what we had of the deleted repo is cleaned up
+  assert not os.path.exists(f"{plugin.repoDir}/4")
+
+
+def test_mpcc_error_on_a_repo_keeps_it_for_the_next_pass(js, plugin, sh):
+  plugin.repoList = ["4", "5"]
+  mark_owned(f"{plugin.repoDir}/4")
+  js.session.routes.update({"repos/4/": (500, None), "repos/5/": {"id": 5, "version": 3, "hosted_by": [1]}})
+  plugin.handle_jobs()
+  assert len(sh.wget_calls) == 1
+  # an error that may pass is not a deletion: the repo stays on disk
+  assert os.path.exists(f"{plugin.repoDir}/4")
