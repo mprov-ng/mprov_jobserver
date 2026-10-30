@@ -184,9 +184,8 @@ def test_nologin_is_lifted_when_the_scripts_region_fails(js, plugin, monkeypatch
   assert plugin.nologin == [("touch", "/etc/nologin"), ("unlink", "/etc/nologin")]
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="group scripts' dependsOn are objects (depth 3), but they're used as slugs (#146)")
 def test_group_script_dependencies(js, plugin, monkeypatch):
+  # group scripts' dependsOn are objects (depth 3), but were used as slugs (#146)
   argv(monkeypatch, "-i", "compute")
   data = entity()
   data["systemgroups"][0]["scripts"] = [script("group-tool", depends=[script("base")])]
@@ -195,9 +194,8 @@ def test_group_script_dependencies(js, plugin, monkeypatch):
   assert plugin.ran.index("base") < plugin.ran.index("group-tool")
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="with -s, distro scripts' dependsOn are slugs (depth 4), but they're read as objects (#146)")
 def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
+  # with -s, distro scripts' dependsOn are slugs (depth 4), but were read as objects (#146)
   argv(monkeypatch, "-s")
   system = entity(scripts=[])
   system["hostname"] = "node01"
@@ -209,13 +207,34 @@ def test_system_mode_distro_script_dependencies(js, plugin, monkeypatch):
   assert plugin.ran.index("base") < plugin.ran.index("tool")
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="an unresolvable dependency makes depResolve() return None, which handle_jobs() iterates (#146)")
-def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch):
+@pytest.mark.parametrize("scripts", [
+  [script("tool", depends=[{"slug": "missing"}])],                                    # nobody provides it
+  [script("a", depends=[{"slug": "b"}]), script("b", depends=[{"slug": "a"}])],        # a cycle
+])
+def test_unresolvable_dependency_runs_nothing(js, plugin, monkeypatch, scripts):
+  # depResolve() returned None, which handle_jobs() then iterated (#146)
   argv(monkeypatch, "-i", "compute")
-  js.session.routes["systemimages/compute/"] = entity(scripts=[script("tool", depends=[{"slug": "missing"}])])
+  js.session.routes["systemimages/compute/"] = entity(scripts=scripts)
   plugin.handle_jobs()
   assert plugin.ran == []
+  assert plugin.failed is True
+  # nothing ran, so nobody was locked out either
+  assert plugin.nologin == []
+
+
+def test_system_mode_distro_script_type_as_a_slug(js, plugin, monkeypatch):
+  # at depth 4 the scriptType can be a slug too, not an object (post-boot: -b)
+  argv(monkeypatch, "-s", "-b")
+  system = entity(scripts=[])
+  system["hostname"] = "node01"
+  del system["name"]
+  base = dict(script("base", stype="post-boot"), scriptType="post-boot")
+  tool = dict(script("tool", depends=["base"], stype="post-boot"), scriptType="post-boot")
+  system["systemgroups"] = []
+  system["systemimage"] = {"osdistro": dict(system.pop("osdistro"), scripts=[base, tool])}
+  js.session.routes["systems/?self"] = system
+  plugin.handle_jobs()
+  assert plugin.ran == ["base", "tool"]
 
 
 # script failures propagate (#174)
