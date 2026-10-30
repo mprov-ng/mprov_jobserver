@@ -22,6 +22,9 @@ DISTRO_VERSION = re.compile(r'[0-9]+(\.[0-9]+)*')
 # instead, so these are disabled wherever the image has them
 STOCK_REPOS = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
 
+# where the image trusts the mPCC's CA from (update-ca-trust reads it) (#267)
+MPCC_CA_ANCHOR = '/etc/pki/ca-trust/source/anchors/mprov-mpcc.pem'
+
 
 def stock_repos_in(imgDir):
   """ The STOCK_REPOS that the image's yum.repos.d defines, in list order. """
@@ -96,6 +99,30 @@ class UpdateImage(JobServerPlugin):
       # the build goes on: the mPCC's repos are still there to install from
       print(f"Warning: unable to disable the image's stock repos {', '.join(repos)}.")
 
+  def mpcc_ca(self, imgDir):
+    '''
+    Copy the job server's configured caBundle, the mPCC's CA, into the
+    image: to the same absolute path, and to the trust anchors (#267).  The
+    same path because the first installs run the host's dnf against the
+    image's repo files, and dnf reads sslcacert as a host path; the chroot's
+    dnf and the nodes then read the image's copy.  Returns that path, None
+    if no caBundle is configured (the OS bundle is the host's own, and can't
+    be copied in as the mPCC's CA), or False if the copy failed.
+    '''
+    ca = ((self.js.config_data or {}).get('global') or {}).get('caBundle')
+    if not ca:
+      return None
+    ca = os.path.abspath(ca)
+    try:
+      for dest in (imgDir + ca, imgDir + MPCC_CA_ANCHOR):
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copyfile(ca, dest)
+        os.chmod(dest, 0o644)
+    except OSError as err:
+      print(f"Error: unable to copy the mPCC's CA {ca} into the image: {err}")
+      return False
+    return ca
+
   def updateBootFiles(self):
     # update the dracut image one last time.
     imgDir = self.imageDir + '/' + self.imageDetails['slug']
@@ -162,6 +189,13 @@ class UpdateImage(JobServerPlugin):
 #         return
     ########
     
+    # an https mPCC with a site or self-signed CA: the image trusts it too
+    caBundle = self.mpcc_ca(imgDir)
+    if caBundle is False:
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
     # install the extra repository packages on the system image
     print("Installing extra repos...")
     repostr = ""
@@ -215,6 +249,10 @@ class UpdateImage(JobServerPlugin):
           repofile.write(f"baseurl=\"{repourl}\"\n")
           repofile.write(f"enabled=1\n")
           repofile.write(f"gpgcheck=0\n")
+          if repo['managed'] and caBundle:
+            # the host's dnf (with --installroot) and the image's dnf both
+            # find the mPCC's CA at this path (#267)
+            repofile.write(f"sslcacert={caBundle}\n")
       
     ver= str(imageDetails['osdistro']['version'])
     if not DISTRO_VERSION.fullmatch(ver):
@@ -260,6 +298,14 @@ class UpdateImage(JobServerPlugin):
         self.threadOk = False
         return
     
+    # ca-certificates is in now: add the mPCC's CA to the image's bundle,
+    # which the job server and node scripts in the image use (#267)
+    if caBundle and os.system(f"chroot {qimg} update-ca-trust"):
+      print("Error: unable to add the mPCC's CA to the image's trust store.")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
     # the main install brought in the stock repo files; disable them again
     self.disable_stock_repos(imgDir, f"chroot {qimg} dnf -y config-manager --disable")
 
