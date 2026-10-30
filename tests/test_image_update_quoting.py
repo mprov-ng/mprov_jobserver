@@ -69,8 +69,9 @@ def test_an_image_path_with_a_space_stays_one_argument(js, plugin, images, comma
   assert argv(cp)[-1] == f"{img}/etc/resolv.conf"
   [runner] = commands.matching("script-runner.sh")
   assert argv(runner) == [f"{img}/tmp/mprov/script-runner.sh"]
-  [rm] = commands.matching(".img")
-  assert argv(rm) == ["rm", "-f", f"{img}/compute.img"]
+  # the old .img isn't removed with a shell command any more: tar leaves it
+  # out (#232); tar itself runs from an argument list
+  assert not [cmd for cmd in commands.run if cmd.startswith("rm ") and ".img" in cmd]
   # script-runner.sh gets the path as one shell word
   assert f"IMGDIR={shlex.quote(img)}\n" in (store / "compute/tmp/mprov/script-runner.sh").read_text()
 
