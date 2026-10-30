@@ -24,6 +24,28 @@ def write_if_changed(path, text):
     return True
 
 
+def remove_stale(directory, suffix, keep):
+    '''
+    Remove the hosts files in directory that this plugin writes (named
+    "<network-slug><suffix>") but didn't write this pass: the network was
+    deleted, renamed or no longer has DNS/DHCP managed.  dnsmasq reads every
+    file in its hosts directories, so a leftover kept answering (#244).
+    Other files, an operator's included, are left alone.  True if any was
+    removed.
+    '''
+    removed = False
+    for name in os.listdir(directory):
+        if name.startswith('.') or not name.endswith(suffix) or name in keep:
+            continue
+        try:
+            os.unlink(os.path.join(directory, name))
+        except FileNotFoundError:
+            continue
+        print(f"Removed {os.path.join(directory, name)}: its network is no longer served.")
+        removed = True
+    return removed
+
+
 def running_dnsmasq(binary, pidfile):
     '''
     The dnsmasq we run, as a psutil.Process, or None if it isn't running.
