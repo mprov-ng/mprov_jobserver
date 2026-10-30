@@ -1,1 +1,3 @@
 - repo-delete:
+    # the directory repo-update mirrors into; defaults to repo-update's repoDir
+    repoDir: '/export/repos'

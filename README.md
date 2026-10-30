@@ -65,7 +65,7 @@ names in the `jobmodules:` config list (and the `-m` argument):
 - `libgenders` — generates a genders file for use with pdsh.
 - `mprov-webserver` — serves images and repo mirrors over HTTP to the systems being provisioned.
 - `nads` — Node Auto Detection System; sniffs LLDP on the provisioning interface (`provIntf`) to discover the switch port a provisioning node is attached to.
-- `repo-delete` — deletes mirrored repos from disk.
+- `repo-delete` — when the mPCC deletes a repo, removes its mirror from `repoDir` (by default repo-update's); run it on the repo-update node.
 - `repo-sync` — keeps the mPCC's repo mirrors up to date on a local directory. Must run on repo *source* nodes together with `mprov-webserver`.
 - `repo-update` — mirrors the repos defined in mPCC to disk (reposync).
 - `script-runner` — runs image-gen and post-boot scripts against a system image or the local system (see *script-runner args* below).
