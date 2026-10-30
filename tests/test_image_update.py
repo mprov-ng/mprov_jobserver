@@ -599,6 +599,29 @@ def test_pack_writes_the_image_in_place_through_a_temp_file(js, plugin, images, 
 
 
 @pytest.mark.parametrize("failing", ["tar c", "gzip"])
+def test_failed_pack_keeps_the_previous_image(js, plugin, images, commands, failing):
+  # the old archive was deleted before packing, so a failed pack left the
+  # job server with no image to serve at all (#232)
+  img = images / "compute" / "compute.img"
+  img.parent.mkdir(parents=True)
+  img.write_bytes(b"OLD")
+  commands.fail = [failing]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert img.read_bytes() == b"OLD"
+  assert not [cmd for cmd in commands.matching("rm -f") if "compute.img" in cmd]
+
+
+def test_pack_leaves_the_previous_archive_out(js, plugin, images, commands):
+  pending_build(js)
+  plugin.handle_jobs()
+  [pack] = commands.matching("tar c")
+  args = pack.split()
+  assert args[args.index("--exclude") + 1] == "./compute.img"
+
+
+@pytest.mark.parametrize("failing", ["tar c", "gzip"])
 def test_failed_tar_or_gzip_fails_the_job_and_publishes_nothing(js, plugin, images, commands, failing):
   # a shell pipeline only reported gzip's status, so a tar that failed
   # partway published a truncated image as a success (#216)

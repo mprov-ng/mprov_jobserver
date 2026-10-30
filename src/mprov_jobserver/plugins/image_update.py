@@ -167,11 +167,17 @@ class image_update(JobServerPlugin):
     # (#216).  The archive is written to a temporary file in the image store
     # (outside imgDir, so it isn't packed into itself) and moved into place
     # only when both succeeded.  False if anything failed.
+    # dest is usually in imgDir itself: the previous archive stays out of the
+    # new one, and stays in place until the new one replaces it, so a failed
+    # pack keeps the image nodes are booting (#232)
+    exclude = []
+    if os.path.dirname(os.path.abspath(dest)) == os.path.abspath(imgDir):
+      exclude = ['--exclude', './' + basename(dest)]
     tmp = None
     try:
       fd, tmp = tempfile.mkstemp(dir=self.imageDir, prefix='.' + basename(dest) + '.', suffix='.pack')
       with os.fdopen(fd, 'wb') as out:
-        tar = subprocess.Popen([busybox, 'tar', 'c', '-C' + imgDir, '-f', '-', './'], stdout=subprocess.PIPE)
+        tar = subprocess.Popen([busybox, 'tar', 'c', '-C' + imgDir] + exclude + ['-f', '-', './'], stdout=subprocess.PIPE)
         gzip = subprocess.Popen(['gzip', '-1', '-c'], stdin=tar.stdout, stdout=out)
         # so tar gets SIGPIPE if gzip dies, instead of blocking on a full pipe
         tar.stdout.close()
@@ -616,7 +622,6 @@ class image_update(JobServerPlugin):
         # package the filesystem into an initramfs
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
-        os.system('rm -f ' + shlex.quote(imgDir + '/' + imageDetails['slug'] + '.img'))
         if not self.packImage(busybox, imgDir, imgDir + '/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
