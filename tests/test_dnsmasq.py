@@ -535,3 +535,23 @@ def test_plugin_passes_worker_outcomes_to_config(js, monkeypatch):
   [conf] = RecordedConfig.runs
   assert (conf.dnsOk, conf.dhcpOk) == (False, True)
   assert (conf.mainChanged, conf.hostsChanged) == (False, True)
+
+
+@pytest.mark.parametrize("dns, dhcp_jobs, config_runs", [
+  (False, False, False),  # DHCP only, idle: nothing to do this pass
+  (False, True, True),    # DHCP only, with work
+  (True, False, True),    # DNS on: config runs every pass (it keeps dnsmasq up)
+])
+def test_config_runs_when_there_is_work_or_dns_is_on(js, monkeypatch, dns, dhcp_jobs, config_runs):
+  # the DHCP no-jobs branch set self.enableDHCP = False to get this (#163)
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqDNSConfig", FinishedWorker)
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqDHCPConfig", FinishedWorker)
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqConfig", RecordedConfig)
+  RecordedConfig.runs = []
+  js.has_jobs = dhcp_jobs
+  plugin = dnsmasq_plugin.dnsmasq(js)
+  plugin.enableDNS, plugin.enableDHCP = dns, True
+  plugin.handle_jobs()
+  assert bool(RecordedConfig.runs) == config_runs
+  # and the setting itself is left alone
+  assert plugin.enableDHCP is True

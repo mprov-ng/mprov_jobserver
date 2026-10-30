@@ -135,8 +135,7 @@ class dnsmasq(JobServerPlugin):
       jobquery = "&module=[\"pxe-update\",\"dhcp-update\",\"pxe-delete\",\"dhcp-delete\"]"
       # print(jobquery)
       if not self.js.update_job_status(self.jobModule, 2, jobquery=jobquery + "&status=1") and not self.firstRun:
-        pass # no jobs.
-        self.enableDHCP = False
+        pass # no jobs, so no DHCP worker this pass
       else:
         dhcpThread = DnsmasqDHCPConfig(self.js)
         dhcpThread.dnsmasqConfDir = self.dnsmasqConfDir
@@ -151,7 +150,11 @@ class dnsmasq(JobServerPlugin):
         thread.join()
 
     # Based on our settings, let's start up the submodules for dnsmasq.
-    if(self.enableDNS or self.enableDHCP):
+    # With DNS on, the config module runs every pass (it also keeps dnsmasq
+    # running); DHCP alone only brings it in when the DHCP worker had work.
+    # This used to be `self.enableDHCP = False` in the no-jobs branch, which
+    # read as if DHCP got switched off (#163).
+    if self.enableDNS or dhcpThread is not None:
       
       # DNS or DHCP is on, so let's run the config module
       # the config module for dnsmasq will also be responsible for
