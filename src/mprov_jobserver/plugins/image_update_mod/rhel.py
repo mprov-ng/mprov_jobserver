@@ -177,12 +177,8 @@ class UpdateImage(JobServerPlugin):
     ######
 
     ver= str(imageDetails['osdistro']['version'])
-    # run a clean on yum
-    if os.system('dnf -y clean all'):
-      print("Error: unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
+    # run a clean on yum, in the image only: a plain `dnf clean all` here
+    # wiped the job server's own dnf cache on every build (#164)
     if os.system('dnf --installroot=' + imgDir + ' -y clean all'):
       print("Error: unable to clear all dnf metadata.")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')

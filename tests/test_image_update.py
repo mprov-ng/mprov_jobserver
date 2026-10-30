@@ -789,3 +789,12 @@ def test_failed_build_thread_doesnt_stop_the_others(js, plugin, images, commands
   assert job_states(js)[-1] == (4, 10)
   [pack] = commands.matching("tar c")
   assert f"-C{images}/login " in pack
+
+
+def test_build_never_cleans_the_job_servers_own_dnf(js, plugin, commands):
+  # a bare `dnf -y clean all` wiped the build host's cache on every build (#164)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(4, 9)]
+  cleans = commands.matching("clean all")
+  assert cleans and all("--installroot=" in cmd for cmd in cleans)
