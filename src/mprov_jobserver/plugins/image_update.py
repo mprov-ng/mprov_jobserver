@@ -529,12 +529,23 @@ class image_update(JobServerPlugin):
           if 'rootpw' in imageDetails['osdistro']:
             if imageDetails['osdistro']['rootpw'] is not None and imageDetails['osdistro']['rootpw'] != "" :
               print("Setting root password...")
-              # feed the password to the chrooted passwd over its stdin pipe,
+              rootpw = imageDetails['osdistro']['rootpw']
+              # chpasswd reads one user:password line; a line break would end it early
+              if "\n" in rootpw or "\r" in rootpw:
+                print("Error: the OS distro's root password contains a line break, failing job.")
+                self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+                continue
+              # feed the password to the chrooted chpasswd over its stdin pipe,
               # which is private to this (root) process; an `echo ... | passwd`
               # shell command would expose it in the sh -c argv (#168).
-              subprocess.run(["chroot", imgDir, "passwd", "root"],
-                             input=f"{imageDetails['osdistro']['rootpw']}\n" * 2,
-                             text=True)
+              # chpasswd is non-interactive, unlike passwd's prompts (#229).
+              if subprocess.run(["chroot", imgDir, "chpasswd"],
+                                input=f"root:{rootpw}\n",
+                                text=True).returncode != 0:
+                # don't ship an image with the distro's default root password
+                print("Error: unable to set the image's root password, failing job.")
+                self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+                continue
 
           # now let's run our script-runner shell script.
           with open(os.open(imgDir + '/tmp/mprov/script-runner.sh',os.O_CREAT | os.O_WRONLY, 0o755) , 'w') as conf:

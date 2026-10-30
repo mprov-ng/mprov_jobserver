@@ -361,15 +361,44 @@ def test_root_password_is_set_in_the_image(js, plugin, images, commands, recorde
   data["osdistro"]["rootpw"] = "s3cret"
   pending_build(js, data)
   plugin.handle_jobs()
-  passwd_runs = [run for run in recorded_processes if "passwd" in run[0]]
+  passwd_runs = [run for run in recorded_processes if "chpasswd" in run[0]]
   assert len(passwd_runs) == 1
   argv, kwargs = passwd_runs[0]
-  assert argv == ["chroot", f"{images}/compute", "passwd", "root"]
+  assert argv == ["chroot", f"{images}/compute", "chpasswd"]
   feed = kwargs["input"]
   if isinstance(feed, bytes):
     feed = feed.decode()
-  # the password reaches passwd's stdin: the new password, then the confirmation
-  assert feed.count("s3cret") == 2
+  # the password reaches chpasswd's stdin as one user:password line (#229);
+  # chpasswd splits at the first colon, so a colon in the password is fine
+  assert feed == "root:s3cret\n"
+  assert job_states(js)[-1][0] == 4
+
+
+def test_a_failed_root_password_fails_the_job(js, plugin, images, commands, monkeypatch):
+  # the image would ship with the distro's default password (#229)
+  runs = []
+  def run(argv, **kwargs):
+    runs.append(argv)
+    return subprocess.CompletedProcess(argv, 1 if "chpasswd" in argv else 0)
+  monkeypatch.setattr(subprocess, "run", run)
+  data = image()
+  data["osdistro"]["rootpw"] = "s3cret"
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert ["chroot", f"{images}/compute", "chpasswd"] in runs
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("script-runner.sh")
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+@pytest.mark.parametrize("rootpw", ["s3cret\nroot2:x", "s3cret\r"])
+def test_a_root_password_with_a_line_break_fails_the_job(js, plugin, images, commands, recorded_processes, rootpw):
+  data = image()
+  data["osdistro"]["rootpw"] = rootpw
+  pending_build(js, data)
+  plugin.handle_jobs()
+  assert not [run for run in recorded_processes if "chpasswd" in run[0]]
+  assert job_states(js) == [(3, 9)]
 
 
 def test_root_password_never_reaches_process_argv(js, plugin, images, commands, recorded_processes):
