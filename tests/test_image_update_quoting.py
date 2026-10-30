@@ -4,12 +4,15 @@ checked or quoted first, so a value that's fine as data but odd as shell
 syntax can't change a command (#184).  Uses test_image_update's fake job
 server, image store and recorded commands.
 """
+import os
 import shlex
 
 import pytest
 
 # the fixtures (fake_wget is autouse there, so it's imported to apply here too)
 from test_image_update import fake_wget, images, plugin, image, job_states, pending_build  # noqa: F401
+# the real subprocess.run, for the test that runs script-runner.sh
+from test_image_update import _run
 
 
 def argv(cmd):
@@ -58,7 +61,60 @@ def test_an_image_path_with_a_space_stays_one_argument(js, plugin, images, comma
   img = f"{store}/compute"
   installs = [argv(cmd) for cmd in commands.matching("--installroot=")]
   assert installs and all(f"--installroot={img}" in args for args in installs)
-  # the rhel module's chroot commands; image_update's own (its pip install
-  # of the job server, script-runner.sh) are quoted in a follow-up
-  chroots = [argv(cmd) for cmd in commands.matching("chroot ") if "mprov_jobserver" not in cmd]
+  chroots = [argv(cmd) for cmd in commands.matching("chroot ")]
+  assert any("mprov_jobserver" in args for args in chroots)
   assert chroots and all(args[0] == "chroot" and args[1] == img for args in chroots)
+  # image_update's own commands: resolv.conf, script-runner.sh, the old .img
+  [cp] = commands.matching("/etc/resolv.conf")
+  assert argv(cp)[-1] == f"{img}/etc/resolv.conf"
+  [runner] = commands.matching("script-runner.sh")
+  assert argv(runner) == [f"{img}/tmp/mprov/script-runner.sh"]
+  [rm] = commands.matching(".img")
+  assert argv(rm) == ["rm", "-f", f"{img}/compute.img"]
+  # script-runner.sh gets the path as one shell word
+  assert f"IMGDIR={shlex.quote(img)}\n" in (store / "compute/tmp/mprov/script-runner.sh").read_text()
+
+
+def test_busybox_download_path_with_a_space_stays_one_argument(js, plugin, commands, tmp_path):
+  store = tmp_path / "image store"
+  store.mkdir()
+  plugin.imageDir = str(store)
+  pending_build(js)
+  plugin.handle_jobs()
+  [wget] = commands.matching("wget -q -O")
+  args = argv(wget)
+  assert args[args.index("-O") + 1] == f"{store}/.busybox/busybox"
+
+
+def test_script_runner_sh_keeps_odd_values_as_one_word(tmp_path):
+  # run the rendered script with chroot, mount, umount and mountpoint faked;
+  # chroot logs each argument it gets on its own line
+  from jinja2 import Environment, PackageLoader
+  img = tmp_path / "image store" / "comp ute"
+  slug = "compute; touch $HOME/pwned $(id)"
+  script = tmp_path / "script-runner.sh"
+  script.write_text(Environment(loader=PackageLoader("mprov_jobserver"))
+                    .get_template("image-update/script-runner.sh")
+                    .render({"imgDir": shlex.quote(str(img)), "image": shlex.quote(slug)}))
+  bin = tmp_path / "bin"
+  bin.mkdir()
+  log = tmp_path / "log"
+  fakes = {
+    "mount": f'echo "mount $4" >> "{log}"',
+    "mountpoint": "exit 0",
+    "umount": f'echo "umount $1" >> "{log}"',
+    "chroot": f'printf "chroot %s\\n" "$@" >> "{log}"',
+  }
+  for name, body in fakes.items():
+    (bin / name).write_text(f"#!/bin/sh\n{body}\n")
+    (bin / name).chmod(0o755)
+  env = dict(os.environ, PATH=f"{bin}:/usr/bin:/bin", HOME=str(tmp_path))
+  assert _run(["/bin/bash", str(script)], env=env).returncode == 0
+  lines = log.read_text().splitlines()
+  assert [l for l in lines if l.startswith("mount ")] == [f"mount {img}/{d}" for d in ("dev", "proc", "run", "sys")]
+  assert [l for l in lines if l.startswith("umount ")] == [f"umount {img}/{d}" for d in ("sys", "run", "proc", "dev")]
+  chroot = [l[len("chroot "):] for l in lines if l.startswith("chroot ")]
+  assert chroot[0] == str(img)
+  # the slug reaches the job server's -i as one argument, unparsed
+  assert chroot[-1] == slug
+  assert not (tmp_path / "pwned").exists()

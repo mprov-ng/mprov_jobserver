@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import shlex
 import time
 import urllib.parse
 
@@ -461,9 +462,12 @@ class image_update(JobServerPlugin):
     
         
         imgDir = self.imageDir + '/' + imageDetails['slug']
+        # the image path goes into shell commands quoted, so an odd
+        # character in it can't change the command (#184)
+        qimg = shlex.quote(imgDir)
         # copy in the system resolv.conf
-        os.system(f"/bin/cp -f /etc/resolv.conf {imgDir}/etc/resolv.conf")
-        if os.system("chroot " + imgDir + " pip3 --no-cache-dir install --upgrade mprov_jobserver"):
+        os.system(f"/bin/cp -f /etc/resolv.conf {qimg}/etc/resolv.conf")
+        if os.system(f"chroot {qimg} pip3 --no-cache-dir install --upgrade mprov_jobserver"):
           print("Error: Unable to install mprov_jobserver python module.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -503,9 +507,10 @@ class image_update(JobServerPlugin):
           confFile.write("\n- !include plugins/*.yaml")
 
         try:
+          # script-runner.sh takes these as shell words, so quote them (#184)
           data = {
-            'imgDir': imgDir,
-            'image': imageDetails['slug'],
+            'imgDir': shlex.quote(imgDir),
+            'image': shlex.quote(imageDetails['slug']),
           }
 
           # copy in our root keys from the distro
@@ -544,7 +549,7 @@ class image_update(JobServerPlugin):
               conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
 
           # a failed image-gen script fails the job, and no image is packed (#221)
-          if os.system(imgDir + '/tmp/mprov/script-runner.sh'):
+          if os.system(shlex.quote(imgDir + '/tmp/mprov/script-runner.sh')):
             print("Error while running image-gen scripts via job server, failing job.")
             self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
             continue
@@ -561,7 +566,7 @@ class image_update(JobServerPlugin):
         os.makedirs(busyboxDir, mode=0o700, exist_ok=True)
         os.chmod(busyboxDir, 0o700)
         busybox = busyboxDir + '/busybox'
-        if os.system(f"wget -q -O {busybox} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
+        if os.system(f"wget -q -O {shlex.quote(busybox)} https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"):
           print("Error: unable to download busybox")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -600,7 +605,7 @@ class image_update(JobServerPlugin):
         # package the filesystem into an initramfs
         print("Building " +  imgDir + '/' + imageDetails['slug'] + '.img')
         startTime=time.time()
-        os.system('rm -f ' + imgDir + '/' + imageDetails['slug'] + '.img')
+        os.system('rm -f ' + shlex.quote(imgDir + '/' + imageDetails['slug'] + '.img'))
         if not self.packImage(busybox, imgDir, imgDir + '/' + imageDetails['slug'] + '.img'):
           print("Error: unable to create initramfs")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
