@@ -137,39 +137,39 @@ class script_runner(JobServerPlugin):
     else:
       query="systems/?self" #?hostname=" + entityId
     print(self.js.mprovURL + query)
-    response = self.js.session.get( self.js.mprovURL + query)
+    # If the image or system we were asked for can't be loaded, stop and say
+    # so.  This used to fall back to the nads image's scripts: an image build
+    # that got a 5xx ran nads' image-gen scripts in the image it was building
+    # and carried on, and with -s the fallback had no 'systemimage' and
+    # crashed.  exit() only ended this thread, so runonce still exited 0 (#156).
+    what = f"system image '{entityId}'" if sysimage else "this system (systems/?self)"
     try:
-      entity = response.json()
-      if response.status_code != 200:
-        print(f"code: {response.status_code}")
-        raise Exception()
-    except:
-      # if this response was bad, try to grab the nads image 
-      query="systemimages/nads/"
-      print(self.js.mprovURL + query)
-    
-      response = self.js.session.get( self.js.mprovURL + query )
+      response = self.js.session.get( self.js.mprovURL + query)
+    except requests.RequestException as err:
+      return self.entityFailed(f"Error: unable to reach the mPCC for {what}: {err}")
+    entity = None
+    if response.status_code == 200:
       try:
         entity = response.json()
-      except: 
-        print("Error: Unable to get information from mPCC.")
-        exit(1)
-
-    if entity == None:
-      print("Error: Entity Not loaded.")
-      exit(1)
+      except ValueError:
+        pass
+    if entity is None:
+      return self.entityFailed(f"Error: unable to load {what} from the mPCC: {response.status_code} {response.text[:200]}")
 
     # some clean up of the entity
     if type(entity) == list:
       if len(entity) == 1:
         entity = entity[0]
+    if not isinstance(entity, dict):
+      return self.entityFailed(f"Error: the mPCC's reply for {what} isn't one entity, cannot continue.")
     if system :
+      if not isinstance(entity.get('systemimage'), dict):
+        return self.entityFailed(f"Error: {what} has no system image, so it has no scripts to run.")
       entity['osdistro'] = entity['systemimage']['osdistro']
     # pprint.pprint(entity)
 
     if "name" not in entity and "hostname" not in entity:
-      print("Error: Corrupted entity found, cannot continue.")
-      exit(1)
+      return self.entityFailed("Error: Corrupted entity found, cannot continue.")
 
     # merge the scripts and config_params from distro -> system groups ->
     # image -> system.  The mPCC does the merge and serves it as `config`;
@@ -264,6 +264,14 @@ class script_runner(JobServerPlugin):
           pass
     if not failures:
       print("script-runner complete.")
+
+  def entityFailed(self, message):
+    # the run fails, and runonce exits nonzero; nothing has run yet and
+    # /etc/nologin hasn't been created, so there's nothing to undo.
+    print(message)
+    self.failed = True
+    self.set_job_failure()
+    return False
 
   def mpccMerge(self, entity, scriptMode):
     '''
