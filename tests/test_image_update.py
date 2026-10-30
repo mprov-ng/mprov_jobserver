@@ -552,6 +552,36 @@ def test_pack_failure_fails_only_this_job(js, plugin, commands):
   assert [w for w in js.session.writes if "systemimages" in w[1]] == []
 
 
+def test_pack_writes_the_image_in_place_through_a_temp_file(js, plugin, images, commands):
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(4, 9)]
+  img = images / "compute" / "compute.img"
+  assert img.read_bytes() == b"PACKED"
+  # readable by whatever serves images, as the old /tmp file was
+  assert stat.S_IMODE(img.stat().st_mode) == 0o644
+  # no temp file left behind, and never the fixed world-writable /tmp path
+  assert [p.name for p in images.iterdir() if p.name.endswith(".pack")] == []
+  assert not commands.matching("/tmp/compute.img")
+  [gzip] = commands.matching("gzip")
+  assert gzip == "gzip -1 -c"
+
+
+@pytest.mark.parametrize("failing", ["tar c", "gzip"])
+def test_failed_tar_or_gzip_fails_the_job_and_publishes_nothing(js, plugin, images, commands, failing):
+  # a shell pipeline only reported gzip's status, so a tar that failed
+  # partway published a truncated image as a success (#216)
+  commands.fail = [failing]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not (images / "compute" / "compute.img").exists()
+  assert [p.name for p in images.iterdir() if p.name.endswith(".pack")] == []
+  # not registered as a host, nor recorded as having this version
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+  assert not (images / "image-versions").exists() or "compute" not in json.loads((images / "image-versions").read_text())
+
+
 def test_mpcc_error_fails_only_this_job(js, plugin):
   pending_build(js)
   js.session.routes["systemimages/compute/"] = (500, None)
