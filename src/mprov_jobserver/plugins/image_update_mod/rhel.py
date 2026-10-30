@@ -18,6 +18,29 @@ MODULE_NAME = re.compile(r'[A-Za-z0-9_-]+')
 # a distro version, as dnf's --releasever takes it (e.g. 9, 8.10)
 DISTRO_VERSION = re.compile(r'[0-9]+(\.[0-9]+)*')
 
+# the distro's own repos; the image gets its packages from the mPCC's repos
+# instead, so these are disabled wherever the image has them
+STOCK_REPOS = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
+
+
+def stock_repos_in(imgDir):
+  """ The STOCK_REPOS that the image's yum.repos.d defines, in list order. """
+  found = set()
+  repoDir = f"{imgDir}/etc/yum.repos.d"
+  if os.path.isdir(repoDir):
+    for name in os.listdir(repoDir):
+      if not name.endswith(".repo"):
+        continue
+      try:
+        with open(f"{repoDir}/{name}") as repofile:
+          for line in repofile:
+            m = re.match(r'\s*\[([^\]]+)\]', line)
+            if m:
+              found.add(m.group(1).strip())
+      except OSError:
+        continue
+  return [repo for repo in STOCK_REPOS if repo in found]
+
 
 class UpdateImage(JobServerPlugin):
   imageDetails = None
@@ -63,6 +86,15 @@ class UpdateImage(JobServerPlugin):
       else:
         print(f"Leaving {mod} out of the initramfs: it's built in, or not a module of the image's kernel.")
     return keep
+
+  def disable_stock_repos(self, imgDir, cmd):
+    # cmd is the config-manager --disable command, without the repo ids
+    repos = stock_repos_in(imgDir)
+    if not repos:
+      return
+    if os.system(f"{cmd} {' '.join(repos)}"):
+      # the build goes on: the mPCC's repos are still there to install from
+      print(f"Warning: unable to disable the image's stock repos {', '.join(repos)}.")
 
   def updateBootFiles(self):
     # update the dracut image one last time.
@@ -184,22 +216,17 @@ class UpdateImage(JobServerPlugin):
           repofile.write(f"enabled=1\n")
           repofile.write(f"gpgcheck=0\n")
       
-    # here we are going to disable all the default repos, we'll do this again after the main install.
-    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
-    for drepo in disable_repos:
-      try:
-        os.system(f"dnf -y --installroot {qimg} config-manager --disable {drepo}")
-      except:
-        pass
-
-    ######
-
     ver= str(imageDetails['osdistro']['version'])
     if not DISTRO_VERSION.fullmatch(ver):
       print(f"Error: the OS distro's version {ver!r} isn't a version number (like 9 or 8.10).")
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
+
+    # disable the stock repos an existing image already has; a new image has
+    # none yet, and asking dnf to disable a missing repo logs "Error:" (#211).
+    # Done again after the main install.
+    self.disable_stock_repos(imgDir, f"dnf -y --installroot={qimg} --releasever={ver} config-manager --disable")
     # run a clean on yum, in the image only: a plain `dnf clean all` here
     # wiped the job server's own dnf cache on every build (#164)
     if os.system('dnf --installroot=' + qimg + ' -y clean all'):
@@ -233,13 +260,8 @@ class UpdateImage(JobServerPlugin):
         self.threadOk = False
         return
     
-    # here we are going to disable all the default repos again just to make sure.
-    disable_repos = ['appstream', 'baseos', 'epel', 'extras', 'powertools', 'crb']
-    for drepo in disable_repos:
-      try:
-        os.system(f"chroot {qimg} dnf -y --disable config-manager {drepo}")
-      except:
-        pass
+    # the main install brought in the stock repo files; disable them again
+    self.disable_stock_repos(imgDir, f"chroot {qimg} dnf -y config-manager --disable")
 
     # install and copy the kernel image to the image root
     if float(imageDetails['osdistro']['version']) >= 9 :
