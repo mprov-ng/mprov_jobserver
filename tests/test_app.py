@@ -344,6 +344,7 @@ def test_unregistered_server_starts_modules_only_once_registered(server, monkeyp
   server.highLoad = False
   server.loadmon = False
   server.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "database is locked"})
+  server.session.routes.update({"jobs/?jobserver=9&status=2": [], "jobs/?jobserver=9&status=2&module=recorder": []})
   ticks = []
 
   def sleep(s):
@@ -472,3 +473,115 @@ def test_a_failed_heartbeat_keeps_the_last_features(server):
   server.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "boom"})
   server.register_server()
   assert server.features == {"addjs-version"}
+
+
+# Jobs left RUNNING: by an earlier run of this job server (#94), or by a
+# module whose thread ended without finishing them (#180).
+
+def orphan_server(server, monkeypatch, plugin_cls, ticks_to_run=3):
+  monkeypatch.setattr(mprov_jobserver.plugins, "recorder_mod",
+                      types.SimpleNamespace(recorder_mod=plugin_cls), raising=False)
+  Recorder.ran = []
+  server.jobmodules = ["recorder-mod"]
+  server.config_data = {}
+  server.runonce = False
+  server.heartbeatInterval = 1
+  server.highLoad = False
+  server.loadmon = False
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 5}
+  server.session.routes.update({
+    "jobs/?jobserver=5&status=2": [],
+    "jobs/?jobserver=5&status=2&module=recorder": [],
+  })
+  ticks = []
+  def sleep(s):
+    # let this tick's module run finish, so the next tick sees it ended
+    for thread in list(server.running_threads.values()):
+      thread.join()
+    ticks.append(1)
+    if len(ticks) == ticks_to_run:
+      server.running = False
+  monkeypatch.setattr(app.time, "sleep", sleep)
+  return server
+
+
+def failed_jobs(server):
+  return [path for path, data in patches(server) if data.get("status") == 3]
+
+
+def test_start_up_fails_jobs_left_running_by_the_last_run(server, monkeypatch):
+  orphan_server(server, monkeypatch, Recorder)
+  server.session.routes["jobs/?jobserver=5&status=2"] = [
+    {"id": 21, "module": "image-update", "status": 2}, {"id": 22, "module": "dns-update", "status": 2}]
+  # each job is failed by its id
+  server.session.routes.update({"jobs/21/": {"id": 21, "status": 2}, "jobs/22/": {"id": 22, "status": 2}})
+  ran_before_sweep = []
+  orig = server.fail_orphaned_jobs
+  def spy(modules, reason):
+    if modules is None:
+      ran_before_sweep.append(len(Recorder.ran))
+    return orig(modules, reason)
+  server.fail_orphaned_jobs = spy
+  assert server.start() == 0
+  assert failed_jobs(server) == ["jobs/21/", "jobs/22/"]
+  # once, before any module ran
+  assert ran_before_sweep == [0]
+
+
+def test_a_module_that_ends_with_jobs_running_has_them_failed(server, monkeypatch):
+  class Forgetful(Recorder):
+    def handle_jobs(self):
+      Recorder.ran.append(self.js)
+      # claims a job, then returns (or crashes) without marking it
+      self.js.session.routes["jobs/?jobserver=5&status=2&module=recorder"] = [{"id": 31, "module": "recorder", "status": 2}]
+  orphan_server(server, monkeypatch, Forgetful, ticks_to_run=2)
+  server.session.routes["jobs/31/"] = {"id": 31, "status": 2}
+  server.start()
+  assert "jobs/31/" in failed_jobs(server)
+
+
+# the module's exception is the point here
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_crashed_module_has_its_jobs_failed(server, monkeypatch):
+  class Crashing(Recorder):
+    def handle_jobs(self):
+      self.js.session.routes["jobs/?jobserver=5&status=2&module=recorder"] = [{"id": 32, "module": "recorder", "status": 2}]
+      raise RuntimeError("boom")
+  orphan_server(server, monkeypatch, Crashing, ticks_to_run=2)
+  server.session.routes["jobs/32/"] = {"id": 32, "status": 2}
+  server.start()
+  assert "jobs/32/" in failed_jobs(server)
+
+
+def test_a_module_that_finished_its_jobs_leaves_nothing_to_fail(server, monkeypatch):
+  orphan_server(server, monkeypatch, Recorder)
+  server.start()
+  assert failed_jobs(server) == []
+  assert len(Recorder.ran) >= 2
+
+
+def test_runonce_doesnt_look_for_orphans(server):
+  server.runonce = True
+  assert server.fail_orphaned_jobs(None, "x") == 0
+  assert server.fail_orphaned_jobs(["recorder"], "x") == 0
+
+
+def test_several_modules_are_asked_for_as_a_json_list(server):
+  server.runonce = False
+  server.session.routes['jobs/?jobserver=5&status=2&module=["dns-update","dns-delete"]'] = [{"id": 41, "module": "dns-delete"}]
+  server.session.routes["jobs/41/"] = {"id": 41, "status": 2}
+  assert server.fail_orphaned_jobs(["dns-update", "dns-delete"], "x") == 1
+  assert failed_jobs(server) == ["jobs/41/"]
+
+
+@pytest.mark.parametrize("reply", [(500, {"detail": "x"}), (200, {"detail": "x"})])
+def test_an_error_reply_fails_nothing(server, reply):
+  server.runonce = False
+  server.session.routes["jobs/?jobserver=5&status=2"] = reply
+  assert server.fail_orphaned_jobs(None, "x") == 0
+  assert failed_jobs(server) == []
+
+
+def test_dnsmasq_claims_the_dns_and_dhcp_modules(js):
+  from mprov_jobserver.plugins.dnsmasq import dnsmasq
+  assert dnsmasq(js).claimedModules() == ["dns-update", "dns-delete", "pxe-update", "dhcp-update", "pxe-delete", "dhcp-delete"]

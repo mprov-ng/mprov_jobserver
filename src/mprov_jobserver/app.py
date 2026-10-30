@@ -37,6 +37,9 @@ class JobServer ():
   register = True
   highLoad = False
   firstrun = True
+  # jobs left RUNNING by an earlier run of this job server are failed once,
+  # before any module starts (#94)
+  orphansChecked = False
   # what the mPCC said it supports in its last registration reply (#248)
   features = frozenset()
   # jobmodules that ran and failed in runonce mode, checked before exiting (#174)
@@ -169,6 +172,11 @@ class JobServer ():
           waiting = self.register and not self.runonce and self.id == -1
           if waiting:
             print("Error: not registered with the mPCC yet, job modules wait until we are.")
+          elif not self.orphansChecked:
+            # nothing is running yet, so a job the mPCC has as RUNNING here
+            # was cut off when this job server last stopped (#94)
+            self.orphansChecked = True
+            self.fail_orphaned_jobs(None, "it was running when this job server stopped")
           for mod in ([] if waiting else self.jobmodules):
             # first check if the thread is done running.
             if mod in self.running_threads: 
@@ -176,8 +184,13 @@ class JobServer ():
               if not self.running_threads[mod].is_alive() :
                 # print ("Thread " + mod + " ended.")
                 # if it's done running remove it.
-                self.running_threads[mod].handled = True
+                ended = self.running_threads[mod]
+                ended.handled = True
                 del self.running_threads[mod]
+                # a module waits for its own workers before it returns, so
+                # nothing is working on a job it left RUNNING: it crashed or
+                # forgot it.  Fail it before the next run claims more (#180).
+                self.fail_orphaned_jobs(ended.claimedModules(), f"the {mod} module ended without finishing it")
 
             # if a thread of this plugin is not running, start one.
             if mod not in self.running_threads:
@@ -292,6 +305,34 @@ class JobServer ():
 
     #print(job_module + " " + str(status))
     pass
+
+  def fail_orphaned_jobs(self, modules, reason):
+    """ Fail the jobs the mPCC has as RUNNING on this job server, for the given
+    job modules (all of them if None), that nothing here is working on any
+    more (#94, #180).  Only for a registered, long-running job server: a
+    runonce run has no id of its own.  Returns how many were failed. """
+    if not self.register or self.runonce or self.id == -1 or modules == []:
+      return 0
+    query = 'jobs/?jobserver=' + str(self.id) + '&status=2'
+    if modules is not None:
+      # one module by name, several as a JSON list, as the mPCC takes them
+      query += '&module=' + (modules[0] if len(modules) == 1 else json.dumps(modules, separators=(',', ':')))
+    try:
+      response = self.session.get(self.mprovURL + query)
+      jobs = response.json() if 199 < response.status_code < 300 else []
+    except Exception as err:
+      print(f"Error: unable to look for orphaned jobs: {err}", file=sys.stderr)
+      return 0
+    if not isinstance(jobs, list):
+      return 0
+    failed = 0
+    for job in jobs:
+      if not isinstance(job, dict) or 'id' not in job:
+        continue
+      print(f"Error: failing job {job['id']} ({job.get('module')}): {reason}.", file=sys.stderr)
+      self.update_job_status(job.get('module', ''), 3, jobid=job['id'])
+      failed += 1
+    return failed
 
   def reply_object(self, response):
     """ The mPCC's POST /jobservers/ reply as a dict, or None if it isn't one.
