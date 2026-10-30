@@ -313,10 +313,12 @@ def test_script_runner_config_is_runonce_script_runner(js, plugin, images, comma
   assert "- !include plugins/*.yaml" in seen["config"]
 
 
-def test_the_image_config_leaves_out_the_hosts_ca_bundle(js, plugin, images, commands, monkeypatch):
-  # the host's CA file isn't in the image (#102); and the job server's own
-  # global settings stay as they were
-  js.config_data["global"]["caBundle"] = "/etc/mprov/mpcc-ca.pem"
+def test_the_image_config_leaves_out_the_hosts_ca_bundle(js, plugin, images, commands, monkeypatch, tmp_path):
+  # the job server in the image uses the image's own bundle (#102, #267); and
+  # the job server's own global settings stay as they were
+  ca = tmp_path / "mpcc-ca.pem"
+  ca.write_text("ca")
+  js.config_data["global"]["caBundle"] = str(ca)
   seen = {}
   def system(cmd):
     if cmd.endswith("/tmp/mprov/script-runner.sh"):
@@ -327,7 +329,7 @@ def test_the_image_config_leaves_out_the_hosts_ca_bundle(js, plugin, images, com
   plugin.handle_jobs()
   config = yaml.load(seen["config"].replace("- !include", "# !include"), Loader=yaml.SafeLoader)
   assert "caBundle" not in config[0]["global"]
-  assert js.config_data["global"]["caBundle"] == "/etc/mprov/mpcc-ca.pem"
+  assert js.config_data["global"]["caBundle"] == str(ca)
   assert js.config_data["global"]["jobmodules"] == ["image-update", "mprov-webserver"]
 
 
