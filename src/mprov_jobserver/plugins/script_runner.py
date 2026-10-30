@@ -238,7 +238,7 @@ class script_runner(JobServerPlugin):
     file_path = Path("/etc/nologin")
     try:
       file_path.touch()
-    except:
+    except OSError:
       pass
     try:
       for step in scriptDeps:
@@ -273,7 +273,7 @@ class script_runner(JobServerPlugin):
         # ...the login block is lifted, however we leave (#173).
         try:
           os.unlink("/etc/nologin")
-        except:
+        except OSError:
           pass
     if not failures:
       log.info("script-runner complete.")
@@ -385,8 +385,8 @@ class script_runner(JobServerPlugin):
             yaml_merged.update(dict_entry)
         else: 
             yaml_merged.update(tmpYamlDict)
-      except:
-        pass
+      except (TypeError, ValueError) as err:
+        log.warning(f"ignoring the OS distro's config_params, they aren't a mapping: {err}")
     
     # print(yaml_merged)
     # then the system groups
@@ -400,8 +400,8 @@ class script_runner(JobServerPlugin):
               yaml_merged.update(dict_entry)
           else:
               yaml_merged.update(tmpYamlDict)
-        except:
-          pass  
+        except (TypeError, ValueError) as err:
+          log.warning(f"ignoring system group {group.get('name')}'s config_params, they aren't a mapping: {err}")  
     # and finally the system/image params
     # print(yaml_merged)
     # print(yaml.safe_load(entity['config_params']))
@@ -417,8 +417,8 @@ class script_runner(JobServerPlugin):
             yaml_merged.update(dict_entry)
         else: 
           yaml_merged.update(tmpYamlDict)
-      except:
-        pass
+      except (TypeError, ValueError) as err:
+        log.warning(f"ignoring the entity's config_params, they aren't a mapping: {err}")
               
     # print(yaml_merged)
     return scripts, scriptDeps, yaml_merged

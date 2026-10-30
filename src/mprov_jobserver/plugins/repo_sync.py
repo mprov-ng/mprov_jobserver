@@ -98,7 +98,7 @@ class repo_sync(JobServerPlugin):
         # grab the version info into a var
         try:
           repoVersions = json.loads(vfile.read())
-        except:
+        except ValueError:
           # if we have an error loading the version data, 
           # init it with no version data, we'll rebuild it 
           # in a moment.

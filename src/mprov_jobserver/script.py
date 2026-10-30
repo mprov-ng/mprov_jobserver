@@ -60,7 +60,7 @@ class MProvScript():
       try:
         getattr(self, config_entry)
         setattr(self, config_entry, self.config_data['global'][config_entry])
-      except:
+      except AttributeError:
         # ignore unused keys
         pass
     pass

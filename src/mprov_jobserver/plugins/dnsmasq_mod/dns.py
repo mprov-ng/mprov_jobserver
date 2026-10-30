@@ -115,19 +115,26 @@ class DnsmasqDNSConfig(JobServerPlugin):
             if self.checkHTTPStatus(response.status_code):
                 # only do the bmcs if we get some.
                 
-                try: 
-                    for bmc in response.json():
+                # one BMC with fields missing used to drop every BMC of the
+                # network; now only that one is left out
+                try:
+                    bmcs = response.json()
+                except ValueError:
+                    bmcs = []
+                for bmc in bmcs if isinstance(bmcs, list) else []:
+                    try:
                         tmpHost = {
                             'ipaddress': bmc['ipaddress'],
-                            'ipv6ll': "", 
+                            'ipv6ll': "",
                             'mac': bmc['mac'],
                             'hostname': bmc['system']['hostname'],
                             'domain': network['domain'],
                             'hostaliases': ""
                         }
-                        data_hosts['hosts'].append(tmpHost)
-                except:
-                    pass
+                    except (KeyError, TypeError) as err:
+                        log.warning(f"leaving a BMC on network {network['slug']} out of DNS, it has no {err}: {bmc!r}")
+                        continue
+                    data_hosts['hosts'].append(tmpHost)
             # merge in the switches
             response = self.js.session.get( self.js.mprovURL + 'switches/?network=' + network['slug'])
             # host_list() turns the 404 with null for a network with no

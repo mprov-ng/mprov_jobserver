@@ -699,3 +699,24 @@ def test_a_name_held_by_another_job_server_is_reported_and_retried(server, tmp_p
   assert "[E] app: the mPCC refused our registration: name js01 is registered by another job server" in out
   # nothing else changes; the next heartbeat tries again
   assert server.id == 5 and server.sessionOk
+
+
+# naming what's wrong (bare excepts narrowed)
+
+def test_load_config_says_a_known_entry_has_a_bad_value(tmp_path, capsys):
+  path = write_config(tmp_path, {"mprovURL": "", "apikey": "k"})
+  with pytest.raises(SystemExit):
+    bare_server(path)
+  out = capsys.readouterr().out
+  assert "invalid value for mprovURL in 'global'" in out
+  assert "not a valid config entry" not in out
+
+
+def test_a_failed_heartbeat_says_why(server, capsys, monkeypatch):
+  def down(*args, **kwargs):
+    raise ConnectionError("connection refused")
+  server.session.post = down
+  monkeypatch.setattr(server, "startSession", lambda: False)
+  server.register_server()
+  assert "[E] app: heartbeat to the mPCC failed: connection refused" in capsys.readouterr().out
+  assert server.sessionOk is False

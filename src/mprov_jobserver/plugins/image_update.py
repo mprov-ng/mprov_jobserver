@@ -61,8 +61,8 @@ class image_update(JobServerPlugin):
 
       try:
         image_update = update_klass(self.js)
-      except:
-        log.error(f"Unable to instantiate UpdateImage class on {name}")
+      except Exception as err:
+        log.error(f"Unable to instantiate UpdateImage class on {name}: {err}")
         continue
       image_update.load_config()
     return super().load_config()
@@ -223,7 +223,7 @@ class image_update(JobServerPlugin):
       # grab the version info into a var
       try:
         imgVersions = json.loads(vfile.read())
-      except:
+      except ValueError:
         pass
         
 
@@ -244,7 +244,7 @@ class image_update(JobServerPlugin):
       try: 
         for image in response.json():
           imageList.append(image['slug'])
-      except:
+      except Exception:
         log.error("Unable to get a list of images from the mPCC")
 
         return
@@ -257,7 +257,7 @@ class image_update(JobServerPlugin):
         continue
       try:
         imageData = response.json()
-      except:
+      except ValueError:
         imageData = None
         log.debug(response.text)
       if imageData is None:
@@ -346,7 +346,7 @@ class image_update(JobServerPlugin):
         self.threadOk = False
         log.info(f"Dependent Jobs Present, waiting for them to finish.")
         return
-    except:
+    except Exception:
       log.warning("Unable to parse reply, trying to continue anyway.")
     
     response = self.js.session.get( self.js.mprovURL + 'jobs/?&module=repo-update&status=2')
@@ -361,7 +361,7 @@ class image_update(JobServerPlugin):
         self.threadOk = False
         log.info(f"Dependent Jobs Present, waiting for them to finish.")
         return
-    except:
+    except Exception:
       log.warning("Unable to parse reply, trying to continue anyway.")
     
 
@@ -375,13 +375,13 @@ class image_update(JobServerPlugin):
       for job in response.json():
         try:
           params = job['params']
-        except: 
+        except (KeyError, TypeError):
           log.error("Image Update Job with no imageID present, cannot parse params")
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
           return
         try:
           self.imageList[params['imageId']] = job['id']
-        except:
+        except (KeyError, TypeError):
           log.error("Image Update Job failed, corrupted params.")
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
           return
@@ -401,7 +401,7 @@ class image_update(JobServerPlugin):
         try:
           for job in response.json():
             self.imageList[image] = job['id']
-        except:
+        except Exception:
           log.error(f"Unable to read the claimed job for image {image}.")
       if len(self.imageList) == 0:
         return # no updates found.
@@ -412,7 +412,7 @@ class image_update(JobServerPlugin):
       # if not, attempt to make it, recursively.
       try:
         os.makedirs(self.imageDir, exist_ok=True)
-      except:
+      except OSError:
         log.error("Unable to make imageDir: " + self.imageDir)
         # no image is being built yet, so fail every job we claimed (#144).
         for jid in self.imageList.values():
@@ -431,7 +431,7 @@ class image_update(JobServerPlugin):
                 # instantiate the sub module and pass it the repo.
         try:
           imageDetails = response.json()
-        except:
+        except ValueError:
           log.error("Unable to parse response.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
@@ -455,8 +455,8 @@ class image_update(JobServerPlugin):
 
         try:
           image_update = update_klass(self.js)
-        except:
-          log.error(f"Unable to instantiate UpdateImage class on {imageDetails['osdistro']['baserepo']['ostype']['slug']}")
+        except Exception as err:
+          log.error(f"Unable to instantiate UpdateImage class on {imageDetails['osdistro']['baserepo']['ostype']['slug']}: {err}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         image_update.imageDetails = imageDetails
@@ -665,7 +665,7 @@ class image_update(JobServerPlugin):
           # grab the version info into a var
           try:
             imgVersions = json.loads(vfile.read())
-          except:
+          except ValueError:
             # if we have an error loading the version data, 
             # init it with no version data, we'll rebuild it 
             # in a moment.
