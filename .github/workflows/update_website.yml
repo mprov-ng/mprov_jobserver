@@ -5,6 +5,14 @@ on:
       - main
     paths:
     - 'README.md'
+
+# One run at a time: a newer README push cancels the older run still in
+# progress, so the website always ends up with the newest README, not
+# whichever copy finished last (#247).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   copy-file:
     runs-on: ubuntu-latest
