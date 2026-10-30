@@ -1,6 +1,6 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
-from .service import write_if_changed
+from .service import write_if_changed, remove_stale
 import os
 
 jenv = Environment(
@@ -34,6 +34,7 @@ class DnsmasqDHCPConfig(JobServerPlugin):
     def handle_jobs(self):
         # get the network informatioin
         response = self.js.session.get( self.js.mprovURL + 'networks/?isdhcp=True')
+        response_ok = response.status_code == 200 and isinstance(response.json(), list)
         # print(self.enableTFTP)
         data = {
             'networks': response.json(),
@@ -68,6 +69,11 @@ class DnsmasqDHCPConfig(JobServerPlugin):
                 host['network'] = network['slug']
             if write_if_changed(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts)):
                 self.hostsChanged = True
+        # drop the files of networks the mPCC no longer lists here, but only
+        # on a real list: an error reply mustn't empty the directory (#244)
+        if response_ok and remove_stale(self.mprovDnsmasqDir + '/dhcp/', '-dhcp.conf',
+                                        {network['slug'] + '-dhcp.conf' for network in data['networks']}):
+            self.hostsChanged = True
         # dnsmasq isn't killed here any more: the config module restarts it
         # or reloads it, depending on what changed (#108).
         self.completed = True

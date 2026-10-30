@@ -559,3 +559,82 @@ def test_config_runs_when_there_is_work_or_dns_is_on(js, monkeypatch, dns, dhcp_
   assert bool(RecordedConfig.runs) == config_runs
   # and the setting itself is left alone
   assert plugin.enableDHCP is True
+
+
+# A network the mPCC stops listing loses its hosts file, so dnsmasq stops
+# answering for it after the reload (#244).
+
+OTHER = dict(NETWORK, id=4, slug="old-net", domain="old.local")
+
+
+def dns_worker(js, dirs):
+  conf, mprov, _ = dirs
+  plugin = DnsmasqDNSConfig(js)
+  plugin.dnsmasqConfDir = f"{conf}/"
+  plugin.mprovDnsmasqDir = str(mprov)
+  plugin.handle_jobs()
+  return plugin
+
+
+def dhcp_worker(js, dirs):
+  conf, mprov, tftproot = dirs
+  plugin = DnsmasqDHCPConfig(js)
+  plugin.dnsmasqConfDir = f"{conf}/"
+  plugin.mprovDnsmasqDir = str(mprov)
+  plugin.tftproot = str(tftproot)
+  plugin.enableTFTP = False
+  plugin.handle_jobs()
+  return plugin
+
+
+def both_networks(js, kind):
+  query = "managedns" if kind == "dns" else "isdhcp"
+  js.session.routes[f"networks/?{query}=True"] = [NETWORK, OTHER]
+  for net in (NETWORK, OTHER):
+    js.session.routes.update({
+      f"networkinterfaces/?network={net['slug']}": [NIC],
+      f"systembmcs/?network={net['id']}&detail": [],
+      f"switches/?network={net['slug']}": [],
+    })
+  return f"networks/?{query}=True"
+
+
+@pytest.mark.parametrize("kind, worker", [("dns", dns_worker), ("dhcp", dhcp_worker)])
+def test_a_network_that_drops_out_loses_its_hosts_file(js, dirs, no_interfaces, kind, worker):
+  _, mprov, _ = dirs
+  route = both_networks(js, kind)
+  worker(js, dirs)
+  hosts = mprov / kind
+  assert sorted(p.name for p in hosts.iterdir()) == [f"cluster-net-{kind}.conf", f"old-net-{kind}.conf"]
+  # an operator's own files, and other names, are left alone
+  (hosts / "site-extra.conf").write_text("# by hand\n")
+  (hosts / f".scratch-{kind}.conf").write_text("")
+
+  js.session.routes[route] = [NETWORK]
+  plugin = worker(js, dirs)
+  assert plugin.hostsChanged and plugin.completed
+  assert sorted(p.name for p in hosts.iterdir()) == [f".scratch-{kind}.conf", f"cluster-net-{kind}.conf", "site-extra.conf"]
+  # and nothing more to do next time
+  plugin = worker(js, dirs)
+  assert not plugin.hostsChanged
+
+
+@pytest.mark.parametrize("kind, worker", [("dns", dns_worker), ("dhcp", dhcp_worker)])
+def test_no_networks_at_all_removes_every_hosts_file(js, dirs, no_interfaces, kind, worker):
+  _, mprov, _ = dirs
+  route = both_networks(js, kind)
+  worker(js, dirs)
+  js.session.routes[route] = []
+  assert worker(js, dirs).hostsChanged
+  assert list((mprov / kind).iterdir()) == []
+
+
+@pytest.mark.parametrize("kind, worker", [("dns", dns_worker), ("dhcp", dhcp_worker)])
+def test_an_error_reply_removes_nothing(js, dirs, no_interfaces, kind, worker):
+  _, mprov, _ = dirs
+  route = both_networks(js, kind)
+  worker(js, dirs)
+  js.session.routes[route] = (500, [])
+  plugin = worker(js, dirs)
+  assert not plugin.hostsChanged
+  assert len(list((mprov / kind).iterdir())) == 2
