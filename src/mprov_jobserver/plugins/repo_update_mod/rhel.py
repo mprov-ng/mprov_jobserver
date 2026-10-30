@@ -14,6 +14,7 @@ class UpdateRepo(JobServerPlugin):
   repo = None
   repoDir = ""
   jobid = None
+  newestOnly = False
   def load_config(self):
     # Do a GET to see if our ostype exists, if it does, patch it, if it doesn't, post it.
     # if 'repo-server' not in self.js.jobmodules:
@@ -57,7 +58,10 @@ class UpdateRepo(JobServerPlugin):
     # the URL is a free-text field in the mPCC: quoted, it can't change the
     # command, whatever it holds (#184).  The repo id is the integer pk.
     repoFromPath = shlex.quote(f"{self.repo['id']},{self.repo['repo_package_url']}")
-    if os.system(f"dnf reposync --repofrompath {repoFromPath} --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata --installroot={self.repoDir}/{self.repo['id']}"):
+    # only the newest version of each package (#95).  Older ones already
+    # mirrored stay: reposync deletes nothing without --delete.
+    newest = " --newest-only" if self.newestOnly else ""
+    if os.system(f"dnf reposync --repofrompath {repoFromPath} --repo {self.repo['id']} --destdir={self.repoDir}/ --download-metadata{newest} --installroot={self.repoDir}/{self.repo['id']}"):
       log.error("unable to get repo: " + baseURL)
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       return

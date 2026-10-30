@@ -1,2 +1,4 @@
 - repo-update:
     repoDir: '/export/repos'
+    # mirror only the newest version of each package, not the whole history
+    newestOnly: True

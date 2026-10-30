@@ -191,3 +191,44 @@ def test_the_repo_url_stays_one_argument(plugin, js, monkeypatch, url):
   args = shlex.split(cmd)
   assert args[args.index("--repofrompath") + 1] == f"5,{url}"
   assert args[0:2] == ["dnf", "reposync"]
+
+
+# newestOnly: mirror only the newest version of each package (#95)
+
+@pytest.mark.parametrize("newest", [True, False])
+def test_newest_only_is_passed_to_reposync(plugin, monkeypatch, newest):
+  commands = []
+  monkeypatch.setattr(os, "system", lambda cmd: commands.append(cmd) or 0)
+  plugin.newestOnly = newest
+  plugin.handle_jobs()
+  [cmd] = commands
+  assert (" --newest-only " in cmd) is newest
+  # never --delete: older packages already mirrored stay
+  assert "--delete" not in cmd
+
+
+@pytest.mark.parametrize("setting", [True, False])
+def test_the_setting_reaches_the_repo_worker(js, update, commands, setting):
+  update.newestOnly = setting
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}], "repos/5/": dict(REPO, ostype="rhel")})
+  update.handle_jobs()
+  [cmd] = commands.matching("dnf reposync")
+  assert (" --newest-only " in cmd) is setting
+
+
+def test_newest_only_is_off_without_the_setting(js):
+  # sites whose repo-update.yaml predates it keep mirroring everything
+  js.config_data = {"repo-update": {"repoDir": "/export/repos"}}
+  plugin = repo_update(js)
+  plugin.load_config()
+  assert plugin.newestOnly is False
+  js.config_data = {"repo-update": {"repoDir": "/export/repos", "newestOnly": True}}
+  plugin = repo_update(js)
+  plugin.load_config()
+  assert plugin.newestOnly is True
+
+
+def test_the_shipped_config_turns_it_on():
+  import yaml, importlib.resources
+  text = (importlib.resources.files("mprov_jobserver") / "plugins" / "repo-update.yaml").read_text()
+  assert yaml.safe_load(text)[0]["repo-update"]["newestOnly"] is True
