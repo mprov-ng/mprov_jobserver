@@ -76,11 +76,12 @@ class MProvScript():
       time.sleep(self.heartbeatInterval)
       return False
     self.sessionOk = True
-    # get the sock from the session
-    s = socket.fromfd(response.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
-    # get the address from the socket
-    address = s.getsockname()
-    self.ip_address=address
+    # our address on the connection to the mPCC: the first item of the
+    # socket's (address, port, ...), not the whole tuple (#160).  A socket
+    # on a copy of the connection's fd, so it takes the connection's own
+    # family (IPv4 or IPv6), and is closed again straight away.
+    with socket.socket(fileno=os.dup(response.raw.fileno())) as s:
+      self.ip_address = s.getsockname()[0]
       
     # if we get a response.status_code == 200, we're ok.  If not,
     # our auth failed.
