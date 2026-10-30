@@ -16,7 +16,9 @@ class repo_update(JobServerPlugin):
   jobModule = 'repo-update'
   repoDir = ""
   repoList = None
-  pass
+  # mirror only the newest version of each package (#95); per repo once the
+  # mPCC has a field for it (mprov_control_center#156)
+  newestOnly = False
 
 
   def load_config(self):
@@ -121,6 +123,7 @@ class repo_update(JobServerPlugin):
           continue
         repo_update.repo = repo
         repo_update.repoDir = self.repoDir
+        repo_update.newestOnly = bool(self.newestOnly)
         repo_update.jobid = jid
         repo_update.start()
         workers.append(repo_update)
