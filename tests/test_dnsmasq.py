@@ -5,10 +5,14 @@ content and, for anything dnsmasq parses as config, with ``dnsmasq --test``.
 """
 import os
 import pathlib
+import signal
+import subprocess
+import sys
+import threading
 
 import pytest
 
-from mprov_jobserver.plugins.dnsmasq_mod import config, dns
+from mprov_jobserver.plugins.dnsmasq_mod import config, dns, service
 from mprov_jobserver.plugins.dnsmasq_mod.config import DnsmasqConfig
 from mprov_jobserver.plugins.dnsmasq_mod.dhcp import DnsmasqDHCPConfig
 from mprov_jobserver.plugins.dnsmasq_mod.dns import DnsmasqDNSConfig
@@ -237,12 +241,23 @@ def conf_plugin(js, dirs, monkeypatch):
   plugin.dnsmasqConfDir = str(conf)
   plugin.mprovDnsmasqDir = str(mprov)
   plugin.tftproot = str(tftproot)
+  plugin.dnsmasqPidFile = str(tftproot.parent / "dnsmasq.pid")
   return plugin
 
 
-def test_config_writes_ipxe_conf_and_menus_and_starts_dnsmasq(js, dirs, conf_plugin, monkeypatch):
+def starts(monkeypatch, returncode=0):
+  """ Record the commands config runs to start dnsmasq. """
   started = []
-  monkeypatch.setattr(config.subprocess, "run", lambda cmd, **kw: started.append(cmd))
+  def run(cmd, **kw):
+    started.append(cmd)
+    return subprocess.CompletedProcess(cmd, returncode)
+  monkeypatch.setattr(config.subprocess, "run", run)
+  return started
+
+
+def test_config_writes_ipxe_conf_and_menus_and_starts_dnsmasq(js, dirs, conf_plugin, monkeypatch):
+  started = starts(monkeypatch)
+  conf_plugin.dnsOk = conf_plugin.dhcpOk = True
   conf_plugin.handle_jobs()
 
   conf, _, tftproot = dirs
@@ -251,17 +266,17 @@ def test_config_writes_ipxe_conf_and_menus_and_starts_dnsmasq(js, dirs, conf_plu
   assert "dhcp-boot=tag:!ipxe,undionly.kpxe" in (conf / "ipxe.conf").read_text()
   assert (tftproot / "ipversionrouter.ipxe").exists()
   assert (tftproot / "menu.ipxe").exists()
-  # no dnsmasq was running, so it starts one
-  assert started == [["/usr/sbin/dnsmasq", "--log-facility=-"]]
+  # no dnsmasq was running, so it starts one, with the pid file we find it by
+  assert started == [["/usr/sbin/dnsmasq", "--log-facility=-", f"--pid-file={conf_plugin.dnsmasqPidFile}"]]
   # the running DNS, DHCP and PXE jobs are marked done
-  _, status, jobquery = js.job_updates[-1]
-  assert status == 4
-  assert '"dns-update"' in jobquery and '"dhcp-update"' in jobquery and jobquery.endswith("&status=2")
+  [(_, dns_status, dns_query), (_, dhcp_status, dhcp_query)] = js.job_updates
+  assert (dns_status, dhcp_status) == (4, 4)
+  assert '"dns-update"' in dns_query and '"dhcp-update"' in dhcp_query and dhcp_query.endswith("&status=2")
 
 
 def test_all_generated_config_passes_dnsmasq_test_together(js, dirs, conf_plugin, no_interfaces, monkeypatch, tmp_path):
   # dnsmasq loads all of these at once, so check them as one config.
-  monkeypatch.setattr(config.subprocess, "run", lambda cmd, **kw: None)
+  starts(monkeypatch)
   js.session.routes.update({
     "networks/?isdhcp=True": [NETWORK],
     "networks/?managedns=True": [NETWORK],
@@ -339,3 +354,184 @@ def test_ipxe_build_failure_doesnt_end_the_plugin(js, tmp_path, monkeypatch, cap
 
   assert "Error: unable to build iPXE: disk full" in capsys.readouterr().out
   assert list(tftproot.iterdir()) == []
+
+
+# Restart only for the main config, SIGHUP for hosts, nothing for no change
+# (#108); the files are swapped in whole (#210); our dnsmasq is found by its
+# pid file (#181); the jobs get each worker's outcome (#179).
+
+def test_write_if_changed_swaps_the_file_in_whole(tmp_path):
+  path = tmp_path / "a-dns.conf"
+  assert service.write_if_changed(str(path), "10.0.0.1 host1\n") is True
+  inode = path.stat().st_ino
+  # the same text again: not rewritten, so nothing for dnsmasq to reload
+  assert service.write_if_changed(str(path), "10.0.0.1 host1\n") is False
+  assert path.stat().st_ino == inode
+  # new text: a new file renamed over the old one, never truncated in place
+  assert service.write_if_changed(str(path), "10.0.0.2 host1\n") is True
+  assert path.read_text() == "10.0.0.2 host1\n"
+  assert path.stat().st_ino != inode
+  # the temp file was a dotfile (dnsmasq's watch skips those) and is gone
+  assert [p.name for p in tmp_path.iterdir()] == ["a-dns.conf"]
+
+
+def test_workers_report_what_changed(js, dirs, no_interfaces):
+  js.session.routes.update({
+    "networks/?managedns=True": [NETWORK],
+    "networkinterfaces/?network=cluster-net": [NIC],
+    "systembmcs/?network=3&detail": [],
+    "switches/?network=cluster-net": [],
+  })
+  conf, mprov, _ = dirs
+
+  def dns_run():
+    plugin = DnsmasqDNSConfig(js)
+    plugin.dnsmasqConfDir = f"{conf}/"
+    plugin.mprovDnsmasqDir = str(mprov)
+    plugin.handle_jobs()
+    return plugin.mainChanged, plugin.hostsChanged, plugin.completed
+
+  assert dns_run() == (True, True, True)
+  # nothing new from the mPCC: nothing changed
+  assert dns_run() == (False, False, True)
+  # a node got a new address: only its hosts file changed
+  js.session.routes["networkinterfaces/?network=cluster-net"] = [dict(NIC, ipaddress="10.0.0.12")]
+  assert dns_run() == (False, True, True)
+
+
+def test_dhcp_worker_reports_what_changed(js, dirs):
+  js.session.routes.update({
+    "networks/?isdhcp=True": [NETWORK],
+    "networkinterfaces/?network=cluster-net": [NIC],
+    "switches/?network=cluster-net": [],
+  })
+  conf, mprov, tftproot = dirs
+
+  def dhcp_run():
+    plugin = DnsmasqDHCPConfig(js)
+    plugin.dnsmasqConfDir = f"{conf}/"
+    plugin.mprovDnsmasqDir = str(mprov)
+    plugin.tftproot = str(tftproot)
+    plugin.handle_jobs()
+    return plugin.mainChanged, plugin.hostsChanged, plugin.completed
+
+  assert dhcp_run() == (True, True, True)
+  assert dhcp_run() == (False, False, True)
+  js.session.routes["networkinterfaces/?network=cluster-net"] = [dict(NIC, mac="aa:bb:cc:00:00:02")]
+  assert dhcp_run() == (False, True, True)
+
+
+class FakeDnsmasq:
+  """ A running dnsmasq as running_dnsmasq() returns it; records signals. """
+  def __init__(self):
+    self.signals = []
+  def terminate(self):
+    self.signals.append("TERM")
+  def wait(self, timeout=None):
+    pass
+  def kill(self):
+    self.signals.append("KILL")
+  def send_signal(self, sig):
+    self.signals.append(signal.Signals(sig).name)
+
+
+@pytest.fixture
+def running(monkeypatch):
+  proc = FakeDnsmasq()
+  monkeypatch.setattr(config, "running_dnsmasq", lambda binary, pidfile: proc)
+  return proc
+
+
+@pytest.mark.parametrize("main, hosts, signals, restarted", [
+  (True, False, ["TERM"], True),    # main config: restart
+  (True, True, ["TERM"], True),     # a restart re-reads the hosts too
+  (False, True, ["SIGHUP"], False), # only hosts: reload, no restart
+  (False, False, [], False),        # nothing changed: leave it alone
+])
+def test_dnsmasq_is_restarted_only_for_its_main_config(js, conf_plugin, running, monkeypatch, main, hosts, signals, restarted):
+  started = starts(monkeypatch)
+  # ipxe.conf is main config too; written once already, so unchanged now
+  conf_plugin.handle_jobs()
+  running.signals.clear()
+  started.clear()
+  conf_plugin.mainChanged, conf_plugin.hostsChanged = main, hosts
+  conf_plugin.handle_jobs()
+  assert running.signals == signals
+  assert bool(started) == restarted
+
+
+def test_a_changed_ipxe_conf_restarts_dnsmasq(js, conf_plugin, running, monkeypatch):
+  started = starts(monkeypatch)
+  # the first run writes ipxe.conf, a main config file
+  conf_plugin.handle_jobs()
+  assert running.signals == ["TERM"]
+  assert len(started) == 1
+
+
+@pytest.mark.parametrize("dns_ok, dhcp_ok, expected", [
+  (True, True, [("dns", 4), ("dhcp", 4)]),
+  (False, True, [("dns", 3), ("dhcp", 4)]),   # the DNS worker crashed
+  (True, False, [("dns", 4), ("dhcp", 3)]),
+  (None, True, [("dhcp", 4)]),                # no DNS worker ran: it claimed nothing
+])
+def test_jobs_get_their_workers_outcome(js, conf_plugin, monkeypatch, dns_ok, dhcp_ok, expected):
+  starts(monkeypatch)
+  conf_plugin.dnsOk, conf_plugin.dhcpOk = dns_ok, dhcp_ok
+  conf_plugin.handle_jobs()
+  assert [("dns" if '"dns-update"' in query else "dhcp", status) for _, status, query in js.job_updates] == expected
+
+
+def test_jobs_fail_when_dnsmasq_wont_start(js, conf_plugin, monkeypatch):
+  starts(monkeypatch, returncode=2)
+  conf_plugin.dnsOk = conf_plugin.dhcpOk = True
+  conf_plugin.handle_jobs()
+  assert [status for _, status, _ in js.job_updates] == [3, 3]
+
+
+def test_running_dnsmasq_is_found_by_pid_file_and_binary(tmp_path):
+  pidfile = tmp_path / "dnsmasq.pid"
+  assert service.running_dnsmasq(sys.executable, str(pidfile)) is None
+  pidfile.write_text("not a pid\n")
+  assert service.running_dnsmasq(sys.executable, str(pidfile)) is None
+  # this test's own process stands in for dnsmasq
+  pidfile.write_text(f"{os.getpid()}\n")
+  assert service.running_dnsmasq(sys.executable, str(pidfile)).pid == os.getpid()
+  # some other program owns that pid: not ours, never signalled
+  assert service.running_dnsmasq("/usr/sbin/dnsmasq", str(pidfile)) is None
+
+
+class CrashingWorker(threading.Thread):
+  """ A DNS/DHCP worker whose run crashes before it completes. """
+  mainChanged = False
+  hostsChanged = False
+  completed = False
+  def __init__(self, js):
+    super().__init__()
+  def run(self):
+    pass
+
+
+class FinishedWorker(CrashingWorker):
+  hostsChanged = True
+  completed = True
+
+
+class RecordedConfig(threading.Thread):
+  runs = []
+  def __init__(self, js):
+    super().__init__()
+  def run(self):
+    RecordedConfig.runs.append(self)
+
+
+def test_plugin_passes_worker_outcomes_to_config(js, monkeypatch):
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqDNSConfig", CrashingWorker)
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqDHCPConfig", FinishedWorker)
+  monkeypatch.setattr(dnsmasq_plugin, "DnsmasqConfig", RecordedConfig)
+  RecordedConfig.runs = []
+  plugin = dnsmasq_plugin.dnsmasq(js)
+  plugin.enableDNS = plugin.enableDHCP = True
+  plugin.handle_jobs()
+  [conf] = RecordedConfig.runs
+  assert (conf.dnsOk, conf.dhcpOk) == (False, True)
+  assert (conf.mainChanged, conf.hostsChanged) == (False, True)
