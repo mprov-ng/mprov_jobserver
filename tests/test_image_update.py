@@ -900,3 +900,12 @@ def test_stale_binds_are_only_cleared_at_start_up(js, plugin, monkeypatch, first
   js.has_jobs = False
   plugin.handle_jobs()
   assert cleared == ([True] if firstrun else [])
+
+
+def test_build_never_cleans_the_job_servers_own_dnf(js, plugin, commands):
+  # a bare `dnf -y clean all` wiped the build host's cache on every build (#164)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(4, 9)]
+  cleans = commands.matching("clean all")
+  assert cleans and all("--installroot=" in cmd for cmd in cleans)
