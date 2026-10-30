@@ -1,8 +1,7 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
+from .service import write_if_changed
 import os
-import psutil 
-import signal 
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -25,6 +24,11 @@ class DnsmasqDHCPConfig(JobServerPlugin):
     dnsmasqConfDir=''
     mprovDnsmasqDir='' 
     tftproot=''
+    # what this run changed, for the config module to restart dnsmasq or
+    # reload it (#108); completed stays False if the run crashed (#179).
+    mainChanged=False
+    hostsChanged=False
+    completed=False
     def load_config(self):
         return True
     def handle_jobs(self):
@@ -37,8 +41,8 @@ class DnsmasqDHCPConfig(JobServerPlugin):
             'enableTFTP': self.enableTFTP,
             'tftproot': self.tftproot,
         }
-        with open(self.dnsmasqConfDir + 'dhcp.conf', 'w') as conf:
-            conf.write(jenv.get_template('dnsmasq/dhcp.conf.j2').render(data))
+        if write_if_changed(self.dnsmasqConfDir + 'dhcp.conf', jenv.get_template('dnsmasq/dhcp.conf.j2').render(data)):
+            self.mainChanged = True
 
         # make sure the mprov hosts dir exists
         os.makedirs(self.mprovDnsmasqDir + '/dhcp/', exist_ok=True)
@@ -62,18 +66,9 @@ class DnsmasqDHCPConfig(JobServerPlugin):
                     host['ipaddress'] = host['mgmt_ip']
                 # the per-network options in dhcp.conf match on the slug.
                 host['network'] = network['slug']
-            with open(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', 'w') as conf:
-                conf.write(jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts))
-        # # restart dnsmasq
-        # os.system('systemctl restart dnsmasq')
-                # look for the dnsmasq process id.
-        pid=None
-        process_name="dnsmasq"
-        for proc in psutil.process_iter():
-            if process_name in proc.name():
-              pid = proc.pid
-              break
-        if pid is not None:
-            # process was found, kill it and let conf restart it.
-            os.kill(pid, signal.SIGKILL)
+            if write_if_changed(self.mprovDnsmasqDir + '/dhcp/' + network['slug'] + '-dhcp.conf', jenv.get_template('dnsmasq/dhcp_host.conf.j2').render(data_hosts)):
+                self.hostsChanged = True
+        # dnsmasq isn't killed here any more: the config module restarts it
+        # or reloads it, depending on what changed (#108).
+        self.completed = True
 

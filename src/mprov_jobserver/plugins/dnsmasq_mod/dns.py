@@ -1,10 +1,9 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 from mprov_jobserver.plugins.dnsmasq_mod.dhcp import host_list
+from .service import write_if_changed
 import os, socket, ipaddress, netifaces
 from socket import AF_INET, AF_INET6
-import psutil
-import signal
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -17,6 +16,11 @@ class DnsmasqDNSConfig(JobServerPlugin):
     dnsmasqConfDir=''
     mprovDnsmasqDir=''
     hostname=''
+    # what this run changed, for the config module to restart dnsmasq or
+    # reload it (#108); completed stays False if the run crashed (#179).
+    mainChanged=False
+    hostsChanged=False
+    completed=False
     def __init__(self, js):
         super().__init__(js)
         self.hostname = socket.gethostname()
@@ -79,8 +83,8 @@ class DnsmasqDNSConfig(JobServerPlugin):
             'networks': response.json(),
             'enableDNS': True,
         }
-        with open(self.dnsmasqConfDir + 'dns.conf', 'w') as conf:
-            conf.write(jenv.get_template('dnsmasq/dns.conf.j2').render(data))
+        if write_if_changed(self.dnsmasqConfDir + 'dns.conf', jenv.get_template('dnsmasq/dns.conf.j2').render(data)):
+            self.mainChanged = True
 
         # make sure the mprov hosts dir exists
         os.makedirs(self.mprovDnsmasqDir + '/dns/', exist_ok=True)
@@ -135,17 +139,9 @@ class DnsmasqDNSConfig(JobServerPlugin):
                 data_hosts['hosts'][idx]['domain'] = network['domain']
                 # print(data_hosts['hosts'][idx])
 
-            with open(self.mprovDnsmasqDir + '/dns/' + network['slug'] + '-dns.conf', 'w') as conf:
-                conf.write(jenv.get_template('dnsmasq/dns_host.conf.j2').render(data_hosts))
-        # # restart dnsmasq
-        # os.system('systemctl restart dnsmasq')
-                pid=None
-        process_name="dnsmasq"
-        for proc in psutil.process_iter():
-            if process_name in proc.name():
-              pid = proc.pid
-              break
-        if pid is not None:
-            # process was found, kill it and let conf restart it.
-            os.kill(pid, signal.SIGKILL)
+            if write_if_changed(self.mprovDnsmasqDir + '/dns/' + network['slug'] + '-dns.conf', jenv.get_template('dnsmasq/dns_host.conf.j2').render(data_hosts)):
+                self.hostsChanged = True
+        # dnsmasq isn't killed here any more: the config module restarts it
+        # or reloads it, depending on what changed (#108).
+        self.completed = True
 
