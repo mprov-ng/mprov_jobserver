@@ -1,5 +1,4 @@
 import shutil
-from threading import local
 from .plugin import JobServerPlugin, path_is_under, mark_mprov_dir, is_mprov_marked_dir, addjs_version
 import os
 import json
@@ -168,7 +167,7 @@ class image_sync(JobServerPlugin):
       
 
     # Clean up any directories that are not in our imageList.
-    log.info("Scanning for haning images... " + self.imageDir)
+    log.info("Scanning for hanging images... " + self.imageDir)
     for entry in os.listdir(self.imageDir):
       # print(entry)
       entryPath = self.imageDir + '/' + entry

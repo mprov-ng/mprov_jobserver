@@ -126,7 +126,7 @@ class JobServer ():
       # we also don't want to register with mPCC
       self.register = False
 
-    # Authenticat to the Control Center and start a session
+    # Authenticate to the Control Center and start a session
     log.info("mProv Job Server authenticating.")
     if not self.startSession():
         log.error("Unable to log into mProv Control Center.")

@@ -73,7 +73,7 @@ class image_delete(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
 
       else:
-        log.error("Recieved image-delete job for image we don't host. HuH?")
+        log.error("Received image-delete job for image we don't host. HuH?")
         self.js.update_job_status(self.jobModule, 3, jobid=job['id'])
 
 

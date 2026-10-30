@@ -49,7 +49,6 @@ class script_runner(JobServerPlugin):
     # convert the dict of lists to a dict of dicts.
     dep_dict=dict((key, set(depDict[key])) for key in depDict)
     result=[]
-    firstPass=True
     prevT=set([])
     while dep_dict:
         # print("-----")
@@ -61,7 +60,7 @@ class script_runner(JobServerPlugin):
         # keys that exist in the dict, giving us dep free items in t
         t=set(item for vals in dep_dict.values() for item in vals)-set(dep_dict.keys())
         if len(t) > 0:
-          log.error("Unresolvable Dependancies, make sure it's listed in distro, group, or entity scripts: ")
+          log.error("Unresolvable Dependencies, make sure it's listed in distro, group, or entity scripts: ")
           for ent in t:
             log.error("\t '" + ent + "'")
           return None
@@ -72,14 +71,12 @@ class script_runner(JobServerPlugin):
         if prevT == t:
         # if not firstPass and len(t) > 0:
           # possible cyclic dependency?
-          log.error("Possibe cyclic dependency.")
+          log.error("Possible cyclic dependency.")
           log.debug("depDict: " + str(depDict))
           log.debug("t: " + str(t))
           return None
         # print("t: " +  str(t))
         prevT = t
-        # After the first pass, we want to check for cyclic deps.
-        firstPass=False
         # t contains our dep free items for this iteration, so
         # append t to the result list.
         result.append(t)
@@ -87,7 +84,7 @@ class script_runner(JobServerPlugin):
         
         # and cleaned up
         # for each entry in the dict, if it has a value, and we have resolved it's
-        # dependancies, remove the resolved dependancies from the value
+        # dependencies, remove the resolved dependencies from the value
         # cleans things up in 2 ways:
         #   - removes keys that do not have a value (resolved deps)
         #   - removes values for already resolved deps from left over deps for each item.
@@ -201,7 +198,7 @@ class script_runner(JobServerPlugin):
       entity['apikey'] = self.js.apikey
 
     # print(scriptDeps)
-    # resolve our dependancies
+    # resolve our dependencies
     scriptDeps=self.depResolve(scriptDeps)
     if scriptDeps is None:
       # depResolve() said why (a missing or cyclic dependency).  Running

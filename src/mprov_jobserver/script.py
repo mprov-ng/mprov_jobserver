@@ -2,8 +2,7 @@
 import requests
 import socket
 from mprov_jobserver.tls import ca_bundle
-import uuid
-import yaml, os, sys, glob, time
+import yaml, os, sys, time
 from mprov_jobserver.log import get_logger
 
 log = get_logger(__name__)

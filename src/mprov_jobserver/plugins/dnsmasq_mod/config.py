@@ -1,8 +1,7 @@
-from pwd import getpwnam
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 import os
-import shutil, socket
+import socket
 import dns.resolver
 import subprocess
 import psutil
@@ -53,7 +52,7 @@ class DnsmasqConfig(JobServerPlugin):
                 if not ipv6ip.startswith("fe80"):
                     self.bootserver6 = f"[{ipv6ip}]"
                     break
-        except Exception as e:
+        except Exception:
             # print(f'Error: {e}')
             pass
         if self.bootserver6 == '':
