@@ -231,14 +231,17 @@ class JobServer ():
       'pk': job_module,
       'status': status,
     }
+    # UTC with an explicit offset: the local clock without one was read in
+    # the mPCC's TIME_ZONE, so the times were off on any job server whose
+    # zone differed (#186).  e.g. 2026-10-30T17:42:18+00:00
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if(status == 2) :
-      # we use UTC here because django in the mPCC will interpret that correctly.
       # setting the job to running
-      data['start_time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+      data['start_time'] = now
       data['end_time'] = None
     elif(status == 3) or (status == 4) :
-      # job failed
-      data['end_time'] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+      # job finished
+      data['end_time'] = now
     if jobid is not None:
       # get the specific job status
       queryURL = self.mprovURL + 'jobs/' + str(jobid) + '/'

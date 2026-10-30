@@ -8,6 +8,7 @@ being tested.
 import json
 import os
 import sys
+import time
 import types
 
 import pytest
@@ -57,6 +58,26 @@ def test_success_sets_an_end_time(server):
   server.update_job_status("libgenders", 4)
   [(_, data)] = patches(server)
   assert data["status"] == 4 and data["end_time"] and "start_time" not in data
+
+
+@pytest.mark.parametrize("status, field", [(2, "start_time"), (3, "end_time"), (4, "end_time")])
+def test_job_times_are_utc_with_an_offset(server, monkeypatch, status, field):
+  # a naive local time was read in the mPCC's TIME_ZONE (#186)
+  import datetime as dt
+  monkeypatch.setenv("TZ", "America/New_York")
+  time.tzset()
+  try:
+    server.session.routes["jobs/?search=libgenders"] = [{"id": 11, "status": 1 if status == 2 else 2}]
+    before = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    server.update_job_status("libgenders", status)
+    after = dt.datetime.now(dt.timezone.utc)
+    [(_, data)] = patches(server)
+    sent = dt.datetime.fromisoformat(data[field])
+    assert data[field].endswith("+00:00")
+    assert before <= sent <= after
+  finally:
+    monkeypatch.delenv("TZ")
+    time.tzset()
 
 
 def test_jobs_already_in_that_state_or_finished_are_left_alone(server):
