@@ -13,8 +13,8 @@ MarkupSafe==3.0.4
 netifaces==0.11.0
 psutil==7.2.2
 py-dmidecode==0.1.3
-pyparted==3.11.7
-pyroute2==0.8.1
+pyparted==3.13.0
+pyroute2==0.9.7
 python-slugify==9.1.3
 PyYAML==6.0.3
 requests==2.34.2
