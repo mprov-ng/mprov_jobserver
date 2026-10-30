@@ -789,3 +789,84 @@ def test_failed_build_thread_doesnt_stop_the_others(js, plugin, images, commands
   assert job_states(js)[-1] == (4, 10)
   [pack] = commands.matching("tar c")
   assert f"-C{images}/login " in pack
+
+
+# The host's dev, proc, run and sys are bound into the image while its
+# scripts run; they must never stay there (#183).
+
+def render_script_runner(tmp_path, chroot):
+  """ script-runner.sh with mount, umount, mountpoint and chroot faked in
+  PATH; umount logs its arguments to umount.log.  Returns (script, env). """
+  from jinja2 import Environment, PackageLoader
+  script = tmp_path / "script-runner.sh"
+  script.write_text(Environment(loader=PackageLoader("mprov_jobserver"))
+                    .get_template("image-update/script-runner.sh")
+                    .render({"imgDir": str(tmp_path / "img"), "image": "compute"}))
+  bin = tmp_path / "bin"
+  bin.mkdir()
+  fakes = {
+    "mount": "exit 0",
+    "mountpoint": "exit 0",
+    "umount": f'echo "$@" >> {tmp_path}/umount.log',
+    "chroot": chroot,
+  }
+  for name, body in fakes.items():
+    (bin / name).write_text(f"#!/bin/sh\n{body}\n")
+    (bin / name).chmod(0o755)
+  return script, dict(os.environ, PATH=f"{bin}:/usr/bin:/bin")
+
+
+def unmounted(tmp_path):
+  return (tmp_path / "umount.log").read_text().split()
+
+
+def test_script_runner_sh_unmounts_after_a_failed_run(tmp_path):
+  script, env = render_script_runner(tmp_path, "exit 3")
+  assert _run(["/bin/bash", str(script)], env=env).returncode == 3
+  img = tmp_path / "img"
+  assert unmounted(tmp_path) == [f"{img}/sys", f"{img}/run", f"{img}/proc", f"{img}/dev"]
+
+
+def test_script_runner_sh_unmounts_when_stopped(tmp_path):
+  # a job server stopped mid-build (systemctl stop signals the whole group)
+  import signal, time
+  script, env = render_script_runner(tmp_path, "exec sleep 30")
+  proc = subprocess.Popen(["/bin/bash", str(script)], env=env, start_new_session=True)
+  time.sleep(0.5)
+  os.killpg(proc.pid, signal.SIGTERM)
+  assert proc.wait(timeout=10) == 143
+  assert len(unmounted(tmp_path)) == 4
+
+
+def test_image_is_not_packed_while_something_is_mounted_in_it(js, plugin, images, commands, monkeypatch):
+  from mprov_jobserver.plugins import image_update as image_update_module
+  monkeypatch.setattr(image_update_module, "mounts_under",
+                      lambda path: [f"{path}/proc"] if path.endswith("/compute") else [])
+  pending_build(js)
+  plugin.handle_jobs()
+  assert not commands.matching("tar c")
+  assert job_states(js) == [(3, 9)]
+  assert [w for w in js.session.writes if "systemimages" in w[1]] == []
+
+
+def test_stale_binds_are_unmounted_at_start_up(js, plugin, images, recorded_processes, monkeypatch):
+  from mprov_jobserver.plugins import image_update as image_update_module
+  store = os.path.realpath(str(images))
+  monkeypatch.setattr(image_update_module, "mounts_under", lambda path: [
+    f"{store}/compute/proc", f"{store}/compute/data", f"{store}/compute/proc/sys/fs"])
+  js.firstrun = True
+  plugin.unmountStaleBinds()
+  # only an image's own dev/proc/run/sys, nothing else that's mounted there
+  assert [argv for argv, _ in recorded_processes] == [["umount", f"{store}/compute/proc"]]
+
+
+@pytest.mark.parametrize("firstrun", [True, False])
+def test_stale_binds_are_only_cleared_at_start_up(js, plugin, monkeypatch, firstrun):
+  js.firstrun = firstrun
+  cleared = []
+  monkeypatch.setattr(plugin, "unmountStaleBinds", lambda: cleared.append(True))
+  monkeypatch.setattr(plugin, "updateImageJobservers", lambda: None)
+  js.session.routes.update({"jobs/?&module=repo-update&status=1": [], "jobs/?&module=repo-update&status=2": []})
+  js.has_jobs = False
+  plugin.handle_jobs()
+  assert cleared == ([True] if firstrun else [])

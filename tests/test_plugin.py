@@ -88,3 +88,21 @@ def test_default_handle_jobs_does_nothing_without_jobs(js, monkeypatch):
   js.has_jobs = False
   JobServerPlugin(js).handle_jobs()
   assert [u[1] for u in js.job_updates] == [2]
+
+
+def test_mounts_under_lists_mounts_in_a_tree_deepest_first(tmp_path):
+  from mprov_jobserver.plugins.plugin import mounts_under
+  info = tmp_path / "mountinfo"
+  root = tmp_path / "images"
+  info.write_text("".join(
+    f"{n} 1 0:1 / {point} rw - tmpfs tmpfs rw\n" for n, point in enumerate([
+      "/", "/proc",
+      f"{root}/compute/dev", f"{root}/compute/dev/pts",
+      f"{root}-other/x",              # a sibling with the same prefix
+      f"{root}/with\\040space/proc",  # mountinfo escapes spaces
+    ])))
+  found = mounts_under(str(root), str(info))
+  assert set(found) == {f"{root}/with space/proc", f"{root}/compute/dev/pts", f"{root}/compute/dev"}
+  # a mount inside another comes first, so it can be unmounted first
+  assert found.index(f"{root}/compute/dev/pts") < found.index(f"{root}/compute/dev")
+  assert mounts_under(str(tmp_path / "nothing"), str(info)) == []
