@@ -628,3 +628,74 @@ def test_finishing_only_touches_our_own_running_jobs(server):
   server.session.routes["jobs/?jobserver=5&module=repo-update&status=2"] = [{"id": 22, "status": 2}]
   assert server.update_job_status("repo-update", 3) == 1
   assert [path for path, _ in patches(server)] == ["jobs/22/"]
+
+
+# a stable host id, sent once the mPCC says it takes one (#113)
+
+def host_id_server(server, tmp_path, features=("addjs-version", "host-id")):
+  server.configfile = str(tmp_path / "jobserver.yaml")
+  server.features = frozenset(features)
+  server.session.write_routes[("POST", "jobservers/")] = json.dumps({"pk": 9, "features": list(features)})
+  return server
+
+
+def sent(server):
+  return [data for method, path, data in server.session.writes if path == "jobservers/"]
+
+
+def test_no_host_id_unless_the_mpcc_takes_one(server, tmp_path):
+  host_id_server(server, tmp_path, features=("addjs-version",))
+  server.register_server()
+  assert "host_id" not in sent(server)[0]
+  assert not (tmp_path / "host-id").exists()
+
+
+def test_a_host_id_is_made_once_saved_and_reused(server, tmp_path):
+  import uuid
+  host_id_server(server, tmp_path)
+  server.register_server()
+  server.register_server()
+  first, second = sent(server)
+  uuid.UUID(first["host_id"])
+  assert second["host_id"] == first["host_id"]
+  saved = tmp_path / "host-id"
+  assert saved.read_text().strip() == first["host_id"]
+  assert oct(saved.stat().st_mode & 0o777) == "0o644"
+  # a restart reads the same id back
+  again = JobServer.__new__(JobServer)
+  again.configfile = server.configfile
+  assert again.host_id() == first["host_id"]
+
+
+def test_the_configured_host_id_wins(server, tmp_path):
+  host_id_server(server, tmp_path)
+  server.hostId = "  rack4-js01  "
+  server.register_server()
+  assert sent(server)[0]["host_id"] == "rack4-js01"
+  assert not (tmp_path / "host-id").exists()
+
+
+def test_an_unsaveable_host_id_falls_back_to_the_name(server, tmp_path, capsys):
+  host_id_server(server, tmp_path)
+  server.configfile = str(tmp_path / "missing-dir" / "jobserver.yaml")
+  server.register_server()
+  assert "host_id" not in sent(server)[0]
+  assert server.id == 9
+  assert "unable to save a host id" in capsys.readouterr().out
+
+
+def test_a_host_id_over_64_characters_isnt_sent(server, tmp_path):
+  host_id_server(server, tmp_path)
+  server.hostId = "x" * 65
+  server.register_server()
+  assert "host_id" not in sent(server)[0]
+
+
+def test_a_name_held_by_another_job_server_is_reported_and_retried(server, tmp_path, capsys):
+  host_id_server(server, tmp_path)
+  server.session.write_routes[("POST", "jobservers/")] = (409, {"detail": "name js01 is registered by another job server"})
+  server.register_server()
+  err = capsys.readouterr().err
+  assert "name js01 is registered by another job server" in err
+  # nothing else changes; the next heartbeat tries again
+  assert server.id == 5 and server.sessionOk
