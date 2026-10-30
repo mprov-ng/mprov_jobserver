@@ -142,16 +142,14 @@ class image_sync(JobServerPlugin):
       if self.js.id not in currJobServers:
         # tell the MPCC we can host this file
         print(f"Adding ourself to mPCC for image {image}")
-        jobservers = []
-        for jobserver in currJobServers:
-          jobservers.append(jobserver)
-        # now append our id
-        jobservers.append(self.js.id)
+        # Only our id: the mPCC merges it into the image's current hosts.
+        # Sending the list from our GET put back every host a rebuild had
+        # cleared since (#248, mprov_control_center#396).
         # no needs_rebuild: sending False cleared any rebuild asked for on
         # the image whenever we added ourselves as a host (#226).
         data = {
           'slug': image,
-          'jobservers': jobservers,
+          'jobservers': [self.js.id],
         }
         response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
         print(f"Image {image} updated.")

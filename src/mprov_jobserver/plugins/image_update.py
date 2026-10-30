@@ -64,17 +64,14 @@ class image_update(JobServerPlugin):
     return super().load_config()
 
   def addAsHost(self, image, imageData):
-    # tell the mPCC we host this image too.
-    jobservers = []
-    for jobserver in imageData['jobservers']:
-      jobservers.append(jobserver)
-    # now append our id
-    jobservers.append(self.js.id)
+    # tell the mPCC we host this image too.  Only our id: the mPCC merges it
+    # into the image's current hosts.  Sending the list from our GET put back
+    # every host a rebuild had cleared since (#248, mprov_control_center#396).
     # no needs_rebuild: we only add ourselves when the image doesn't need
     # one, and sending False would clear a rebuild asked for since our GET (#226).
     data = {
       'slug': image,
-      'jobservers': jobservers,
+      'jobservers': [self.js.id],
     }
     response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
     if response.status_code <= 199 or response.status_code >= 300:

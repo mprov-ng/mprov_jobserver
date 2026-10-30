@@ -125,7 +125,7 @@ def test_adds_itself_as_host_of_an_image_it_has(js, plugin, images):
   hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
   plugin.updateImageJobservers()
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]}),
   ]
 
 
@@ -160,7 +160,7 @@ def test_pulled_image_version_is_recorded(js, plugin, images):
   plugin.updateImageJobservers()
   assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]}),
   ]
   assert sorted(p.name for p in (images / "compute").iterdir()) == ["compute.img", "compute.initramfs", "compute.vmlinuz"]
 
@@ -909,3 +909,12 @@ def test_build_never_cleans_the_job_servers_own_dnf(js, plugin, commands):
   assert job_states(js) == [(4, 9)]
   cleans = commands.matching("clean all")
   assert cleans and all("--installroot=" in cmd for cmd in cleans)
+
+
+def test_adding_itself_as_host_sends_only_its_own_id(js, plugin, images):
+  # the hosts from our GET went back with it, so a rebuild in between got
+  # its cleared hosts back, none of which had the new version (#248)
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7, 8]), local_version=4)
+  plugin.updateImageJobservers()
+  [(method, path, data)] = js.session.writes
+  assert (method, path, data["jobservers"]) == ("PATCH", "systemimages/compute/?addjs", [1])

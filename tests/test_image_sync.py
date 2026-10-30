@@ -59,7 +59,7 @@ def test_downloads_a_new_image_and_adds_itself(js, plugin, images):
   assert (images / "compute" / "compute.vmlinuz").read_bytes() == b"KERNEL"
   assert versions(images) == {"compute": 3}
   assert js.session.writes == [
-    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [7, 1]}),
+    ("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]}),
   ]
 
 
@@ -197,3 +197,13 @@ def test_configured_image_list_is_made_of_strings(js, tmp_path):
   plugin = image_sync(js)
   assert plugin.load_config() is True
   assert plugin.imageList == ["compute", "2024"]
+
+
+def test_adding_itself_sends_only_its_own_id(js, plugin, images):
+  # the hosts from our GET went back with it, so a rebuild in between got
+  # its cleared hosts back, none of which had the new version (#248)
+  js.session.routes.update({"images/": [{"slug": "compute"}], "systemimages/compute/": image(jobservers=[7, 8])})
+  serve_files(js)
+  plugin.handle_jobs()
+  [(method, path, data)] = js.session.writes
+  assert (method, path, data["jobservers"]) == ("PATCH", "systemimages/compute/?addjs", [1])
