@@ -532,3 +532,84 @@ def test_config_params_that_arent_a_mapping_are_ignored_with_a_warning(js, plugi
   # the group's params are skipped, the rest still merge
   assert plugin.entities[0]["config_params"] == {"a": "distro", "b": "distro", "c": "entity"}
   assert "ignoring system group gpu's config_params" in capsys.readouterr().out
+
+
+# disable_scripts: switch scripts off from any layer's config_params (#110)
+
+def node(group_params="", own_params="", own=("own",), config=True):
+  system = {
+    "hostname": "node01",
+    "scripts": [script(slug, stype="post-boot") for slug in own],
+    "systemgroups": [{"name": "sysgroup1", "config_params": group_params,
+                      "scripts": [script("postboot1", stype="post-boot"), script("tool", stype="post-boot")]}],
+    "systemimage": {"name": "compute", "osdistro": {"scripts": [script("base", stype="post-boot")], "config_params": ""},
+                    "scripts": [], "systemgroups": []},
+    "config_params": own_params,
+  }
+  if config:
+    system["config"] = mpcc_config(["base", "postboot1", "tool"] + list(own), {})
+  return system
+
+
+@pytest.mark.parametrize("config", [True, False])
+def test_a_node_can_switch_off_a_group_script(js, plugin, monkeypatch, capsys, config):
+  # node123 tries postboot2 in place of its group's postboot1
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = node(own_params="disable_scripts:\n  - postboot1\n", own=("postboot2",), config=config)
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "postboot2", "tool"]
+  assert plugin.failed is False
+  assert "[I] script-runner: skipping postboot1 (disable_scripts)" in capsys.readouterr().out
+
+
+def test_lists_from_every_layer_are_combined(js, plugin, monkeypatch):
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = node(group_params="disable_scripts: [tool]\n",
+                                            own_params="disable_scripts: [postboot1]\n")
+  plugin.handle_jobs()
+  # the node's list adds to its group's, it doesn't replace it
+  assert sorted(plugin.ran) == ["base", "own"]
+
+
+def test_one_slug_can_be_a_string(js, plugin, monkeypatch):
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = node(own_params="disable_scripts: tool\n")
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "own", "postboot1"]
+
+
+def test_an_unknown_slug_only_warns(js, plugin, monkeypatch, capsys):
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = node(own_params="disable_scripts: [postbot1]\n")
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "own", "postboot1", "tool"]
+  assert plugin.failed is False
+  assert "[W] script-runner: disable_scripts names postbot1, which isn't in this run" in capsys.readouterr().out
+
+
+def test_a_setting_that_isnt_a_list_of_slugs_is_ignored(js, plugin, monkeypatch, capsys):
+  argv(monkeypatch, "-s", "-b")
+  js.session.routes["systems/?self"] = node(own_params="disable_scripts: {postboot1: true}\n")
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "own", "postboot1", "tool"]
+  assert "ignoring disable_scripts in node01's config_params" in capsys.readouterr().out
+
+
+def test_a_script_that_needs_a_disabled_one_fails_the_run(js, plugin, monkeypatch, capsys):
+  argv(monkeypatch, "-s", "-b")
+  system = node(own_params="disable_scripts: [base]\n")
+  system["systemgroups"][0]["scripts"][1]["dependsOn"] = ["base"]
+  js.session.routes["systems/?self"] = system
+  plugin.handle_jobs()
+  # nothing runs half-ordered
+  assert plugin.ran == []
+  assert plugin.failed is True
+  assert js.job_updates[-1][:2] == ("script-runner", 3)
+  assert "script tool depends on base, which disable_scripts turns off" in capsys.readouterr().out
+
+
+def test_an_image_can_switch_off_its_distro_scripts(js, plugin, monkeypatch):
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity(config_params="disable_scripts: [group-tool]\n")
+  plugin.handle_jobs()
+  assert sorted(plugin.ran) == ["base", "image-tool"]

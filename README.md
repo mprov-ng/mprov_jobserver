@@ -107,6 +107,16 @@ The `script-runner` job module will take the following arguments:
 - -r (Global Option) The script-runner must be run in `runonce` mode only.  It is probably wise to also pass -d
 - -d (Global Option) The script-runner will not register as a job server with mPCC.
 
+### Switching scripts off: disable_scripts
+To leave out a script that a system would otherwise run (say its system group's `postboot1`, while you test a `postboot2` on that one node), list its slug under `disable_scripts` in the system's config parameters:
+
+```
+disable_scripts:
+  - postboot1
+```
+
+It works in any layer's config parameters (OS distro, system group, image or system), and the lists from every layer are combined. A single slug can be given as a string. A slug that isn't in the run is only warned about. If a script that still runs depends on a disabled one, script-runner runs nothing and the run fails.
+
 ## Testing
 A pytest suite for the job modules lives in `tests/` (dnsmasq,
 libgenders, repo_update, and a source-syntax check).  CI runs it
