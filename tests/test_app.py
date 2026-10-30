@@ -45,7 +45,9 @@ def patches(server):
 # update_job_status()
 
 def test_moves_the_modules_pending_jobs_to_running(server):
-  server.session.routes["jobs/?search=libgenders"] = [{"id": 11, "status": 1}, {"id": 12, "status": 1}]
+  # only pending jobs of exactly this module: search= matched every status
+  # and job server, so a module took over others' running jobs (#112)
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 1}, {"id": 12, "status": 1}]
   assert server.update_job_status("libgenders", 2) == 2
   (path, data), _ = patches(server)
   assert path == "jobs/11/"
@@ -54,7 +56,8 @@ def test_moves_the_modules_pending_jobs_to_running(server):
 
 
 def test_success_sets_an_end_time(server):
-  server.session.routes["jobs/?search=libgenders"] = [{"id": 11, "status": 2}]
+  # only the jobs this job server is running (#112)
+  server.session.routes["jobs/?jobserver=5&module=libgenders&status=2"] = [{"id": 11, "status": 2}]
   server.update_job_status("libgenders", 4)
   [(_, data)] = patches(server)
   assert data["status"] == 4 and data["end_time"] and "start_time" not in data
@@ -67,7 +70,8 @@ def test_job_times_are_utc_with_an_offset(server, monkeypatch, status, field):
   monkeypatch.setenv("TZ", "America/New_York")
   time.tzset()
   try:
-    server.session.routes["jobs/?search=libgenders"] = [{"id": 11, "status": 1 if status == 2 else 2}]
+    query = "jobs/?module=libgenders&status=1" if status == 2 else "jobs/?jobserver=5&module=libgenders&status=2"
+    server.session.routes[query] = [{"id": 11, "status": 1 if status == 2 else 2}]
     before = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     server.update_job_status("libgenders", status)
     after = dt.datetime.now(dt.timezone.utc)
@@ -81,7 +85,7 @@ def test_job_times_are_utc_with_an_offset(server, monkeypatch, status, field):
 
 
 def test_jobs_already_in_that_state_or_finished_are_left_alone(server):
-  server.session.routes["jobs/?search=libgenders"] = [
+  server.session.routes["jobs/?module=libgenders&status=1"] = [
     {"id": 11, "status": 2}, {"id": 12, "status": 3}, {"id": 13, "status": 4}, {"id": 14, "status": 1},
   ]
   assert server.update_job_status("libgenders", 2) == 1
@@ -102,13 +106,13 @@ def test_a_job_query_is_used_as_is(server):
 
 @pytest.mark.parametrize("route", [[], (500, None), (404, None)])
 def test_no_jobs_or_an_mpcc_error_returns_false(server, route):
-  server.session.routes["jobs/?search=libgenders"] = route
+  server.session.routes["jobs/?module=libgenders&status=1"] = route
   assert server.update_job_status("libgenders", 2) is False
   assert patches(server) == []
 
 
 def test_a_reply_that_isnt_json_returns_false(server):
-  server.session.routes["jobs/?search=libgenders"] = b"<html>Server Error</html>"
+  server.session.routes["jobs/?module=libgenders&status=1"] = b"<html>Server Error</html>"
   assert server.update_job_status("libgenders", 2) is False
 
 
@@ -430,8 +434,11 @@ def run_script_runner_once(server, monkeypatch, tmp_path, run_script):
   server.runonce = True
   server.heartbeatInterval = 10
   server.firstrun = True
-  # the pending script-runner job the failure report moves to failed
-  server.session.routes["jobs/?search=script-runner"] = [{"id": 11, "status": 1}]
+  # a failure is reported only on the script-runner jobs this process is
+  # running; a runonce run has no id of its own (-1), so none (#112).  It
+  # used to fail every unfinished script-runner job on the mPCC.
+  server.id = -1
+  server.session.routes["jobs/?jobserver=-1&module=script-runner&status=2"] = []
   # start() spawns (and joins) the module thread itself; keep its scratch out
   # of the real /tmp
   real_init = Runner.__init__
@@ -450,9 +457,9 @@ def test_runonce_exits_nonzero_when_a_script_fails(server, monkeypatch, tmp_path
     self.scriptResults[filename] = 1 if "bad" in filename else 0
   assert run_script_runner_once(server, monkeypatch, tmp_path, run_script) == 1
   assert server.failed_runonce_modules == ["script-runner"]
-  # the module's job was reported failed, not successful
-  [(_, data)] = server.session.patches
-  assert (data["id"], data["pk"], data["status"]) == (11, "script-runner", 3)
+  # no other job server's script-runner jobs were touched (#112)
+  assert server.session.patches == []
+  assert ("GET", "jobs/?jobserver=-1&module=script-runner&status=2") in server.session.requests
 
 
 def test_runonce_still_exits_zero_when_everything_succeeds(server, monkeypatch, tmp_path):
@@ -606,3 +613,18 @@ def test_an_error_reply_fails_nothing(server, reply):
 def test_dnsmasq_claims_the_dns_and_dhcp_modules(js):
   from mprov_jobserver.plugins.dnsmasq import dnsmasq
   assert dnsmasq(js).claimedModules() == ["dns-update", "dns-delete", "pxe-update", "dhcp-update", "pxe-delete", "dhcp-delete"]
+
+
+def test_claiming_never_touches_another_servers_running_job(server):
+  # the mPCC answers the pending-only query; a RUNNING job of job server 7
+  # isn't in it, so it can't be taken over (#112)
+  server.session.routes["jobs/?module=repo-update&status=1"] = [{"id": 21, "status": 1}]
+  assert server.update_job_status("repo-update", 2) == 1
+  assert [path for path, _ in patches(server)] == ["jobs/21/"]
+  assert not [r for r in server.session.requests if "search=" in r[1]]
+
+
+def test_finishing_only_touches_our_own_running_jobs(server):
+  server.session.routes["jobs/?jobserver=5&module=repo-update&status=2"] = [{"id": 22, "status": 2}]
+  assert server.update_job_status("repo-update", 3) == 1
+  assert [path for path, _ in patches(server)] == ["jobs/22/"]
