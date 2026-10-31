@@ -10,6 +10,7 @@ import copy
 import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import types
@@ -1077,3 +1078,34 @@ def test_build_without_the_check_is_hosted_as_before(js, plugin, images, command
   assert "version" not in addjs_data(js)
   assert job_states(js) == [(4, 9)]
   assert (images / "compute" / "compute.img").exists()
+
+
+# the chroot's dnf needs the image's resolv.conf from the first build (#281)
+
+def test_a_new_image_has_resolv_conf_before_the_chroots_dnf_runs(js, rhel, images, monkeypatch):
+  img = images / "compute"
+  seen = {}
+  def system(cmd):
+    if f"chroot {img}" in cmd and " dnf " in cmd and "chroot" not in seen:
+      seen["chroot"] = (img / "etc/resolv.conf").exists()
+    return 0
+  monkeypatch.setattr(os, "system", system)
+  rhel.imageDetails = image()
+  rhel.handle_jobs()
+  assert seen["chroot"] is True
+  assert (img / "etc/resolv.conf").read_bytes() == open("/etc/resolv.conf", "rb").read()
+  assert rhel.threadOk
+
+
+def test_an_unreadable_host_resolv_conf_fails_the_job(js, rhel, commands, monkeypatch):
+  real = shutil.copyfile
+  def copyfile(src, dst, *a, **k):
+    if src == "/etc/resolv.conf":
+      raise PermissionError(13, "Permission denied", src)
+    return real(src, dst, *a, **k)
+  monkeypatch.setattr(shutil, "copyfile", copyfile)
+  rhel.imageDetails = image()
+  rhel.handle_jobs()
+  assert not rhel.threadOk
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("groupinstall")
