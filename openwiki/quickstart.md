@@ -30,7 +30,7 @@ The `JobServer` class (`src/mprov_jobserver/app.py`) authenticates to the mPCC w
 
 1. Install (RHEL-family, as root, Python ≥ 3.8):
    `wget https://raw.githubusercontent.com/mprov-ng/mprov_jobserver/main/install_mprov_jobserver.sh -O - | bash`
-2. Create an API key in the mPCC and edit `/etc/mprov/jobserver.yaml`: set `mprovURL` (use an IP or internal name, not localhost), `apikey`, `myaddress`, and enable the `jobmodules` you want. A template is copied to `/etc/mprov/` on first run (`src/mprov_jobserver/main.py`).
+2. Create an API key in the mPCC and edit `/etc/mprov/jobserver.yaml`: set `mprovURL` (use an IP or internal name, not localhost), `apikey`, `myaddress`, and enable the `jobmodules` you want. For an https mPCC whose certificate comes from a site or self-signed CA, set `caBundle` to that CA's file (otherwise the OS CA bundle is used); `logLevel` and `hostId` are optional globals. A template is copied to `/etc/mprov/` on first run (`src/mprov_jobserver/main.py`).
 3. `systemctl enable --now mprov_jobserver`. On first connect the job server starts a repo sync, which is required before images can be built.
 
 Useful CLI flags (global): `-c <configfile>`, `-r` runonce mode, `-d` do not register with the mPCC, `-m mod1,mod2` run specific modules once. See `README.md` and [Operations & Deployment](operations/deployment.md).

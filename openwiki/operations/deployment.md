@@ -17,7 +17,7 @@ tags: [mprov, jobserver, deployment, docker, systemd, install, ci]
 
 Runtime dependencies are in `requirements.txt` (pyyaml, jinja2, requests, python-slugify, py-dmidecode, netifaces, pyparted, sh, pyroute2 0.8.1 pinned for py3.8 compat, dnspython, distro, psutil). Packaging metadata: `setup.cfg` / `setup.py`; package data ships all plugin YAMLs and `templates/*/*`.
 
-First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` copies template configs into `/etc/mprov/` and exits for editing (see [Architecture Overview](../architecture/overview.md)). Service units: `mprov_jobserver.service` (systemd), `mprov_jobserver_postboot.service` (runs post-boot scripting via script-runner, see [Script Execution](../workflows/script-execution.md)), `mprov_jobserver.conf` (service drop-in), `systemd-system.conf` (tuning sample).
+First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` copies template configs into `/etc/mprov/` and exits for editing (see [Architecture Overview](../architecture/overview.md)). Service units: `mprov_jobserver.service` (systemd, shipped inside the package at `src/mprov_jobserver/systemd/` so the installer installs the unit matching the installed version, not the one on main, #165), `mprov_jobserver_postboot.service` (runs post-boot scripting via script-runner, see [Script Execution](../workflows/script-execution.md)), `mprov_jobserver.conf` (service drop-in), `systemd-system.conf` (tuning sample).
 
 ## Container image
 
@@ -31,7 +31,7 @@ First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` co
 
 ## CI
 
-`.github/workflows/`: `ci_build.yml` (build/publish), `dockerimage-dev.yml` (dev container image → `ghcr.io/mprov-ng/mprov-jobserver`, versioned `X.Y.Z.devN` from `VERSION` on pushes to main), `update_website.yml`, and `openwiki-update.yml` (this documentation). Pull requests run the dev/release workflows as dry runs that stop after the tests; `.github/dependabot.yml` keeps Actions deps current. The **pytest suite in `tests/`** runs inside the just-built jobserver image via `tests/Dockerfile` (adds pytest + `genders` for `nodeattr` checks), so tests use the same Rocky build, Python, and dnsmasq that ship. `gen_changelog.sh` generates release notes from git history; `VERSION` is the source of truth for releases.
+`.github/workflows/`: `ci_build.yml` (build/publish), `dockerimage-dev.yml` (dev container image → `ghcr.io/mprov-ng/mprov-jobserver`, versioned `X.Y.Z.devN` from `VERSION` on pushes to main, with concurrency so only the newest push publishes, #247), `lint.yml` (ruff errors-only + ShellCheck on every PR/push, independent of the image build, #187), `update_website.yml`, and `openwiki-update.yml` (this documentation). Pull requests run the dev/release workflows as dry runs that stop after the tests; `.github/dependabot.yml` keeps Actions deps current. The **pytest suite in `tests/`** runs inside the just-built jobserver image via `tests/Dockerfile` (adds pytest + `genders` for `nodeattr` checks), so tests use the same Rocky build, Python, and dnsmasq that ship. `gen_changelog.sh` generates release notes from git history; `VERSION` is the source of truth for releases.
 
 ## Operational checklists
 
@@ -39,5 +39,8 @@ First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` co
 - **New Python dependency**: add to `requirements.txt` *and* the Dockerfile install line if it has system build deps (e.g. pyparted needs parted-devel).
 - **Container**: any new listening port needs an `EXPOSE` update; anything stateful belongs under `/export` or the `mprov-conf` volume.
 - **Changing plugin logic**: add or update a pytest case in `tests/` (the fixtures in `tests/conftest.py` serve canned mPCC responses and stub out host side effects); CI runs the suite in the shipped image. For live smoke-testing use `-r -d -m <module> -c <config>` against a dev mPCC.
+
+Source map: `install_mprov_jobserver.sh`, `Dockerfile`, `start_server.sh`, `jobserver.yaml.j2`, `dev-docker-compose.yml`, `stack.env.example`, `mprov_jobserver*.service`, `setup.cfg`, `requirements.txt`, `.github/workflows/`.
+ dev mPCC.
 
 Source map: `install_mprov_jobserver.sh`, `Dockerfile`, `start_server.sh`, `jobserver.yaml.j2`, `dev-docker-compose.yml`, `stack.env.example`, `mprov_jobserver*.service`, `setup.cfg`, `requirements.txt`, `.github/workflows/`.

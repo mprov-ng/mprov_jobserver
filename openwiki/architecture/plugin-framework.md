@@ -24,7 +24,7 @@ A plugin defines:
   self.set_job_success()           # or set_job_failure()
   ```
 
-  The base class ships a simulated version (sleep 15s, mark success) — which is exactly what the stub `repo_delete.py` still runs (see [Image & Repo Provisioning](../workflows/image-provisioning.md)).
+  The base class ships a simulated version (sleep 15s, mark success) for stubs; plugins that claim specific job IDs filter by `status=1` (pending) on claim and `jobserver=<id>&status=2` on finish, per the job protocol in [Architecture Overview](overview.md).
 - `self.js` — back-reference to the `JobServer`, giving `js.session` (authenticated mPCC requests), `js.mprovURL`, `js.id`, `js.update_job_status()`, and `js.running`.
 - `set_job_running/success/failure` — thin wrappers around the job status state machine documented in [Architecture Overview](overview.md). `set_job_failure()` also sets `self.threadOk = False`.
 
