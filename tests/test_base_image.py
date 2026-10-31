@@ -265,6 +265,19 @@ def test_reset_identity_empties_machine_id_and_fstab(root):
   assert "UUID" not in (root / "etc/fstab").read_text()
 
 
+def test_unmask_units_removes_the_bases_masks_only(root):
+  units = root / "etc/systemd/system"
+  (units / "multi-user.target.wants").mkdir(parents=True)
+  for name in ("systemd-logind.service", "getty.target", "console-getty.service"):
+    (units / name).symlink_to("/dev/null")
+  (units / "multi-user.target.wants/sshd.service").symlink_to("/usr/lib/systemd/system/sshd.service")
+  (units / "local.service").write_text("[Unit]\n")
+  assert base_image.unmask_units(str(root)) == ["console-getty.service", "getty.target", "systemd-logind.service"]
+  assert sorted(p.name for p in units.iterdir()) == ["local.service", "multi-user.target.wants"]
+  assert (units / "multi-user.target.wants/sshd.service").is_symlink()
+  assert base_image.unmask_units(str(root / "missing")) == []
+
+
 def test_the_marker_records_the_base(root):
   (root / "etc").mkdir()
   assert base_image.read_marker(str(root)) is None

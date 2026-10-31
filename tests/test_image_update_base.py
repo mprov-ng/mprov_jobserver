@@ -15,7 +15,9 @@ from test_base_image import BASE, tar_bytes
 
 URL = "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-Container-Base.latest.x86_64.tar.xz"
 ARCHIVE = tar_bytes(BASE + [("etc/machine-id", b"0123456789abcdef\n"),
-                            ("etc/fstab", b"UUID=abc / xfs defaults 0 0\n")])
+                            ("etc/fstab", b"UUID=abc / xfs defaults 0 0\n"),
+                            ("etc/systemd", None), ("etc/systemd/system", None),
+                            ("etc/systemd/system/getty.target", ("symlink", "/dev/null"))])
 SHA = hashlib.sha256(ARCHIVE).hexdigest()
 
 
@@ -57,6 +59,8 @@ def test_a_new_image_is_built_from_the_base_image(js, rhel, images, commands, do
 def test_the_base_images_identity_is_reset(js, rhel, images, commands, downloads):
   from_base(rhel)
   rhel.handle_jobs()
+  # the container base's masks are gone, so nodes get a console login
+  assert not (images / "compute/etc/systemd/system/getty.target").is_symlink()
   assert (images / "compute/etc/machine-id").read_text() == ""
   assert "UUID" not in (images / "compute/etc/fstab").read_text()
 

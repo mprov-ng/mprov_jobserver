@@ -333,6 +333,27 @@ def reset_identity(root):
     os.chmod(path, 0o444 if name == 'machine-id' else 0o644)
 
 
+def unmask_units(root):
+  """
+  Remove the systemd masks (links to /dev/null in /etc/systemd/system) a
+  base image comes with.  A container image masks what a container has no
+  use for, Rocky's systemd-logind, getty.target and console-getty among
+  them; on a node that leaves no console login and no login sessions.  A
+  freshly installed OS has no masks there, so all of them go.  Returns the
+  unit names unmasked.
+  """
+  unitDir = os.path.join(root, 'etc/systemd/system')
+  unmasked = []
+  if not os.path.isdir(unitDir) or os.path.islink(unitDir):
+    return unmasked
+  for name in sorted(os.listdir(unitDir)):
+    path = os.path.join(unitDir, name)
+    if os.path.islink(path) and os.readlink(path) == '/dev/null':
+      os.unlink(path)
+      unmasked.append(name)
+  return unmasked
+
+
 def read_marker(root):
   """ What write_marker recorded in this tree, or None (a tree not built from a base image). """
   try:

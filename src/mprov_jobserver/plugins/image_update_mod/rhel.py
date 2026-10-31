@@ -165,6 +165,9 @@ class UpdateImage(JobServerPlugin):
         raise base_image.BaseImageError(f"the base image {url} has sha256 {got}, not {sha256}.")
       log.info(f"Unpacking the base image into {imgDir}")
       base_image.unpack(archive, imgDir, workdir, osdistro.get('distArch') or 'x86_64')
+      unmasked = base_image.unmask_units(imgDir)
+      if unmasked:
+        log.info(f"Unmasked the base image's {', '.join(unmasked)}")
       base_image.write_marker(imgDir, url, sha256)
     except (base_image.BaseImageError, OSError) as err:
       log.error(f"unable to use the base image: {err}")
