@@ -56,6 +56,18 @@ Here is an example for a good first jobserver config:
     # hostId: 'rack4-js01'
     # logTimestamps: True # stamp lines yourself; journald and docker already do.
     myaddress: 'mprov.local.cluster' # set this to the address of this jobserver.
+    # this jobserver's address on each network it serves, so the mPCC sends
+    # nodes on each network to the one on theirs.  Each address heartbeats on
+    # its own, sent from that address; one that stops is skipped.  Unset, the
+    # IPv4 and global IPv6 addresses on the interfaces that are up are used
+    # (not loopback, link-local or docker/VM bridges); [] registers none.
+    # network (the mPCC network id) and mprovURL (the mPCC's URL from that
+    # network, if the global one isn't reachable from it) are optional.
+    # addresses:
+    #   - 172.16.0.5
+    #   - address: 10.20.0.5
+    #     network: 3
+    #     mprovURL: "http://10.20.0.1/"
     jobmodules:
       # set the jobmodules you want to run here.
       - repo-delete
