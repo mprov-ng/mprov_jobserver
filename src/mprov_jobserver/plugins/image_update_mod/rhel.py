@@ -283,6 +283,19 @@ class UpdateImage(JobServerPlugin):
     #   self.threadOk = False
     #   return 
       
+    # the chroot's dnf (the fallback below, and the package install after it)
+    # resolves the repos' hosts with the image's resolv.conf.  Without one,
+    # glibc asks 127.0.0.1, which only works on a job server running its own
+    # dnsmasq (#281).
+    try:
+      os.makedirs(f"{imgDir}/etc", exist_ok=True)
+      shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
+    except OSError as err:
+      log.error(f"unable to copy /etc/resolv.conf into the image: {err}")
+      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      self.threadOk = False
+      return
+
     # build the filesystem.
     log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
     if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
@@ -335,8 +348,6 @@ class UpdateImage(JobServerPlugin):
     # set up a version lock on the kernel
     os.system(f'chroot {qimg} dnf -y versionlock kernel*')
 
-    shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
-    
     if float(imageDetails['osdistro']['version']) < 9 :
       os.system(f'chroot {qimg} alternatives --set python3 /usr/bin/python3.8')
       os.system(f'chroot {qimg} alternatives --set python /usr/bin/python3.8')
