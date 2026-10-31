@@ -630,6 +630,110 @@ def test_finishing_only_touches_our_own_running_jobs(server):
   assert [path for path, _ in patches(server)] == ["jobs/22/"]
 
 
+# atomic claims, once the mPCC lists "job-claim" (#112, mprov_control_center#296)
+
+def claims(server):
+  return [(path, data) for method, path, data in server.session.writes if method == "POST" and path.endswith("/claim/")]
+
+
+def test_with_job_claim_pending_jobs_are_claimed_not_patched(server):
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 1}, {"id": 12, "status": 1}]
+  assert server.update_job_status("libgenders", 2) == 2
+  assert claims(server) == [("jobs/11/claim/", {"jobserver": 5}), ("jobs/12/claim/", {"jobserver": 5})]
+  # the mPCC sets RUNNING, our id and the start time itself
+  assert patches(server) == []
+
+
+def test_a_claim_another_job_server_won_is_skipped(server, capsys):
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=repo-update&status=1"] = [{"id": 21, "status": 1}, {"id": 22, "status": 1}]
+  server.session.write_routes[("POST", "jobs/21/claim/")] = (409, {"detail": "The job isn't pending any more.", "status": 2, "jobserver": 7})
+  assert server.update_job_status("repo-update", 2) == 1
+  out = capsys.readouterr().out
+  assert "job 22 repo-update started" in out
+  assert "job 21 repo-update started" not in out
+
+
+def test_losing_every_claim_claims_nothing(server):
+  # the module's thread then has no job to run
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 1}]
+  server.session.write_routes[("POST", "jobs/11/claim/")] = (409, {"detail": "x", "status": 2, "jobserver": 7})
+  assert server.update_job_status("libgenders", 2) == 0
+  assert patches(server) == []
+
+
+@pytest.mark.parametrize("reply", [(400, {"jobserver": "No job server has ID 5."}), (404, {"detail": "No such job."}), (500, None)])
+def test_a_refused_claim_is_logged_and_skipped(server, capsys, reply):
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 1}]
+  server.session.write_routes[("POST", "jobs/11/claim/")] = reply
+  assert server.update_job_status("libgenders", 2) == 0
+  assert f"the mPCC refused our claim of job 11 libgenders (HTTP {reply[0]})" in capsys.readouterr().out
+  assert patches(server) == []
+
+
+def test_with_job_claim_a_job_query_claims_too(server):
+  # image-update and the others pass their own pending-job query
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=image-update&params={\"imageId\":\"compute\"}&status=1"] = [{"id": 9, "status": 1}]
+  assert server.update_job_status("image-update", 2, jobquery='module=image-update&params={"imageId":"compute"}&status=1') == 1
+  assert claims(server) == [("jobs/9/claim/", {"jobserver": 5})]
+
+
+def test_with_job_claim_jobs_not_pending_are_still_left_alone(server):
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 2}, {"id": 12, "status": 4}]
+  assert server.update_job_status("libgenders", 2) == 0
+  assert server.session.writes == []
+
+
+@pytest.mark.parametrize("status", [3, 4])
+def test_finishing_still_patches_with_job_claim(server, status):
+  server.features = frozenset({"job-claim"})
+  server.session.routes["jobs/?jobserver=5&module=libgenders&status=2"] = [{"id": 11, "status": 2}]
+  assert server.update_job_status("libgenders", status) == 1
+  assert claims(server) == []
+  [(path, data)] = patches(server)
+  assert path == "jobs/11/" and data["status"] == status
+
+
+def test_without_job_claim_claims_are_patched_as_before(server):
+  # an mPCC from before #296 has no claim endpoint
+  server.features = frozenset({"addjs-version", "host-id"})
+  server.session.routes["jobs/?module=libgenders&status=1"] = [{"id": 11, "status": 1}]
+  assert server.update_job_status("libgenders", 2) == 1
+  assert claims(server) == []
+  assert [path for path, _ in patches(server)] == ["jobs/11/"]
+
+
+def test_two_job_servers_racing_for_a_job_run_it_once(monkeypatch):
+  # both list the same pending job; the mPCC's claim lets only the first in
+  owner = {}
+  def make(jsid):
+    js = JobServer.__new__(JobServer)
+    js.session = FakeSession()
+    js.mprovURL = MPROV_URL
+    js.id = jsid
+    js.features = frozenset({"job-claim"})
+    js.session.routes["jobs/?module=repo-update&status=1"] = [{"id": 30, "status": 1}]
+    real = js.session.post
+    def post(url, data=None, **kwargs):
+      if url.endswith("jobs/30/claim/"):
+        winner = owner.setdefault(30, json.loads(data)["jobserver"])
+        from conftest import FakeResponse
+        js.session.writes.append(("POST", "jobs/30/claim/", json.loads(data)))
+        return FakeResponse(200, {"id": 30}) if winner == jsid else FakeResponse(409, {"status": 2, "jobserver": winner})
+      return real(url, data=data, **kwargs)
+    js.session.post = post
+    return js
+  a, b = make(5), make(7)
+  assert a.update_job_status("repo-update", 2) == 1
+  assert b.update_job_status("repo-update", 2) == 0
+  assert owner == {30: 5}
+
+
 # a stable host id, sent once the mPCC says it takes one (#113)
 
 def host_id_server(server, tmp_path, features=("addjs-version", "host-id")):
