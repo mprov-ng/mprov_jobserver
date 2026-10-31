@@ -13,8 +13,9 @@ class repo_update(JobServerPlugin):
   jobModule = 'repo-update'
   repoDir = ""
   repoList = None
-  # mirror only the newest version of each package (#95); per repo once the
-  # mPCC has a field for it (mprov_control_center#156)
+  # mirror only the newest version of each package (#95).  A repo's own
+  # newest_only (mprov_control_center#156) wins; this is the setting for an
+  # mPCC that doesn't send one.
   newestOnly = False
 
 
@@ -120,7 +121,8 @@ class repo_update(JobServerPlugin):
           continue
         repo_update.repo = repo
         repo_update.repoDir = self.repoDir
-        repo_update.newestOnly = bool(self.newestOnly)
+        newest = repo.get('newest_only')
+        repo_update.newestOnly = bool(self.newestOnly if newest is None else newest)
         repo_update.jobid = jid
         repo_update.start()
         workers.append(repo_update)

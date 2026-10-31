@@ -216,6 +216,21 @@ def test_the_setting_reaches_the_repo_worker(js, update, commands, setting):
   assert (" --newest-only " in cmd) is setting
 
 
+@pytest.mark.parametrize("setting, per_repo, newest", [
+  (False, True, True),
+  (True, False, False),
+  (True, None, True),     # an mPCC that sends null
+  (False, None, False),
+])
+def test_the_repos_own_setting_wins(js, update, commands, setting, per_repo, newest):
+  update.newestOnly = setting
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}],
+                            "repos/5/": dict(REPO, ostype="rhel", newest_only=per_repo)})
+  update.handle_jobs()
+  [cmd] = commands.matching("dnf reposync")
+  assert (" --newest-only " in cmd) is newest
+
+
 def test_newest_only_is_off_without_the_setting(js):
   # sites whose repo-update.yaml predates it keep mirroring everything
   js.config_data = {"repo-update": {"repoDir": "/export/repos"}}

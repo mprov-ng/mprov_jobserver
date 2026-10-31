@@ -1,4 +1,5 @@
 - repo-update:
     repoDir: '/export/repos'
-    # mirror only the newest version of each package, not the whole history
+    # mirror only the newest version of each package, not the whole history;
+    # a repo's own "Newest only" setting in the mPCC wins over this one
     newestOnly: True
