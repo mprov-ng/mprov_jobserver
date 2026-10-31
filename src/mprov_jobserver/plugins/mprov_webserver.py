@@ -2,10 +2,49 @@ import os
 from .plugin import JobServerPlugin
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
-import multiprocessing, socket, stat, threading
+import multiprocessing, socket, stat, threading, time
 from mprov_jobserver.log import get_logger
 
 log = get_logger(__name__)
+# node boots as the job server sees them, for a time-to-provision metric
+# (#105): "[I] provisioning: c01 (10.0.0.21) requested image compute"
+plog = get_logger('mprov_jobserver.provisioning')
+
+# reverse names of clients, as (name, when looked up); a node's name comes
+# from the job server's own dnsmasq, so a lookup is quick, but not every
+# request needs one
+NAME_TTL = 300
+_names = {}
+_namesLock = threading.Lock()
+
+
+def client_ip(address):
+  # the server listens on ::, so IPv4 clients come in as ::ffff:a.b.c.d
+  ip = address[0]
+  return ip[len('::ffff:'):] if ip.startswith('::ffff:') else ip
+
+
+def client_name(ip):
+  """ The client's short host name from a reverse lookup, or None. """
+  now = time.monotonic()
+  with _namesLock:
+    cached = _names.get(ip)
+  if cached is not None and now - cached[1] < NAME_TTL:
+    return cached[0]
+  try:
+    name = socket.gethostbyaddr(ip)[0].split('.')[0] or None
+  except (OSError, UnicodeError):
+    name = None
+  with _namesLock:
+    _names[ip] = (name, now)
+  return name
+
+
+def size_text(size):
+  for unit in ('B', 'KB', 'MB', 'GB'):
+    if size < 1024 or unit == 'GB':
+      return f"{size:.1f} {unit}" if unit != 'B' else f"{size} B"
+    size /= 1024
 
 def safe_root(rootDir):
   # The directory to serve, or None if serving it would expose the whole
@@ -45,6 +84,34 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
       return False
     return stat.S_ISREG(st.st_mode) and st.st_size >= self.server.maxConnFileSize
 
+  def bootFile(self):
+    """
+    (image slug, kind) for a node's boot file under images/<slug>/:
+    "kernel" for <slug>.vmlinuz, "image" for <slug>.img; None otherwise.
+    """
+    if not self.isImageRequest():
+      return None
+    rel = os.path.relpath(self.translate_path(self.path), self.directory)
+    parts = rel.split(os.sep)
+    if len(parts) != 3:
+      return None
+    slug, name = parts[1], parts[2]
+    if name == slug + '.vmlinuz':
+      return slug, 'kernel'
+    if name == slug + '.img':
+      return slug, 'image'
+    return None
+
+  def node(self):
+    ip = client_ip(self.client_address)
+    name = client_name(ip)
+    return f"{name} ({ip})" if name else ip
+
+  def send_response(self, code, message=None):
+    # remember the status, to tell a served image from a refused one
+    self.sentCode = code
+    super().send_response(code, message)
+
   def refuseBusy(self):
     # 404 will result in a retry from the mPCC/client hopefully to another
     # server: the mPCC HEADs each job server before redirecting a client,
@@ -54,30 +121,70 @@ class mProvHTTPReqestHandler(SimpleHTTPRequestHandler):
     self.send_error(HTTPStatus.NOT_FOUND, "File not found, max connections reached")
 
   def do_GET(self):
+    boot = self.bootFile()
     # the job server is the server's, not the handler's (#147)
     if os.getloadavg()[1] >= multiprocessing.cpu_count() \
         and self.server.js is not None and self.server.js.loadmon \
         and self.isImageRequest():
       log.warning("Not Serving, high load.")
+      if boot:
+        plog.warning(f"{self.node()} turned away from image {boot[0]}: high load")
       self.send_error(HTTPStatus.NOT_FOUND, "Unable to serve, High load")
       return False
 
     if not self.isLimitedImage():
-      return super().do_GET()
+      return self.serveBootFile(boot)
 
     with mProvHTTPReqestHandler.connLock:
       busy = mProvHTTPReqestHandler.connCount >= mProvHTTPReqestHandler.maxConn
       if not busy:
         mProvHTTPReqestHandler.connCount += 1
     if busy:
+      if boot:
+        plog.warning(f"{self.node()} turned away from image {boot[0]}: {mProvHTTPReqestHandler.maxConn} downloads already running")
       self.refuseBusy()
       return None
     # we are ok to serve; give the slot back however the download ends.
     try:
-      return super().do_GET()
+      return self.serveBootFile(boot)
     finally:
       with mProvHTTPReqestHandler.connLock:
         mProvHTTPReqestHandler.connCount -= 1
+
+  def serveBootFile(self, boot):
+    """
+    Serve the request; for a node's kernel or image, log the provisioning
+    steps: the kernel request starts a boot, the image download is timed
+    (#105).
+    """
+    if boot is None:
+      return super().do_GET()
+    slug, kind = boot
+    node = self.node()
+    if kind == 'kernel':
+      super().do_GET()
+      if getattr(self, 'sentCode', None) == HTTPStatus.OK:
+        plog.info(f"{node} requested image {slug}")
+      return None
+    plog.info(f"{node} downloading image {slug}")
+    start = time.monotonic()
+    try:
+      super().do_GET()
+    except OSError as err:
+      # the node went away mid-download (a reset, a reboot)
+      plog.warning(f"{node} image {slug} download failed after {time.monotonic() - start:.0f} s ({err.strerror or err})")
+      self.close_connection = True
+      return None
+    took = time.monotonic() - start
+    if getattr(self, 'sentCode', None) != HTTPStatus.OK:
+      plog.warning(f"{node} image {slug} not served (HTTP {getattr(self, 'sentCode', '?')})")
+      return None
+    try:
+      size = size_text(os.stat(self.translate_path(self.path)).st_size)
+    except OSError:
+      size = "?"
+    plog.info(f"{node} got image {slug} ({size} in {took:.0f} s)")
+    return None
 
   def do_HEAD(self):
     # a HEAD never takes a slot: the mPCC probes with one per redirect.
