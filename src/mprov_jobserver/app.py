@@ -16,9 +16,57 @@ import mprov_jobserver.plugins
 import glob
 import multiprocessing
 import uuid
+import ipaddress
+import psutil
+from requests.adapters import HTTPAdapter
 from mprov_jobserver.log import get_logger, configure as log_configure
 
 log = get_logger(__name__)
+
+# interfaces whose addresses aren't ones clients reach this job server on:
+# loopback, and container and VM bridges (#114)
+SKIPPED_INTERFACES = ("lo", "docker", "veth", "br-", "virbr", "podman", "cni")
+# seconds to wait for an address's heartbeat: a network that drops packets
+# mustn't hold up the job server's main loop (#114)
+ADDRESS_HEARTBEAT_TIMEOUT = 5
+
+
+def interface_addresses():
+  """
+  The addresses on this host's interfaces that are up, for the mPCC to
+  send clients on each network to the one on theirs (#114): IPv4 and
+  global-scope IPv6, without loopback, link-local or container bridges.
+  """
+  stats = psutil.net_if_stats()
+  result = []
+  for name, addrs in psutil.net_if_addrs().items():
+    if name.startswith(SKIPPED_INTERFACES) or name not in stats or not stats[name].isup:
+      continue
+    for addr in addrs:
+      if addr.family not in (socket.AF_INET, socket.AF_INET6):
+        continue
+      try:
+        ip = ipaddress.ip_address(addr.address.split('%', 1)[0])
+      except ValueError:
+        continue
+      if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+        continue
+      if str(ip) not in result:
+        result.append(str(ip))
+  return result
+
+
+class SourceAddressAdapter(HTTPAdapter):
+  """ Sends requests from one local address, so a per-address heartbeat
+  goes out on that address's network (#114). """
+
+  def __init__(self, source, **kwargs):
+    self.source = source
+    super().__init__(**kwargs)
+
+  def init_poolmanager(self, *args, **kwargs):
+    kwargs['source_address'] = (self.source, 0)
+    super().init_poolmanager(*args, **kwargs)
 
 
 def job_subject(job):
@@ -79,6 +127,15 @@ class JobServer ():
   # host-id next to the config file (#113)
   hostId = ""
   _hostIdValue = None
+  # the addresses this job server serves clients on, one per network, each
+  # heartbeated to the mPCC on its own (#114).  Unset, they're found from
+  # the interfaces that are up; [] registers none.
+  addresses = None
+  addressEntries = None
+  # per-address sessions, bound to that address, and the addresses whose
+  # last heartbeat failed, so a failure is logged once
+  _addressSessions = None
+  _failingAddresses = None
   # how much the log says (error, warning, info, debug), and whether lines
   # carry a timestamp; journald and docker stamp lines themselves (#104)
   logLevel = "info"
@@ -192,6 +249,11 @@ class JobServer ():
       except Exception as err:
         log.error(f"invalid value for {config_entry} in 'global': {err}")
         sys.exit(1)
+    try:
+      self.addressEntries = self.parse_addresses(self.addresses)
+    except ValueError as err:
+      log.error(f"invalid addresses in 'global': {err}")
+      sys.exit(1)
     self.use_ca_bundle()
     if not log_configure(self.logLevel, self.logTimestamps):
       log.error(f"logLevel {self.logLevel!r} isn't one of error, warning, info or debug.")
@@ -482,6 +544,12 @@ class JobServer ():
       hostId = self.host_id()
       if hostId:
         data['host_id'] = hostId
+    # our address on each network we serve, if the mPCC can take them and
+    # keep each one fresh by its own heartbeat (#114)
+    entries = None
+    if {'jobserver-addresses', 'jobserver-address-heartbeat'} <= self.features:
+      entries = self.address_entries()
+      data['addresses'] = [{k: entry[k] for k in ('address', 'network') if k in entry} for entry in entries]
     # print(self.config_data)
     if 'mprov-webserver' in self.config_data:
     # if  self.config_data['mprov-webserver']:
@@ -545,6 +613,98 @@ class JobServer ():
     self.features = frozenset(f for f in features if isinstance(f, str)) if isinstance(features, list) else frozenset()
 
     log.info("Heartbeat - " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    if entries and 'jobserver-address-heartbeat' in self.features:
+      self.heartbeat_addresses(entries)
+
+  def parse_addresses(self, value):
+    '''
+    The global addresses list (#114) as [{"address", "network"?, "mprovURL"}],
+    or None if it isn't set.  An entry is an address, or a mapping with
+    "address", optionally the mPCC "network" id it's on (else the mPCC finds
+    it from the subnets) and the "mprovURL" that reaches the mPCC from that
+    network (else the global mprovURL).  Raises ValueError if it's malformed.
+    '''
+    if value is None:
+      return None
+    if not isinstance(value, list):
+      raise ValueError("must be a list of addresses")
+    entries = []
+    for item in value:
+      if isinstance(item, str):
+        item = {'address': item}
+      if not isinstance(item, dict) or not isinstance(item.get('address'), str) or not item['address'].strip():
+        raise ValueError(f"each entry needs an address, not {item!r}")
+      unknown = set(item) - {'address', 'network', 'mprovURL'}
+      if unknown:
+        raise ValueError(f"unknown key(s) {', '.join(sorted(unknown))} for {item['address']}")
+      entry = {'address': item['address'].strip()}
+      if item.get('network') is not None:
+        entry['network'] = item['network']
+      url = item.get('mprovURL') or self.mprovURL
+      if not isinstance(url, str):
+        raise ValueError(f"mprovURL for {entry['address']} must be a URL")
+      entry['mprovURL'] = url if url.endswith('/') else url + '/'
+      if entry['address'] in (e['address'] for e in entries):
+        raise ValueError(f"{entry['address']} is listed twice")
+      entries.append(entry)
+    return entries
+
+  def address_entries(self):
+    ''' The addresses to register (#114): the configured ones, else those
+    on the interfaces that are up, found again on each heartbeat. '''
+    if self.addressEntries is not None:
+      return self.addressEntries
+    return [{'address': address, 'mprovURL': self.mprovURL} for address in interface_addresses()]
+
+  def address_session(self, address):
+    '''
+    A session that sends from address, so its heartbeat goes out on that
+    address's network (#114), sharing the main session's headers (the API
+    key) and certificate checks.  A host name can't be bound: the main
+    session is used.
+    '''
+    try:
+      ipaddress.ip_address(address)
+    except ValueError:
+      return self.session
+    if self._addressSessions is None:
+      self._addressSessions = {}
+    if address not in self._addressSessions:
+      session = requests.Session()
+      session.headers = self.session.headers
+      session.verify = self.session.verify
+      adapter = SourceAddressAdapter(address)
+      session.mount('http://', adapter)
+      session.mount('https://', adapter)
+      self._addressSessions[address] = session
+    return self._addressSessions[address]
+
+  def heartbeat_addresses(self, entries):
+    '''
+    Heartbeat each registered address on its own, from that address and to
+    its mprovURL (#114), so the mPCC stops sending clients to an address
+    whose network can't reach us.  A failure is logged once, until that
+    address heartbeats again.
+    '''
+    if self._failingAddresses is None:
+      self._failingAddresses = set()
+    for entry in entries:
+      address = entry['address']
+      url = entry['mprovURL'] + 'jobservers/' + str(self.id) + '/heartbeat/'
+      problem = None
+      try:
+        response = self.address_session(address).post(url, data=json.dumps({'address': address}), timeout=ADDRESS_HEARTBEAT_TIMEOUT)
+        if response.status_code != 200:
+          problem = f"the mPCC answered {response.status_code}: {response.text[:200]}"
+      except Exception as err:
+        problem = f"unable to reach the mPCC at {entry['mprovURL']} from it: {err}"
+      if problem is None:
+        if address in self._failingAddresses:
+          self._failingAddresses.discard(address)
+          log.info(f"heartbeat for {address} is back.")
+      elif address not in self._failingAddresses:
+        self._failingAddresses.add(address)
+        log.warning(f"heartbeat for {address} failed, so the mPCC will stop sending clients to it: {problem}")
 
 
   def host_id(self):

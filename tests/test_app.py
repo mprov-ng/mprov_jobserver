@@ -17,7 +17,7 @@ import mprov_jobserver.app as app
 import mprov_jobserver.plugins
 from mprov_jobserver.app import JobServer
 from mprov_jobserver.plugins.plugin import JobServerPlugin
-from conftest import FakeSession, MPROV_URL
+from conftest import FakeResponse, FakeSession, MPROV_URL
 
 
 @pytest.fixture
@@ -501,6 +501,196 @@ def test_a_failed_heartbeat_keeps_the_last_features(server):
   server.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "boom"})
   server.register_server()
   assert server.features == {"addjs-version"}
+
+
+# An address per network, each with its own heartbeat (#114)
+
+ADDRESS_FEATURES = ["jobserver-addresses", "jobserver-address-heartbeat"]
+
+
+@pytest.fixture
+def multi(server, monkeypatch):
+  """ A server registered with an mPCC that takes per-address heartbeats,
+  configured with two addresses; heartbeats go through the fake session. """
+  server.features = frozenset(ADDRESS_FEATURES)
+  server.id = 9
+  server.addressEntries = [
+    {"address": "172.16.0.5", "mprovURL": MPROV_URL},
+    {"address": "10.20.0.5", "network": 3, "mprovURL": MPROV_URL},
+  ]
+  monkeypatch.setattr(server, "address_session", lambda address: server.session)
+  server.session.write_routes[("POST", "jobservers/")] = {"pk": 9, "features": ADDRESS_FEATURES}
+  return server
+
+
+def registrations(server):
+  return [data for method, path, data in server.session.writes if path == "jobservers/"]
+
+
+def heartbeats(server):
+  return [(path, data) for method, path, data in server.session.writes if path.endswith("/heartbeat/")]
+
+
+def test_addresses_are_registered_then_each_one_heartbeats(multi):
+  multi.register_server()
+  [data] = registrations(multi)
+  # the mprovURL to heartbeat through stays here
+  assert data["addresses"] == [{"address": "172.16.0.5"}, {"address": "10.20.0.5", "network": 3}]
+  assert data["address"] == "10.0.0.2"
+  assert heartbeats(multi) == [("jobservers/9/heartbeat/", {"address": "172.16.0.5"}),
+                               ("jobservers/9/heartbeat/", {"address": "10.20.0.5"})]
+
+
+@pytest.mark.parametrize("features", [[], ["jobserver-addresses"], ["jobserver-address-heartbeat"]])
+def test_without_both_features_no_addresses_are_sent(multi, features):
+  # an mPCC with only #427's list would replace it on every heartbeat with
+  # nothing keeping each address fresh, so it gets the single address only
+  multi.features = frozenset(features)
+  multi.session.write_routes[("POST", "jobservers/")] = {"pk": 9, "features": features}
+  multi.register_server()
+  [data] = registrations(multi)
+  assert "addresses" not in data
+  assert heartbeats(multi) == []
+
+
+def test_an_mpcc_that_drops_the_feature_gets_no_heartbeats(multi):
+  multi.session.write_routes[("POST", "jobservers/")] = {"pk": 9, "features": ["jobserver-addresses"]}
+  multi.register_server()
+  assert heartbeats(multi) == []
+  multi.register_server()
+  assert "addresses" not in registrations(multi)[1]
+
+
+def test_a_failed_registration_sends_no_heartbeats(multi):
+  multi.session.write_routes[("POST", "jobservers/")] = (500, {"msg": "boom"})
+  multi.register_server()
+  assert heartbeats(multi) == []
+
+
+def test_no_configured_addresses_finds_them_on_the_interfaces(multi, monkeypatch):
+  multi.addressEntries = None
+  monkeypatch.setattr(app, "interface_addresses", lambda: ["172.16.0.5", "2001:db8::5"])
+  multi.register_server()
+  assert registrations(multi)[0]["addresses"] == [{"address": "172.16.0.5"}, {"address": "2001:db8::5"}]
+  assert [data["address"] for _, data in heartbeats(multi)] == ["172.16.0.5", "2001:db8::5"]
+
+
+def test_an_empty_list_registers_no_addresses(multi):
+  multi.addressEntries = []
+  multi.register_server()
+  assert registrations(multi)[0]["addresses"] == []
+  assert heartbeats(multi) == []
+
+
+def test_each_address_heartbeats_through_its_own_mprov_url(multi, monkeypatch):
+  posts = []
+
+  class Recorder:
+    def __init__(self, address):
+      self.address = address
+
+    def post(self, url, data=None, **kwargs):
+      posts.append((self.address, url, json.loads(data)))
+      # a network that drops packets doesn't hang the main loop
+      assert kwargs["timeout"] == app.ADDRESS_HEARTBEAT_TIMEOUT
+      return types.SimpleNamespace(status_code=200, text="{}")
+
+  multi.addressEntries[1]["mprovURL"] = "http://10.20.0.1/"
+  monkeypatch.setattr(multi, "address_session", Recorder)
+  multi.register_server()
+  assert posts == [("172.16.0.5", MPROV_URL + "jobservers/9/heartbeat/", {"address": "172.16.0.5"}),
+                   ("10.20.0.5", "http://10.20.0.1/jobservers/9/heartbeat/", {"address": "10.20.0.5"})]
+
+
+def test_a_failing_address_is_logged_once_and_its_return_too(multi, monkeypatch, caplog):
+  replies = {"172.16.0.5": [(404, {"detail": "nope"}), (404, {"detail": "nope"}), (200, {})]}
+
+  def post(url, data=None, **kwargs):
+    address = json.loads(data)["address"]
+    if address == "10.20.0.5":
+      raise app.requests.ConnectionError("no route to host")
+    return FakeResponse(*replies[address].pop(0))
+
+  monkeypatch.setattr(multi, "address_session", lambda address: types.SimpleNamespace(post=post))
+  for _ in range(3):
+    multi.register_server()
+  err = caplog.text
+  assert err.count("heartbeat for 172.16.0.5 failed") == 1
+  assert "404" in err
+  assert err.count("heartbeat for 172.16.0.5 is back") == 1
+  assert err.count("heartbeat for 10.20.0.5 failed") == 1
+  assert "no route to host" in err
+
+
+def test_an_address_session_sends_from_that_address(server):
+  server.session = app.requests.Session()
+  server.session.headers["Authorization"] = "Api-Key k"
+  server.session.verify = "/etc/mprov/ca.pem"
+  session = server.address_session("10.20.0.5")
+  assert session is server.address_session("10.20.0.5")
+  assert session.get_adapter("http://mpcc/").source == "10.20.0.5"
+  assert session.get_adapter("https://mpcc/").source == "10.20.0.5"
+  # the API key the main session gets later still goes along
+  server.session.headers["Authorization"] = "Api-Key k2"
+  assert session.headers["Authorization"] == "Api-Key k2"
+  assert session.verify == "/etc/mprov/ca.pem"
+  assert server.address_session("2001:db8::5").get_adapter("http://mpcc/").source == "2001:db8::5"
+
+
+def test_a_host_name_address_uses_the_main_session(server):
+  assert server.address_session("js01.ib.cluster") is server.session
+
+
+def test_interface_addresses_skips_loopback_link_local_bridges_and_down(monkeypatch):
+  addr = lambda family, address: types.SimpleNamespace(family=family, address=address)
+  v4, v6 = app.socket.AF_INET, app.socket.AF_INET6
+  monkeypatch.setattr(app.psutil, "net_if_addrs", lambda: {
+    "lo": [addr(v4, "127.0.0.1"), addr(v6, "::1")],
+    "eth0": [addr(v4, "172.16.0.5"), addr(v6, "fe80::1%eth0"), addr(v6, "2001:db8::5"),
+             addr(app.psutil.AF_LINK, "52:54:00:12:34:56")],
+    "ib0": [addr(v4, "10.20.0.5"), addr(v4, "169.254.3.4"), addr(v6, "fd00:20::5")],
+    "eth1": [addr(v4, "192.168.9.5")],
+    "docker0": [addr(v4, "172.17.0.1")],
+    "br-3f2a": [addr(v4, "172.18.0.1")],
+    "veth12ab": [addr(v4, "172.17.0.9")],
+    "virbr0": [addr(v4, "192.168.122.1")],
+  })
+  up = types.SimpleNamespace(isup=True)
+  monkeypatch.setattr(app.psutil, "net_if_stats", lambda: {
+    name: up for name in ("lo", "eth0", "ib0", "docker0", "br-3f2a", "veth12ab", "virbr0")
+  } | {"eth1": types.SimpleNamespace(isup=False)})
+  # unique-local IPv6 is global scope on the host, like private IPv4
+  assert app.interface_addresses() == ["172.16.0.5", "2001:db8::5", "10.20.0.5", "fd00:20::5"]
+
+
+def test_load_config_reads_the_addresses(tmp_path):
+  path = write_config(tmp_path, {"mprovURL": "http://mpcc:8080", "addresses": [
+    "172.16.0.5", {"address": " 10.20.0.5 ", "network": 3, "mprovURL": "http://10.20.0.1"}]})
+  server = bare_server(path)
+  assert server.addressEntries == [
+    {"address": "172.16.0.5", "mprovURL": "http://mpcc:8080/"},
+    {"address": "10.20.0.5", "network": 3, "mprovURL": "http://10.20.0.1/"},
+  ]
+
+
+def test_load_config_without_addresses_finds_them_later(tmp_path):
+  server = bare_server(write_config(tmp_path, {"mprovURL": "http://mpcc/"}))
+  assert server.addressEntries is None
+
+
+@pytest.mark.parametrize("addresses", [
+  "172.16.0.5",                                     # not a list
+  [{"network": 3}],                                 # no address
+  [""],                                             # blank
+  [7],                                              # not an address
+  [{"address": "10.20.0.5", "netwrok": 3}],         # a typo
+  [{"address": "10.20.0.5", "mprovURL": 5}],
+  ["10.20.0.5", {"address": "10.20.0.5"}],          # twice
+])
+def test_load_config_rejects_bad_addresses(tmp_path, addresses):
+  path = write_config(tmp_path, {"mprovURL": "http://mpcc/", "addresses": addresses})
+  with pytest.raises(SystemExit):
+    bare_server(path)
 
 
 # Jobs left RUNNING: by an earlier run of this job server (#94), or by a
