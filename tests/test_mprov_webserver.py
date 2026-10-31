@@ -263,3 +263,108 @@ def test_high_load_serves_images_when_loadmon_is_off(js, server, monkeypatch):
   monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
   js.loadmon = False
   assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
+
+
+# provisioning log lines for a time-to-provision metric (#105)
+
+@pytest.fixture
+def named(root, monkeypatch):
+  """ Clients resolve to c01; the image has its kernel too. """
+  (root / "images" / "compute" / "compute.vmlinuz").write_bytes(b"KERNEL")
+  monkeypatch.setattr(webserver_module, "_names", {})
+  monkeypatch.setattr(webserver_module.socket, "gethostbyaddr", lambda ip: ("c01.cluster.example", [], [ip]))
+
+
+def provisioning(capsys):
+  return [line for line in capsys.readouterr().out.splitlines() if "provisioning:" in line]
+
+
+def wait_for(capsys, count):
+  # the handler logs after the response is sent, so the client can get
+  # here first
+  lines = []
+  for _ in range(200):
+    lines += provisioning(capsys)
+    if len(lines) >= count:
+      break
+    time.sleep(0.01)
+  return lines
+
+
+def test_a_kernel_request_starts_a_boot(server, named, capsys):
+  assert get(server, "/images/compute/compute.vmlinuz") == (200, b"KERNEL")
+  assert wait_for(capsys, 1) == ["[I] provisioning: c01 (127.0.0.1) requested image compute"]
+
+
+def test_an_image_download_is_logged_and_timed(server, named, capsys):
+  assert get(server, "/images/compute/compute.img") == (200, b"IMAGE")
+  start, done = wait_for(capsys, 2)
+  assert start == "[I] provisioning: c01 (127.0.0.1) downloading image compute"
+  assert done == "[I] provisioning: c01 (127.0.0.1) got image compute (5 B in 0 s)"
+
+
+def test_other_files_arent_provisioning(server, named, capsys, root):
+  (root / "images" / "compute" / "compute.initramfs").write_bytes(b"INITRD")
+  get(server, "/images/compute/compute.initramfs")
+  get(server, "/osrepos/5/repomd.xml")
+  get(server, "/images/compute/compute.img", method="HEAD")
+  time.sleep(0.1)
+  assert provisioning(capsys) == []
+
+
+def test_a_download_that_breaks_is_a_warning(server, named, capsys, monkeypatch):
+  def hang_up(self):
+    raise ConnectionResetError(104, "Connection reset by peer")
+  monkeypatch.setattr(webserver_module.SimpleHTTPRequestHandler, "do_GET", hang_up)
+  with pytest.raises((urllib.error.URLError, ConnectionError, http.client.HTTPException)):
+    get(server, "/images/compute/compute.img")
+  lines = wait_for(capsys, 2)
+  assert lines[0] == "[I] provisioning: c01 (127.0.0.1) downloading image compute"
+  assert lines[1] == "[W] provisioning: c01 (127.0.0.1) image compute download failed after 0 s (Connection reset by peer)"
+
+
+def test_a_missing_image_is_a_warning(server, named, capsys, root):
+  (root / "images" / "compute" / "compute.img").unlink()
+  with pytest.raises(urllib.error.HTTPError):
+    get(server, "/images/compute/compute.img")
+  assert wait_for(capsys, 2)[1] == "[W] provisioning: c01 (127.0.0.1) image compute not served (HTTP 404)"
+
+
+def test_a_busy_refusal_is_a_warning(js, server, busy, named, capsys):
+  with pytest.raises(urllib.error.HTTPError):
+    get(server, "/images/compute/compute.img")
+  assert wait_for(capsys, 1) == [
+    f"[W] provisioning: c01 (127.0.0.1) turned away from image compute: {mProvHTTPReqestHandler.maxConn} downloads already running"]
+
+
+def test_a_high_load_refusal_is_a_warning(js, server, named, capsys, monkeypatch):
+  monkeypatch.setattr(webserver_module.os, "getloadavg", lambda: (99.0, 99.0, 99.0))
+  with pytest.raises(urllib.error.HTTPError):
+    get(server, "/images/compute/compute.vmlinuz")
+  assert wait_for(capsys, 1) == ["[W] provisioning: c01 (127.0.0.1) turned away from image compute: high load"]
+
+
+def test_a_client_without_a_name_is_logged_by_address(server, named, capsys, monkeypatch):
+  def unknown(ip):
+    raise socket.herror(1, "Unknown host")
+  monkeypatch.setattr(webserver_module.socket, "gethostbyaddr", unknown)
+  get(server, "/images/compute/compute.vmlinuz")
+  assert wait_for(capsys, 1) == ["[I] provisioning: 127.0.0.1 requested image compute"]
+
+
+def test_names_are_looked_up_once_per_client(server, named, monkeypatch):
+  asked = []
+  monkeypatch.setattr(webserver_module.socket, "gethostbyaddr", lambda ip: asked.append(ip) or ("c01", [], [ip]))
+  for _ in range(3):
+    get(server, "/images/compute/compute.vmlinuz")
+  assert asked == ["127.0.0.1"]
+
+
+def test_ipv4_clients_of_the_ipv6_socket_show_their_ipv4_address():
+  assert webserver_module.client_ip(("::ffff:192.168.250.12", 50000, 0, 0)) == "192.168.250.12"
+  assert webserver_module.client_ip(("fd00::12", 50000, 0, 0)) == "fd00::12"
+  assert webserver_module.client_ip(("10.0.0.2", 50000)) == "10.0.0.2"
+
+
+def test_sizes_read_well():
+  assert [webserver_module.size_text(n) for n in (5, 2048, 3 * 1024**2, int(1.5 * 1024**3))] == ["5 B", "2.0 KB", "3.0 MB", "1.5 GB"]

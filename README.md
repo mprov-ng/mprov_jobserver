@@ -46,6 +46,10 @@ Here is an example for a good first jobserver config:
     # how much to log: error, warning, info (the default) or debug.  Each line is
     # tagged [E], [W], [I] or [D] and the module; under systemd, journald also
     # gets the level, so `journalctl -p warning -u mprov_jobserver` works.
+    # mprov-webserver logs node boots under "provisioning": a node's kernel
+    # request, its image download starting, and the download done (with its
+    # size and time) or failed, e.g. "[I] provisioning: c01 (10.0.0.21) got
+    # image compute (1.2 GB in 41 s)".
     # logLevel: info
     # this host's id for the mPCC, so a rename keeps its registration.  Unset,
     # a random one is made and kept in host-id next to this file.
