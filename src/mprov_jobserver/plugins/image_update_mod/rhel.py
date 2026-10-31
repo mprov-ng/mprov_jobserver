@@ -5,7 +5,9 @@ import json
 import shutil
 import re
 import shlex
+import tempfile
 
+from mprov_jobserver.plugins import base_image
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 from mprov_jobserver.log import get_logger
 
@@ -124,6 +126,75 @@ class UpdateImage(JobServerPlugin):
       return False
     return ca
 
+  def fail_job(self):
+    self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+    self.threadOk = False
+
+  def unpack_base_image(self, imgDir):
+    '''
+    Unpack the OS distro's base image (base_image_url) into a new image
+    tree (#92).  Returns True if the tree is built from a base image (just
+    unpacked, or by an earlier build: rebuilds update the tree in place),
+    False to build with dnf as before, or None if it failed (the job is
+    failed).  A tree from a base image is always installed into from inside
+    it: its rpm database is the base's, which the host's rpm may only be able
+    to read (a Rocky 9 sqlite database under the Rocky 8 job server).
+    '''
+    osdistro = self.imageDetails['osdistro']
+    url = (osdistro.get('base_image_url') or '').strip()
+    existing = os.path.lexists(imgDir + '/etc/os-release')
+    if existing:
+      marker = base_image.read_marker(imgDir)
+      if url:
+        if marker is None:
+          log.warning(f"image {self.imageDetails['slug']} was built with dnf, so its base image {url} isn't used; delete the image to rebuild it from the base image.")
+        elif marker.get('url') != url:
+          log.warning(f"image {self.imageDetails['slug']} was built from the base image {marker.get('url')}, not {url}; delete the image to rebuild it from the new one.")
+      return marker is not None
+    if not url:
+      return False
+    workdir = None
+    try:
+      sha256 = base_image.expected_sha256(osdistro.get('base_image_checksum'), url)
+      # scratch space on the image store, beside the image (not in it); a
+      # dot name, so it isn't taken for an image
+      workdir = tempfile.mkdtemp(prefix=f".{self.imageDetails['slug']}.base-", dir=self.imageDir)
+      archive = workdir + '/base-image'
+      got = base_image.download(url, archive)
+      if got != sha256:
+        raise base_image.BaseImageError(f"the base image {url} has sha256 {got}, not {sha256}.")
+      log.info(f"Unpacking the base image into {imgDir}")
+      base_image.unpack(archive, imgDir, workdir, osdistro.get('distArch') or 'x86_64')
+      base_image.write_marker(imgDir, url, sha256)
+    except (base_image.BaseImageError, OSError) as err:
+      log.error(f"unable to use the base image: {err}")
+      self.fail_job()
+      return None
+    finally:
+      if workdir is not None:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if not os.path.lexists(imgDir + '/etc/os-release'):
+      log.error(f"the base image {url} has no /etc/os-release, so it isn't an OS image.")
+      self.fail_job()
+      return None
+    return True
+
+  def strip_base_image(self, qimg):
+    '''
+    Remove what a base image brings that an mProv image mustn't have:
+    cloud-init, which would wait for a cloud datasource on every node, and
+    the base's own kernel, which the image's kernel and initramfs replace.
+    Returns False if a removal failed.
+    '''
+    for check, packages in (("rpm -q --quiet cloud-init", "cloud-init"),
+                            ("rpm -q --quiet kernel-core", "'kernel' 'kernel-core' 'kernel-modules*'")):
+      if os.system(f"chroot {qimg} {check}") == 0:
+        log.info(f"Removing the base image's {packages}")
+        if os.system(f"chroot {qimg} dnf -y remove --noautoremove {packages}"):
+          log.error(f"unable to remove the base image's {packages}.")
+          return False
+    return True
+
   def updateBootFiles(self):
     # update the dracut image one last time.
     imgDir = self.imageDir + '/' + self.imageDetails['slug']
@@ -152,6 +223,11 @@ class UpdateImage(JobServerPlugin):
     # would move every other plugin's working directory too (#129).  Every
     # path below is absolute.
     os.makedirs(imgDir, exist_ok=True)
+
+    # a new image from the distro's base image, if it has one (#92)
+    fromBase = self.unpack_base_image(imgDir)
+    if fromBase is None:
+      return
 #     print()
 #     if imageDetails['osdistro']['baserepo']['managed']:
 #       # locally managed repo, let's just generate a repo file and point it.
@@ -258,35 +334,10 @@ class UpdateImage(JobServerPlugin):
       self.threadOk = False
       return
 
-    # disable the stock repos an existing image already has; a new image has
-    # none yet, and asking dnf to disable a missing repo logs "Error:" (#211).
-    # Done again after the main install.
-    self.disable_stock_repos(imgDir, f"dnf -y --installroot={qimg} --releasever={ver} config-manager --disable")
-    # run a clean on yum, in the image only: a plain `dnf clean all` here
-    # wiped the job server's own dnf cache on every build (#164)
-    if os.system('dnf --installroot=' + qimg + ' -y clean all'):
-      log.error("unable to clear all dnf metadata.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
-    # install gpg keys for the distro into the installroot
-    log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"')
-    if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"'):
-      log.error("unable to generate image filesystem.")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return 
-    # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
-    # if os.system(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"'):
-    #   print("Error: unable to generate image filesystem.")
-    #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-    #   self.threadOk = False
-    #   return 
-      
-    # the chroot's dnf (the fallback below, and the package install after it)
-    # resolves the repos' hosts with the image's resolv.conf.  Without one,
-    # glibc asks 127.0.0.1, which only works on a job server running its own
-    # dnsmasq (#281).
+    # the chroot's dnf (a base image's installs; the dnf build's fallback and
+    # its package install) resolves the repos' hosts with the image's
+    # resolv.conf.  Without one, glibc asks 127.0.0.1, which only works on a
+    # job server running its own dnsmasq (#281).
     try:
       os.makedirs(f"{imgDir}/etc", exist_ok=True)
       shutil.copyfile("/etc/resolv.conf", f"{imgDir}/etc/resolv.conf")
@@ -296,18 +347,60 @@ class UpdateImage(JobServerPlugin):
       self.threadOk = False
       return
 
-    # build the filesystem.
-    log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-    if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
-      # if this fails, lets try something slightly different...
-      log.info(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
-      if os.system(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
-
-        log.error("unable to generate image filesystem.")
+    if fromBase:
+      # the base has dnf and its keys: install the rest from inside it.  Its
+      # stock repo files are switched off with the host's dnf, which has
+      # config-manager; a container base may not.
+      self.disable_stock_repos(imgDir, f"dnf -y --installroot={qimg} --releasever={ver} config-manager --disable")
+      if not self.strip_base_image(qimg):
+        self.fail_job()
+        return
+      # --allowerasing: a container base has the cut-down packages
+      # (curl-minimal, coreutils-single) that Minimal Install's full ones replace
+      log.info(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --allowerasing groupinstall \'Minimal Install\'')
+      if os.system(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --allowerasing groupinstall \'Minimal Install\''):
+        log.error("unable to install Minimal Install into the base image.")
+        self.fail_job()
+        return
+    else:
+      # disable the stock repos an existing image already has; a new image has
+      # none yet, and asking dnf to disable a missing repo logs "Error:" (#211).
+      # Done again after the main install.
+      self.disable_stock_repos(imgDir, f"dnf -y --installroot={qimg} --releasever={ver} config-manager --disable")
+      # run a clean on yum, in the image only: a plain `dnf clean all` here
+      # wiped the job server's own dnf cache on every build (#164)
+      if os.system('dnf --installroot=' + qimg + ' -y clean all'):
+        log.error("unable to clear all dnf metadata.")
         self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
         self.threadOk = False
         return
+      # install gpg keys for the distro into the installroot
+      log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"')
+      if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck install "*-gpg-keys"'):
+        log.error("unable to generate image filesystem.")
+        self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+        self.threadOk = False
+        return 
+      # print(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"')
+      # if os.system(f'chroot {imgDir} rpm --import "/etc/pki/rpm-gpg/*"'):
+      #   print("Error: unable to generate image filesystem.")
+      #   self.js.update_job_status(self.jobModule, 3, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+      #   self.threadOk = False
+      #   return 
+      
+      # build the filesystem.
+      log.info('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+      if os.system('dnf -y --installroot=' + qimg + ' --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+        # if this fails, lets try something slightly different...
+        log.info(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\'')
+        if os.system(f'chroot {qimg} dnf -y --releasever=' + ver  + ' --nogpgcheck groupinstall \'Minimal Install\''):
+
+          log.error("unable to generate image filesystem.")
+          self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          self.threadOk = False
+          return
     
+
     # ca-certificates is in now: add the mPCC's CA to the image's bundle,
     # which the job server and node scripts in the image use (#267)
     if caBundle and os.system(f"chroot {qimg} update-ca-trust"):
@@ -404,3 +497,13 @@ class UpdateImage(JobServerPlugin):
       self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
       self.threadOk = False
       return
+
+    # last, as package scriptlets (systemd's) write a machine-id: an image
+    # from a base image gets an empty one and an empty fstab on every build
+    if base_image.read_marker(imgDir) is not None:
+      try:
+        base_image.reset_identity(imgDir)
+      except OSError as err:
+        log.error(f"unable to reset the image's machine-id and fstab: {err}")
+        self.fail_job()
+        return
