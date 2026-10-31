@@ -358,6 +358,15 @@ class JobServer ():
       if(job['status'] == 3) or (job['status'] == 4):
         continue
 
+      if status == 2 and 'job-claim' in getattr(self, 'features', ()):
+        # claim it atomically: of job servers claiming the same pending job,
+        # the mPCC lets exactly one win (mprov_control_center#296).  The PATCH
+        # below was last-writer-wins, so two job servers could both run it
+        # (#112).
+        if self.claim_job(job_module, job):
+          updateCount += 1
+        continue
+
       data['id'] = job['id']
       data['jobserver'] = self.id
       # print(data)
@@ -375,6 +384,28 @@ class JobServer ():
 
     #print(job_module + " " + str(status))
     pass
+
+  def claim_job(self, job_module, job):
+    '''
+    Claim a pending job for this job server with POST jobs/<id>/claim/.
+    The mPCC sets it RUNNING with our id and its start time in the same
+    step.  Returns True if we got it, False if another job server did, it
+    isn't pending any more, or the claim failed.
+    '''
+    response = self.session.post(self.mprovURL + 'jobs/' + str(job['id']) + '/claim/', data=json.dumps({'jobserver': self.id}))
+    if response.status_code == 200:
+      log_job(job_module, job, 2)
+      return True
+    if response.status_code == 409:
+      # someone else has it, or it moved on: nothing for us to do
+      log.debug(f"job {job['id']} {job_module} was claimed elsewhere or isn't pending; skipping it.")
+      return False
+    try:
+      detail = response.json()
+    except ValueError:
+      detail = response.text
+    log.error(f"the mPCC refused our claim of job {job['id']} {job_module} (HTTP {response.status_code}): {detail}")
+    return False
 
   def fail_orphaned_jobs(self, modules, reason):
     """ Fail the jobs the mPCC has as RUNNING on this job server, for the given
