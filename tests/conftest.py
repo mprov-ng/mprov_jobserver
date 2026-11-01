@@ -70,6 +70,8 @@ class FakeSession:
     self.write_routes = {}
     self.writes = []
     self.headers = {}
+    # as a requests.Session has them, for the version check (#287)
+    self.hooks = {"response": []}
     # PATCHes alone, as (path, data)
     self.patches = []
 

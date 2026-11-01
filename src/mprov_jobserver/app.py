@@ -20,6 +20,7 @@ import ipaddress
 import psutil
 from requests.adapters import HTTPAdapter
 from mprov_jobserver.log import get_logger, configure as log_configure
+from mprov_jobserver.version import install as version_install
 
 log = get_logger(__name__)
 
@@ -673,6 +674,9 @@ class JobServer ():
       session = requests.Session()
       session.headers = self.session.headers
       session.verify = self.session.verify
+      # hooks aren't copied with the headers, so the version check has to
+      # be put on this session too (#287)
+      version_install(session)
       adapter = SourceAddressAdapter(address)
       session.mount('http://', adapter)
       session.mount('https://', adapter)
@@ -762,6 +766,7 @@ class JobServer ():
       'Authorization': 'Api-Key ' + self.apikey,
       'Content-Type': 'application/json'
       })
+    version_install(self.session)
 
     # test connectivity
     try:

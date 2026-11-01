@@ -15,7 +15,7 @@ import requests
 
 import mprov_jobserver.app as app
 import mprov_jobserver.script as script_module
-from mprov_jobserver import tls
+from mprov_jobserver import tls, version
 from mprov_jobserver.app import JobServer
 from mprov_jobserver.script import MProvScript
 from tools import run
@@ -69,6 +69,9 @@ def mpcc(tmp_path_factory):
     def do_GET(self):
       self.send_response(200)
       self.send_header("Content-Length", "2")
+      # an mPCC on our own version, so these tests fail on the certificate
+      # and not on the version check (#287)
+      self.send_header(version.VERSION_HEADER, version.api_version())
       self.end_headers()
       self.wfile.write(b"ok")
     def log_message(self, *args):
