@@ -193,24 +193,52 @@ def test_the_job_servers_session_sends_and_checks_the_version(monkeypatch):
   assert version.check_response in server.session.hooks["response"]
 
 
-def test_a_scripts_session_sends_and_checks_the_version_too(monkeypatch):
-  """ script.py has its own startSession(), easy to miss. """
-  # startSession() reads the address off the live connection (#160), so the
-  # reply has to carry a real connected socket.
+def started_script(monkeypatch, script_version=None):
+  """
+  An MProvScript that has run startSession().  startSession() reads the
+  address off the live connection (#160), so the reply has to carry a real
+  connected socket.
+  """
   listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   listener.bind(("127.0.0.1", 0))
   listener.listen(1)
   client = socket.create_connection(listener.getsockname())
   try:
     script = start_session(MProvScript.__new__(MProvScript), monkeypatch)
+    script.script_version = script_version
     connected = types.SimpleNamespace(status_code=200, raw=client)
     monkeypatch.setattr(script.session, "get", lambda *a, **k: connected)
     assert script.startSession() is True
-    assert version.VERSION_HEADER in script.session.headers
-    assert version.check_response in script.session.hooks["response"]
+    return script
   finally:
     client.close()
     listener.close()
+
+
+def test_a_script_reports_the_version_it_sets(monkeypatch):
+  script = started_script(monkeypatch, script_version="0.6")
+  assert script.session.headers[version.VERSION_HEADER] == "0.6"
+
+
+def test_a_script_that_sets_no_version_sends_none(monkeypatch):
+  script = started_script(monkeypatch)
+  assert version.VERSION_HEADER not in script.session.headers
+
+
+@pytest.mark.parametrize("script_version", ["0.6", None])
+def test_a_script_never_refuses_the_mPCCs_version(monkeypatch, script_version):
+  """
+  Scripts are baked into images that can't be rebuilt with every mPCC
+  release, so an mPCC on a newer version has to be able to answer them: the
+  mPCC's exemption list is useless if the script refuses the reply itself.
+  """
+  script = started_script(monkeypatch, script_version=script_version)
+  assert script.session.hooks["response"] == []
+  # the job server's own check would refuse this reply; the script takes it
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  response = reply({version.VERSION_HEADER: "0.9"})
+  for hook in script.session.hooks["response"]:
+    response = hook(response)
 
 
 def test_a_per_address_session_checks_the_version(monkeypatch):

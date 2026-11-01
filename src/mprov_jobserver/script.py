@@ -4,7 +4,7 @@ import socket
 from mprov_jobserver.tls import ca_bundle
 import yaml, os, sys, time
 from mprov_jobserver.log import get_logger
-from mprov_jobserver.version import install as version_install
+from mprov_jobserver.version import VERSION_HEADER
 
 log = get_logger(__name__)
 class MProvScript():
@@ -25,6 +25,9 @@ class MProvScript():
   session = requests.Session()
   ip_address = None
   configfile = "/etc/mprov/script-runner.yaml"
+  # A subclass sets this to its own version to report it to the mPCC in the
+  # mProv-Version header (#452).  Left unset, no version is sent.
+  script_version = None
   def __init__(self, **kwargs):
     # load our config
     self.load_config()
@@ -72,7 +75,12 @@ class MProvScript():
       'Authorization': 'Api-Key ' + self.apikey,
       'Content-Type': 'application/json'
       })
-    version_install(self.session)
+    # A script reports its own version for the mPCC's logs and exemption
+    # list, and doesn't check the mPCC's in return: scripts are baked into
+    # images that can't be rebuilt with every mPCC release, so an mPCC on a
+    # newer version has to be able to answer them (#452).
+    if self.script_version:
+      self.session.headers.update({VERSION_HEADER: self.script_version})
 
     # connect to the mPCC
     try:
