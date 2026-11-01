@@ -21,4 +21,7 @@ die()
 
 version_greater_equal "${pythonVersion}" 3.8.0 ||  die "Error: need python 3.8 or above"
 
-$pythonBinary -m mprov_jobserver.main $@
+# exec, so the job server replaces this script instead of running under it:
+# a SIGTERM sent here reaches the job server itself, which handles it, rather
+# than killing the script and orphaning the job server (#294).
+exec "$pythonBinary" -m mprov_jobserver.main "$@"
