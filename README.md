@@ -130,6 +130,23 @@ only for the exact value `1`, while the job server also accepts `true`,
 check and leaves the mPCC's on, which is rarely what anyone means. `1` does
 the same thing on both sides.
 
+How to set it depends on how the job server runs:
+
+- **In the container**, put it in the environment, e.g. in `stack.env`. The
+  entrypoint is `start_server.sh`, which `exec`s the job server, so the job
+  server inherits whatever the container was given.
+- **Under systemd**, an environment variable set in a shell doesn't reach
+  the service: `mprov_jobserver.service` sets none of its own, and systemd
+  doesn't pass the invoking environment on. Put it in the unit instead:
+
+  ```
+  # systemctl edit mprov_jobserver
+  [Service]
+  Environment=MPROV_SKIP_VERSION_CHECK=1
+  ```
+
+  and take it out again afterwards; it isn't meant for production.
+
 
 ## Arguments
 Job server takes a few command line arguments.  Global arguments are
