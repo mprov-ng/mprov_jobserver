@@ -59,7 +59,6 @@ COPY start_server.sh /
 RUN chmod 755 /start_server.sh
 
 COPY jobserver.yaml.j2 /etc/mprov/
-COPY mprov_jobserver.conf /etc/systemd/system/mprov_jobserver.service.d/mprov_jobserver.conf
 
 # # setup for a systemd container
 # RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == \
@@ -94,7 +93,11 @@ EXPOSE 53/udp
 EXPOSE 8080/tcp
 
 # CMD [ "/usr/sbin/init" ]
-ENTRYPOINT ["/start_server.sh", "${MPROV_ARGS}"]
+# Exec form, so start_server.sh is PID 1 and the job server it execs gets
+# the container's signals (#294).  No argument: exec form does no shell
+# expansion, so "${MPROV_ARGS}" was passed through as that literal string;
+# start_server.sh reads MPROV_ARGS from the environment itself.
+ENTRYPOINT ["/start_server.sh"]
 #STOPSIGNAL SIGRTMIN+3
 #CMD [ "/sbin/init" ] 
 #["/bin/bash", "-c", "exec /sbin/init --log-target=journal"]
