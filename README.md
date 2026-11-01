@@ -105,6 +105,32 @@ After you have setup the `/etc/mprov/jobserver.yaml` you can enable the jobserve
 The jobserver should connect to the mPCC and start a repo sync which is required before you can update any images.
 
 
+## API version lock
+The job server and the mPCC are locked to the same API version. The job
+server sends its own `major.minor` to the mPCC in an `mProv-Version` header,
+and refuses any reply that doesn't carry the same one — including a reply
+from an mPCC too old to send the header at all. A job server and an mPCC
+from different releases fail loudly instead of misbehaving subtly.
+
+There is no support for running a mixed set of versions: the mPCC, the job
+servers and mash are upgraded together, in one window. A job server pointed
+at an mPCC on another version logs the mismatch and retries, and never
+registers.
+
+### MPROV_SKIP_VERSION_CHECK
+Setting `MPROV_SKIP_VERSION_CHECK=1` turns the check off, for development
+and CI where a work-in-progress branch of one component is run against
+another. Never set it in production.
+
+**Set it to exactly `1`.** The mPCC has an environment variable of the same
+name, and the two read it slightly differently: the mPCC turns its check off
+only for the exact value `1`, while the job server also accepts `true`,
+`yes` and anything else that isn't empty, `0`, `false` or `no`. So
+`MPROV_SKIP_VERSION_CHECK=true` switches off the job server's half of the
+check and leaves the mPCC's on, which is rarely what anyone means. `1` does
+the same thing on both sides.
+
+
 ## Arguments
 Job server takes a few command line arguments.  Global arguments are
 
