@@ -9,24 +9,109 @@ The mProv Job server is the work horse behind the scenes of the mPCC.  The job s
 
 ## Requirements
 
-- MUST BE INSTALLED AS ROOT 
-- The mProv Job server requires python 3.8 and above.  
+- A container runtime. We recommend docker-ce.
+- A host the job server can serve images and repos from, with room for them
+  under `/export`.
+- Root, or a user that can run privileged containers: the job server manages
+  services such as dnsmasq and builds image trees.
 
 ## Installation
-The best way to install the job server is to run:
+
+The job server runs as a container. The image is published to GitHub's
+container registry:
+
 ```
-wget https://raw.githubusercontent.com/mprov-ng/mprov_jobserver/main/install_mprov_jobserver.sh -O - | bash
+ghcr.io/mprov-ng/mprov-jobserver:latest    # the current release
+ghcr.io/mprov-ng/mprov-jobserver:v0.6.0    # a specific release, to pin
+ghcr.io/mprov-ng/mprov-jobserver:dev       # built from main, for testing
 ```
 
-This will download and run the jobserver installation script from this repo.
+The supported way to run it is with
+[mprov-compose](https://github.com/mprov-ng/mprov-compose), which brings up
+the mPCC, its database and a job server together on one host:
 
+```
+git clone https://github.com/mprov-ng/mprov-compose.git
+cd mprov-compose
+cp stack.env.dist .env
+$EDITOR .env
+docker compose --env-file .env up -d
+```
+
+See that repository for the full instructions, including the database
+passwords it refuses to start without and how to find the mPCC's generated
+`admin` password.
+
+To run a job server on its own — against an mPCC somewhere else — run the
+image with the same environment described below. The compose file in
+mprov-compose is the reference for what the container needs: host
+networking, `/etc/mprov` on a volume so the configuration and API key
+persist, `/export` for images and repo mirrors, `/etc/genders`, and cgroup
+access.
+
+> **Installing on bare metal is not supported.** The package is still on
+> PyPI and `pip install mprov_jobserver` works, but nothing here documents
+> or tests running the job server as a system service.
+
+### The PyPI package is still used — by nodes, not by job servers
+
+Don't mistake "the job server runs in a container" for "the package is
+obsolete". Every system image built by `image-update` installs
+`mprov_jobserver` from PyPI inside the image:
+
+```
+chroot <image> pip3 --no-cache-dir install --upgrade mprov_jobserver
+```
+
+That is how a provisioned node gets `script-runner` and the `MProvScript`
+class that the node scripts in
+[mprov_scripts](https://github.com/mprov-ng/mprov_scripts) are built on.
+Nodes are not containers, so the package stays published and supported for
+that use.
 
 ## Setup
-You will need to create an API key in the mPCC for the job server.  Once you have the api key, you will want to add that key to the `/etc/mprov/jobserver.yaml` file.  There should be an example in there already, it will not work.  You must replace it.  While you are in there, you will want to setup the `mprovURL` entry to point to your mPCC instance.  After that, you can enable/disable whatever jobmodules you want this job server to run by uncomment/commenting the lines that describe the jobmodules.
 
-do not use localhost use IP or internal name 
+Create an API key in the mPCC for the job server, then give the container
+its settings **in the environment** — not by editing a configuration file.
+On start-up the container renders `/etc/mprov/jobserver.yaml` from these:
 
-Here is an example for a good first jobserver config:
+| variable | what it sets |
+|---|---|
+| `MPROV_URL` | the mPCC's URL, e.g. `http://10.0.0.1`. Use an address or an internal name, **not** `localhost` |
+| `MPROV_APIKEY` | the mPCC API key. In a full mprov-compose stack this is generated and filled in for you |
+| `MPROV_ADDRESS` | this job server's address, as the nodes reach it |
+| `MPROV_MODS` | the job modules to run, space separated — see *Available job modules* |
+| `MPROV_ARGS` | arguments for the job server itself (default `-c /etc/mprov/jobserver.yaml`) |
+| `TZ` | the container's time zone |
+
+With mprov-compose these live in `.env`, copied from `stack.env.dist`.
+
+**Don't edit `/etc/mprov/jobserver.yaml` in a container.** It is written
+from a template on every start, so your changes are gone at the next
+restart.
+
+- **Per-module settings** go in the plugin files in `/etc/mprov/plugins/`,
+  which are on the volume, are not regenerated, and are pulled in by the
+  `!include` at the end of the generated file.
+- **Global settings with no environment variable of their own** —
+  `caBundle`, `hostId`, `logLevel`, `logTimestamps`, `addresses` — have
+  nowhere to go in the generated file. Put them in a file of your own on the
+  volume, say `/etc/mprov/jobserver-local.yaml`, and point the job server at
+  it instead:
+
+  ```
+  MPROV_ARGS=-c /etc/mprov/jobserver-local.yaml
+  ```
+
+  That file is yours, so it must carry the whole `global:` section,
+  including `mprovURL`, `apikey`, `myaddress` and `jobmodules` — the
+  environment variables above no longer apply once you stop using the
+  generated file. Copy the generated one as a starting point.
+
+Here is the whole `global:` section with everything it takes. The container
+generates only the first few — `mprovURL`, `apikey`, `heartbeatInterval`,
+`myaddress` and `jobmodules` — so the commented-out ones below are the ones
+that need a config file of your own, as above:
 ```
 - global:
     # This points to your mprov control center instance.
@@ -44,8 +129,9 @@ Here is an example for a good first jobserver config:
     # the CA's certificate file.  Unset, the OS's CA bundle is used.
     # caBundle: '/etc/mprov/mpcc-ca.pem'
     # how much to log: error, warning, info (the default) or debug.  Each line is
-    # tagged [E], [W], [I] or [D] and the module; under systemd, journald also
-    # gets the level, so `journalctl -p warning -u mprov_jobserver` works.
+    # tagged [E], [W], [I] or [D] and the module, and read with
+    # `docker compose logs jobserver`.  Where stdout is journald's, the level
+    # is recorded as the line's PRIORITY too, so `journalctl -p warning` works.
     # mprov-webserver logs node boots under "provisioning": a node's kernel
     # request, its image download starting, and the download done (with its
     # size and time) or failed, e.g. "[I] provisioning: c01 (10.0.0.21) got
@@ -97,12 +183,23 @@ names in the `jobmodules:` config list (and the `-m` argument):
 - `repo-update` — mirrors the repos defined in mPCC to disk (reposync).
 - `script-runner` — runs image-gen and post-boot scripts against a system image or the local system (see *script-runner args* below).
 
-## Post Setup
-After you have setup the `/etc/mprov/jobserver.yaml` you can enable the jobserver with this command:
+## Running it
+
+With mprov-compose, from that checkout:
+
 ```
-# systemctl enable --now mprov_jobserver
+docker compose up -d          # start the stack
+docker compose logs -f jobserver
+docker compose restart jobserver   # after changing .env
+docker compose down           # stop it
 ```
-The jobserver should connect to the mPCC and start a repo sync which is required before you can update any images.
+
+The job server connects to the mPCC and starts a repo sync, which has to
+finish before any image can be updated. Watch the log for that first run.
+
+A job server that can't reach the mPCC, or that is on a different API
+version to it, says so once and keeps retrying — it won't register until
+the mPCC is there and on a matching version. See *API version lock* below.
 
 
 ## API version lock
@@ -130,22 +227,13 @@ only for the exact value `1`, while the job server also accepts `true`,
 check and leaves the mPCC's on, which is rarely what anyone means. `1` does
 the same thing on both sides.
 
-How to set it depends on how the job server runs:
+Set it in the container's environment, e.g. in `.env` with mprov-compose,
+and take it out again afterwards. The entrypoint `exec`s the job server, so
+it inherits whatever the container was given.
 
-- **In the container**, put it in the environment, e.g. in `stack.env`. The
-  entrypoint is `start_server.sh`, which `exec`s the job server, so the job
-  server inherits whatever the container was given.
-- **Under systemd**, an environment variable set in a shell doesn't reach
-  the service: `mprov_jobserver.service` sets none of its own, and systemd
-  doesn't pass the invoking environment on. Put it in the unit instead:
-
-  ```
-  # systemctl edit mprov_jobserver
-  [Service]
-  Environment=MPROV_SKIP_VERSION_CHECK=1
-  ```
-
-  and take it out again afterwards; it isn't meant for production.
+Running the package outside a container instead? Then it reads the variable
+from its own process environment, which a service manager won't pass on
+from your shell — you'd have to set it for the process itself.
 
 
 ## Arguments
