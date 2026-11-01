@@ -753,7 +753,7 @@ class JobServer ():
       session.verify = self.session.verify
       # hooks aren't copied with the headers, so the version check has to
       # be put on this session too (#287)
-      version_install(session)
+      version_install(session, enforce=self.register)
       adapter = SourceAddressAdapter(address)
       session.mount('http://', adapter)
       session.mount('https://', adapter)
@@ -843,7 +843,11 @@ class JobServer ():
       'Authorization': 'Api-Key ' + self.apikey,
       'Content-Type': 'application/json'
       })
-    version_install(self.session)
+    # A script runner (-d, and -m) is a short-lived client of whatever mPCC
+    # the site has, not a job server registering with it, so a version
+    # mismatch is a warning there rather than a refusal: refusing hangs it
+    # instead of failing it (#303).
+    version_install(self.session, enforce=self.register)
 
     # test connectivity
     try:

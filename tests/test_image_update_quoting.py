@@ -13,6 +13,7 @@ import pytest
 from test_image_update import fake_wget, images, plugin, image, job_states, pending_build  # noqa: F401
 # the real subprocess.run, for the test that runs script-runner.sh
 from test_image_update import _run
+from mprov_jobserver.version import pip_requirement
 
 
 def argv(cmd):
@@ -62,7 +63,9 @@ def test_an_image_path_with_a_space_stays_one_argument(js, plugin, images, comma
   installs = [argv(cmd) for cmd in commands.matching("--installroot=")]
   assert installs and all(f"--installroot={img}" in args for args in installs)
   chroots = [argv(cmd) for cmd in commands.matching("chroot ")]
-  assert any("mprov_jobserver" in args for args in chroots)
+  # the pinned requirement has a < in it, so it has to survive as one
+  # argument rather than becoming a shell redirection (#303)
+  assert any(pip_requirement() in args for args in chroots)
   assert chroots and all(args[0] == "chroot" and args[1] == img for args in chroots)
   # image_update's own commands: resolv.conf, script-runner.sh, the old .img
   [cp] = commands.matching("/etc/resolv.conf")

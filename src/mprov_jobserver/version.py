@@ -67,38 +67,105 @@ def skip_version_check():
   return os.environ.get(SKIP_CHECK_ENV, '').strip().lower() not in ('', '0', 'false', 'no')
 
 
-def check_response(response, *args, **kwargs):
+def _mismatch(response):
   '''
-  A requests response hook, so every reply from the mPCC is checked wherever
-  the call was made from, rather than each caller checking for itself.
+  The (ours, theirs) API versions when this reply doesn't match ours, or
+  None when it does (or when the check is turned off).
   '''
   if skip_version_check():
-    return response
+    return None
   theirs = response.headers.get(VERSION_HEADER)
   if theirs is not None:
     theirs = theirs.strip()
   ours = api_version()
   if theirs == ours:
+    return None
+  return ours, theirs
+
+
+def _spoken(theirs):
+  # An mPCC that sends no header is too old to be version-locked at all,
+  # which is as much a mismatch as the wrong version (#452).
+  return f"speaks API version {theirs}" if theirs else "sends no API version"
+
+
+def _first_time(ours, theirs):
+  ''' True once per (ours, theirs) pair, so a wrong-version mPCC doesn't
+  fill the log with a line per request. '''
+  if (ours, theirs) in _reported:
+    return False
+  _reported.add((ours, theirs))
+  return True
+
+
+def check_response(response, *args, **kwargs):
+  '''
+  A requests response hook, so every reply from the mPCC is checked wherever
+  the call was made from, rather than each caller checking for itself.
+  '''
+  mismatch = _mismatch(response)
+  if mismatch is None:
     return response
-  if (ours, theirs) not in _reported:
-    _reported.add((ours, theirs))
-    # An mPCC that sends no header is too old to be version-locked at all,
-    # which is as much a mismatch as the wrong version (#452).
-    spoken = f"speaks API version {theirs}" if theirs else "sends no API version"
+  ours, theirs = mismatch
+  if _first_time(ours, theirs):
     log.error(
-      f"the mPCC at {response.url} {spoken}, this job server speaks {ours}; "
+      f"the mPCC at {response.url} {_spoken(theirs)}, this job server speaks {ours}; "
       f"upgrade them together, or set {SKIP_CHECK_ENV}=1 for a dev or CI run."
     )
   raise VersionMismatch(
     f"mPCC API version {theirs or 'missing'}, expected {ours}", response=response)
 
 
-def install(session):
+def warn_response(response, *args, **kwargs):
+  '''
+  The same check for a script runner (-d): say so once and carry on (#303).
+
+  A runner is a short-lived client of whatever mPCC the site already has,
+  not a job server registering with it, and it is installed into system
+  images by image_update.  Refusing its replies doesn't fail it, it hangs
+  it: runonce only clears self.running after the job modules run, which
+  needs a session.  So an image build against an older mPCC never finishes,
+  and a node booted from such an image polls forever instead of running its
+  post-boot scripts.
+  '''
+  mismatch = _mismatch(response)
+  if mismatch is None:
+    return response
+  ours, theirs = mismatch
+  if _first_time(ours, theirs):
+    log.warning(
+      f"the mPCC at {response.url} {_spoken(theirs)}, this script runner speaks {ours}; "
+      f"carrying on, but they should be upgraded together."
+    )
+  return response
+
+
+def pip_requirement():
+  '''
+  What an image build installs into the image it is building (#303): a job
+  server that speaks the same API version this one does, rather than
+  whatever is newest on PyPI.  The bound comes from our own version, so it
+  doesn't need editing at each release.
+  '''
+  ours = api_version()
+  if ours == '0.0':
+    # we don't know our own version; pinning to 0.0 would install nothing
+    return 'mprov_jobserver'
+  major, minor = ours.split('.')
+  return f'mprov_jobserver>={major}.{minor},<{major}.{int(minor) + 1}'
+
+
+def install(session, enforce=True):
   ''' Send our version on a session's requests, and check the mPCC's on its
   replies.  Hooks aren't inherited when a session is copied, so every
   session that talks to the mPCC has to be passed through here (#114's
-  per-address sessions included). '''
+  per-address sessions included).
+
+  enforce=False warns instead of refusing, for a script runner (#303). '''
   session.headers.update({VERSION_HEADER: api_version()})
-  if check_response not in session.hooks['response']:
-    session.hooks['response'].append(check_response)
+  hook, other = (check_response, warn_response) if enforce else (warn_response, check_response)
+  if other in session.hooks['response']:
+    session.hooks['response'].remove(other)
+  if hook not in session.hooks['response']:
+    session.hooks['response'].append(hook)
   return session

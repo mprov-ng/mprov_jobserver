@@ -23,6 +23,7 @@ import mprov_jobserver.app as app
 from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
+from mprov_jobserver.version import pip_requirement
 
 # Bound at import, before the no_processes fixture stubs subprocess.run out,
 # for the test that runs the rendered script-runner.sh.
@@ -562,11 +563,23 @@ def test_unknown_ostype_fails_the_job(js, plugin, commands):
 
 
 def test_jobserver_install_failure_fails_the_job(js, plugin, commands):
-  commands.fail = ["pip3 --no-cache-dir install --upgrade mprov_jobserver"]
+  commands.fail = ["pip3 --no-cache-dir install --upgrade"]
   pending_build(js)
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9)]
   assert not commands.matching("tar c")
+
+
+def test_the_image_gets_a_runner_of_our_own_api_version(js, plugin, commands):
+  """
+  An unpinned --upgrade put whatever was newest on PyPI into the image, so
+  an image built against an older mPCC got a runner that refused to talk to
+  it and the build never finished (#303).
+  """
+  pending_build(js)
+  plugin.handle_jobs()
+  [install] = commands.matching("pip3 --no-cache-dir install")
+  assert f"--upgrade {shlex.quote(pip_requirement())}" in install
 
 
 def test_boot_files_failure_fails_the_job_and_skips_packing(js, plugin, commands, monkeypatch):
