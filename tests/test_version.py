@@ -252,3 +252,95 @@ def test_a_per_address_session_checks_the_version(monkeypatch):
   assert session is not server.session
   assert version.VERSION_HEADER in session.headers
   assert version.check_response in session.hooks["response"]
+
+
+# the script runner (#303): warns instead of refusing
+
+def test_a_script_runner_is_not_refused_a_mismatched_reply(monkeypatch):
+  """
+  image_update installs a job server into every image it builds and runs it
+  with -d; refusing the reply there hangs the build rather than failing it.
+  """
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  response = reply({version.VERSION_HEADER: "0.2"})
+  assert version.warn_response(response) is response
+
+
+def test_a_script_runner_is_not_refused_an_mPCC_with_no_version(monkeypatch):
+  """ The case sites actually hit: a pre-0.6 mPCC sends no header at all. """
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  response = reply()
+  assert version.warn_response(response) is response
+
+
+def test_a_script_runner_says_so_once_per_pair(monkeypatch, caplog):
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  for _ in range(3):
+    version.warn_response(reply())
+  said = [r for r in caplog.records if "sends no API version" in r.getMessage()]
+  assert len(said) == 1
+  assert said[0].levelname == "WARNING"
+
+
+def test_a_matching_mPCC_says_nothing_to_a_script_runner(monkeypatch, caplog):
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  version.warn_response(reply({version.VERSION_HEADER: "0.1"}))
+  assert caplog.records == []
+
+
+def test_a_script_runner_still_sends_its_own_version(monkeypatch):
+  monkeypatch.setattr(version, "api_version", lambda *a: "0.1")
+  session = version.install(requests.Session(), enforce=False)
+  assert session.headers[version.VERSION_HEADER] == "0.1"
+  assert version.warn_response in session.hooks["response"]
+  assert version.check_response not in session.hooks["response"]
+
+
+def test_installing_without_enforcement_replaces_the_refusing_hook():
+  session = version.install(requests.Session())
+  version.install(session, enforce=False)
+  assert session.hooks["response"] == [version.warn_response]
+
+
+def test_installing_twice_without_enforcement_doesnt_warn_twice():
+  session = requests.Session()
+  version.install(session, enforce=False)
+  version.install(session, enforce=False)
+  assert session.hooks["response"].count(version.warn_response) == 1
+
+
+def test_a_job_server_that_registers_still_refuses(monkeypatch):
+  server = start_session(JobServer.__new__(JobServer), monkeypatch)
+  server.register = True
+  server.startSession()
+  assert version.check_response in server.session.hooks["response"]
+  assert version.warn_response not in server.session.hooks["response"]
+
+
+def test_a_script_runner_session_warns_instead(monkeypatch):
+  """ -d (and -m) set register = False before startSession() runs. """
+  server = start_session(JobServer.__new__(JobServer), monkeypatch)
+  server.register = False
+  server.startSession()
+  assert version.warn_response in server.session.hooks["response"]
+  assert version.check_response not in server.session.hooks["response"]
+
+
+# pip_requirement(): what an image build installs into the image
+
+@pytest.mark.parametrize("ours,expected", [
+  ("0.6.0", "mprov_jobserver>=0.6,<0.7"),
+  ("0.6.1.dev0", "mprov_jobserver>=0.6,<0.7"),
+  ("0.9.4", "mprov_jobserver>=0.9,<0.10"),
+  ("1.0.0", "mprov_jobserver>=1.0,<1.1"),
+])
+def test_an_image_gets_a_runner_of_our_own_api_version(monkeypatch, ours, expected):
+  monkeypatch.setattr(version, "jobserver_version", lambda: ours)
+  assert version.pip_requirement() == expected
+
+
+def test_an_unknown_version_doesnt_pin_the_image_to_nothing(monkeypatch):
+  """ 0.0 means we couldn't read our own version; >=0.0,<0.1 would install
+  nothing at all, which is worse than the unpinned install it replaces. """
+  monkeypatch.setattr(version, "jobserver_version", lambda: "not-a-version")
+  assert version.pip_requirement() == "mprov_jobserver"

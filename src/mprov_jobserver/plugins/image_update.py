@@ -18,6 +18,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from os.path import dirname, basename, isfile, join
 import glob
 from mprov_jobserver.log import get_logger
+from mprov_jobserver.version import pip_requirement
 
 log = get_logger(__name__)
 
@@ -476,7 +477,12 @@ class image_update(JobServerPlugin):
         qimg = shlex.quote(imgDir)
         # copy in the system resolv.conf
         os.system(f"/bin/cp -f /etc/resolv.conf {qimg}/etc/resolv.conf")
-        if os.system(f"chroot {qimg} pip3 --no-cache-dir install --upgrade mprov_jobserver"):
+        # pin what goes into the image to a job server that speaks the same
+        # API version we do, rather than whatever is newest on PyPI: an
+        # unpinned --upgrade put a 0.6 runner into images built against
+        # older mPCCs, and those builds never finished (#303)
+        requirement = shlex.quote(pip_requirement())
+        if os.system(f"chroot {qimg} pip3 --no-cache-dir install --upgrade {requirement}"):
           log.error("Unable to install mprov_jobserver python module.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
