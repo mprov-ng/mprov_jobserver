@@ -34,6 +34,8 @@ Caveat: in the `layerMerge()` fallback, group-level `dependsOn` entries are appe
 - starts an API-key `requests.Session` against the mPCC and records the host's local `ip_address`,
 - expects subclasses to override `run()`.
 
+A subclass can set `script_version` to report its own version to the mPCC in the `mProv-Version` header (#452). Unlike the job server itself, a script never *checks* the mPCC's version — scripts are baked into images that can't be rebuilt with every mPCC release, so the mPCC must stay able to answer them (see [Architecture Overview](../architecture/overview.md) for the API version lock the job server does enforce).
+
 Scripts can therefore call back into mPCC endpoints using the same session/auth pattern as the [Plugin Framework](../architecture/plugin-framework.md) plugins.
 
 ## Where to start when changing this area

@@ -28,10 +28,12 @@ The `JobServer` class (`src/mprov_jobserver/app.py`) authenticates to the mPCC w
 
 ## Quickstart: running it
 
-1. Install (RHEL-family, as root, Python ≥ 3.8):
-   `wget https://raw.githubusercontent.com/mprov-ng/mprov_jobserver/main/install_mprov_jobserver.sh -O - | bash`
-2. Create an API key in the mPCC and edit `/etc/mprov/jobserver.yaml`: set `mprovURL` (use an IP or internal name, not localhost), `apikey`, `myaddress`, and enable the `jobmodules` you want. For an https mPCC whose certificate comes from a site or self-signed CA, set `caBundle` to that CA's file (otherwise the OS CA bundle is used); `logLevel` and `hostId` are optional globals. A template is copied to `/etc/mprov/` on first run (`src/mprov_jobserver/main.py`).
-3. `systemctl enable --now mprov_jobserver`. On first connect the job server starts a repo sync, which is required before images can be built.
+The job server runs as a container (`ghcr.io/mprov-ng/mprov-jobserver`); bare-metal installation is no longer supported or documented (`README.md`, #300). The supported way is [mprov-compose](https://github.com/mprov-ng/mprov-compose), which brings up the mPCC, its database, and a job server together; run the image alone against a remote mPCC with the same environment.
+
+1. Give the container its settings **in the environment**, not by editing a config file: `MPROV_URL` (mPCC URL — an IP or internal name, not localhost), `MPROV_APIKEY`, `MPROV_ADDRESS`, `MPROV_MODS` (space-separated module list), `MPROV_ARGS`, `TZ`. `/etc/mprov/jobserver.yaml` is rendered from these on every start, so edits to it don't survive a restart; per-module settings go in `/etc/mprov/plugins/` and globals with no env var (e.g. `caBundle`, `hostId`, `logLevel`, `addresses`) need your own config file pointed at via `MPROV_ARGS=-c <file>`.
+2. Start the stack and watch the log: on first connect the job server starts a repo sync, which is required before images can be built. A job server that can't reach the mPCC, or is on a different API version, says so once and keeps retrying without registering (see [Architecture Overview](architecture/overview.md)).
+
+The PyPI package is still published and supported — but for **nodes**, not job servers: `image-update` pip-installs it into every built image so provisioned hosts get `script-runner` and the `MProvScript` class (see [Script Execution](workflows/script-execution.md)).
 
 Useful CLI flags (global): `-c <configfile>`, `-r` runonce mode, `-d` do not register with the mPCC, `-m mod1,mod2` run specific modules once. See `README.md` and [Operations & Deployment](operations/deployment.md).
 
