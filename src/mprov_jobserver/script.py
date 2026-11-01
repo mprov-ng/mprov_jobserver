@@ -4,6 +4,7 @@ import socket
 from mprov_jobserver.tls import ca_bundle
 import yaml, os, sys, time
 from mprov_jobserver.log import get_logger
+from mprov_jobserver.version import install as version_install
 
 log = get_logger(__name__)
 class MProvScript():
@@ -71,6 +72,7 @@ class MProvScript():
       'Authorization': 'Api-Key ' + self.apikey,
       'Content-Type': 'application/json'
       })
+    version_install(self.session)
 
     # connect to the mPCC
     try:

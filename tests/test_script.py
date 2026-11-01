@@ -21,6 +21,8 @@ class Session:
   def __init__(self, response):
     self.response = response
     self.headers = {}
+    # as a requests.Session has them, for the version check (#287)
+    self.hooks = {"response": []}
 
   def get(self, url, **kwargs):
     return self.response
