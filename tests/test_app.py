@@ -303,6 +303,31 @@ def test_dash_m_runs_the_named_modules_once_without_registering(tmp_path, monkey
   assert posts == []
 
 
+def registers_when(tmp_path, monkeypatch, logged_in):
+  """ Whether __init__ registers, for a session that did or didn't start. """
+  path = write_config(tmp_path, {"mprovURL": "http://mpcc/", "jobmodules": ["libgenders"]})
+  monkeypatch.setattr(app.sys, "argv", ["mprov_jobserver"])
+  monkeypatch.setattr(JobServer, "startSession", lambda self: logged_in)
+  monkeypatch.setattr(JobServer, "load_plugins", lambda self: None)
+  registered = []
+  monkeypatch.setattr(JobServer, "register_server", lambda self: registered.append(True))
+  JobServer(configfile=path)
+  return registered
+
+
+def test_a_job_server_that_couldnt_log_in_doesnt_register(tmp_path, monkeypatch):
+  """
+  Registering over a session that didn't start left a job server row on the
+  mPCC that this job server never used (#293): it either never saw the
+  reply or couldn't read an id out of it.
+  """
+  assert registers_when(tmp_path, monkeypatch, logged_in=False) == []
+
+
+def test_a_job_server_that_logged_in_registers(tmp_path, monkeypatch):
+  assert registers_when(tmp_path, monkeypatch, logged_in=True) == [True]
+
+
 def test_load_plugins_needs_jobmodules(server):
   server.jobmodules = None
   with pytest.raises(SystemExit):
@@ -319,6 +344,53 @@ def test_start_session_sends_the_api_key(server):
   assert server.session.headers["Authorization"] == "Api-Key secret"
   assert server.ip_address == "10.0.0.3"
   assert server.sessionOk is True
+
+
+def fails_with(server, monkeypatch, error):
+  """ An mPCC that can't be reached, with sleeps taken out of the retry. """
+  def down(*args, **kwargs):
+    raise error
+  server.session.get = down
+  server.apikey = "k"
+  server.myaddress = None
+  monkeypatch.setattr(app.time, "sleep", lambda s: None)
+
+
+def test_the_same_failure_is_logged_once_not_every_retry(server, monkeypatch, caplog):
+  """ A job server left pointing at an mPCC it can't use filled the log
+  with the same two lines every few seconds (#293). """
+  fails_with(server, monkeypatch, ConnectionError("refused"))
+  for _ in range(5):
+    server.startSession()
+  assert len([r for r in caplog.records if "unable to reach the mPCC" in r.getMessage()]) == 1
+  assert len([r for r in caplog.records if "Communication error" in r.getMessage()]) == 1
+
+
+def test_a_different_failure_is_still_reported(server, monkeypatch, caplog):
+  """ A certificate error that becomes a version mismatch is news. """
+  fails_with(server, monkeypatch, ConnectionError("refused"))
+  server.startSession()
+  server.startSession()
+  fails_with(server, monkeypatch, ConnectionError("mPCC API version 0.9, expected 0.6"))
+  server.startSession()
+  reasons = [r.getMessage() for r in caplog.records if "unable to reach the mPCC" in r.getMessage()]
+  assert len(reasons) == 2
+  assert "refused" in reasons[0]
+  assert "0.9" in reasons[1]
+
+
+def test_coming_back_is_logged_and_rearms_the_message(server, monkeypatch, caplog):
+  fails_with(server, monkeypatch, ConnectionError("refused"))
+  server.startSession()
+  server.session.routes[""] = {}
+  server.session.get = FakeSession.get.__get__(server.session)
+  assert server.startSession() is True
+  assert [r for r in caplog.records if "is reachable again" in r.getMessage()]
+  # a later failure is reported again, not swallowed as already seen
+  caplog.clear()
+  fails_with(server, monkeypatch, ConnectionError("refused"))
+  server.startSession()
+  assert [r for r in caplog.records if "unable to reach the mPCC" in r.getMessage()]
 
 
 def test_start_session_retries_when_the_mpcc_is_down(server, monkeypatch):

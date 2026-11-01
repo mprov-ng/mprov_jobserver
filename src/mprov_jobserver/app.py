@@ -137,6 +137,9 @@ class JobServer ():
   # last heartbeat failed, so a failure is logged once
   _addressSessions = None
   _failingAddresses = None
+  # why the last attempt to start a session failed, so a job server left
+  # pointing at an mPCC it can't use says so once instead of every retry
+  _sessionProblem = None
   # how much the log says (error, warning, info, debug), and whether lines
   # carry a timestamp; journald and docker stamp lines themselves (#104)
   logLevel = "info"
@@ -186,15 +189,21 @@ class JobServer ():
 
     # Authenticate to the Control Center and start a session
     log.info("mProv Job Server authenticating.")
-    if not self.startSession():
+    loggedIn = self.startSession()
+    if not loggedIn:
         log.error("Unable to log into mProv Control Center.")
 
 
     # Load Plugins. (plugins register job modules.)
     self.load_plugins()
 
-    # register the server.
-    self.register_server()
+    # register the server, once we can actually talk to the mPCC.
+    # Registering over a session that didn't start leaves a job server row
+    # on the mPCC that this one never uses: it either never sees the reply
+    # or can't read an id out of it.  The main loop registers as soon as a
+    # session does start (#293).
+    if loggedIn:
+      self.register_server()
 
     pass
 
@@ -773,13 +782,23 @@ class JobServer ():
       response = self.session.get(self.mprovURL, stream=True)
     except Exception as err:
       # say why: "Communication error" alone hid certificate problems (#102)
-      log.error(f"unable to reach the mPCC at {self.mprovURL}: {err}")
-      if isinstance(err, requests.exceptions.SSLError):
-        log.error("if the mPCC's certificate is from a site or self-signed CA, set global caBundle to that CA's certificate file.")
-      log.error("Communication error to the server.  Retrying.")
+      problem = f"unable to reach the mPCC at {self.mprovURL}: {err}"
+      # the retry is every few seconds and the cause rarely changes, so say
+      # it once rather than filling the log with it (#293).  A different
+      # failure is still reported: a certificate error that becomes a
+      # version mismatch is news.
+      if problem != self._sessionProblem:
+        self._sessionProblem = problem
+        log.error(problem)
+        if isinstance(err, requests.exceptions.SSLError):
+          log.error("if the mPCC's certificate is from a site or self-signed CA, set global caBundle to that CA's certificate file.")
+        log.error("Communication error to the server.  Retrying.")
       self.sessionOk = False
       time.sleep(10)
       return
+    if self._sessionProblem is not None:
+      self._sessionProblem = None
+      log.info(f"the mPCC at {self.mprovURL} is reachable again.")
     self.sessionOk = True
     if self.myaddress is not None:
       if self.myaddress != '':
