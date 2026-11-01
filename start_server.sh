@@ -14,4 +14,10 @@ import jinja2
 sys.stdout.write(jinja2.Template(sys.stdin.read()).render(env=os.environ))
 ' <  /etc/mprov/jobserver.yaml.j2 > /etc/mprov/jobserver.yaml
 
-/usr/local/bin/mprov_jobserver ${MPROV_ARGS}
+# exec, so this script doesn't sit between the container's init and the job
+# server: without it a SIGTERM here kills the script and leaves the job
+# server orphaned (#294).  MPROV_ARGS is deliberately unquoted: it holds a
+# whole argument string, e.g. "-c /etc/mprov/jobserver.yaml", and is meant
+# to be split into separate arguments.
+# shellcheck disable=SC2086
+exec /usr/local/bin/mprov_jobserver ${MPROV_ARGS}
