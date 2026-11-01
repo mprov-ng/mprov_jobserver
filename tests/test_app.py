@@ -7,6 +7,7 @@ being tested.
 """
 import json
 import os
+import socket
 import sys
 import time
 import types
@@ -601,6 +602,75 @@ def registrations(server):
 
 def heartbeats(server):
   return [(path, data) for method, path, data in server.session.writes if path.endswith("/heartbeat/")]
+
+
+# an address that can't reach the mPCC (#292)
+
+def mpcc_reachable_over(monkeypatch, family):
+  """ The fake mPCC's name resolving to one address family only. """
+  monkeypatch.setattr(app.socket, "getaddrinfo",
+                      lambda *a, **k: [(family, socket.SOCK_STREAM, 6, "", ("::", 0))])
+
+
+def test_an_address_of_a_family_the_mpcc_doesnt_have_isnt_registered(multi, monkeypatch, caplog):
+  """
+  On the rig the mPCC's URL was IPv4, so binding a heartbeat to an IPv6
+  address failed every time: the addresses were registered but never heard
+  from, and the mPCC routed around them anyway (#292).
+  """
+  mpcc_reachable_over(monkeypatch, socket.AF_INET)
+  multi.addressEntries = [
+    {"address": "172.16.0.5", "mprovURL": MPROV_URL},
+    {"address": "2600:4040:b0a5:b500::5", "mprovURL": MPROV_URL},
+  ]
+  multi.register_server()
+  [data] = registrations(multi)
+  assert data["addresses"] == [{"address": "172.16.0.5"}]
+  assert heartbeats(multi) == [("jobservers/9/heartbeat/", {"address": "172.16.0.5"})]
+  assert "not registering 2600:4040:b0a5:b500::5" in caplog.text
+  assert "no IPv6 address" in caplog.text
+
+
+def test_an_ipv6_mpcc_takes_ipv6_addresses_and_drops_ipv4(multi, monkeypatch):
+  mpcc_reachable_over(monkeypatch, socket.AF_INET6)
+  multi.addressEntries = [
+    {"address": "172.16.0.5", "mprovURL": MPROV_URL},
+    {"address": "2001:db8::5", "mprovURL": MPROV_URL},
+  ]
+  multi.register_server()
+  [data] = registrations(multi)
+  assert data["addresses"] == [{"address": "2001:db8::5"}]
+
+
+def test_the_unreachable_address_is_only_logged_once(multi, caplog):
+  multi.addressEntries = [{"address": "2001:db8::5", "mprovURL": "http://10.0.0.1/"}]
+  for _ in range(4):
+    multi.address_entries()
+  assert len([r for r in caplog.records if "not registering" in r.getMessage()]) == 1
+
+
+def test_an_address_that_can_reach_the_mpcc_again_is_registered_again(multi, caplog):
+  entry = {"address": "2001:db8::5", "mprovURL": "http://10.0.0.1/"}
+  multi.addressEntries = [entry]
+  assert multi.address_entries() == []
+  entry["mprovURL"] = "http://[2001:db8::1]/"
+  assert multi.address_entries() == [entry]
+  assert "can reach the mPCC" in caplog.text
+
+
+def test_an_mpcc_whose_name_doesnt_resolve_doesnt_drop_addresses(multi, monkeypatch):
+  """ A passing DNS failure shouldn't unregister every address. """
+  def no_dns(*args, **kwargs):
+    raise socket.gaierror("no such host")
+  monkeypatch.setattr(app.socket, "getaddrinfo", no_dns)
+  multi.addressEntries = [{"address": "2001:db8::5", "mprovURL": "http://mpcc.example/"}]
+  assert multi.address_entries() == multi.addressEntries
+
+
+def test_a_host_name_as_an_address_is_left_alone(multi):
+  """ address_session() can't bind one, so it isn't judged on its family. """
+  multi.addressEntries = [{"address": "js01.example", "mprovURL": "http://10.0.0.1/"}]
+  assert multi.address_entries() == multi.addressEntries
 
 
 def test_addresses_are_registered_then_each_one_heartbeats(multi):

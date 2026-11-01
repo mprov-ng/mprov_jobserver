@@ -18,6 +18,7 @@ import multiprocessing
 import uuid
 import ipaddress
 import psutil
+from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from mprov_jobserver.log import get_logger, configure as log_configure
 from mprov_jobserver.version import install as version_install
@@ -55,6 +56,34 @@ def interface_addresses():
       if str(ip) not in result:
         result.append(str(ip))
   return result
+
+
+def address_family(address):
+  """ The socket family of an address, or None if it isn't one. """
+  try:
+    version = ipaddress.ip_address(address.split('%', 1)[0]).version
+  except ValueError:
+    return None
+  return socket.AF_INET6 if version == 6 else socket.AF_INET
+
+
+def url_families(url):
+  """
+  The address families the mPCC at url can be reached over (#292).  None
+  if that can't be told, e.g. its name doesn't resolve: an address is then
+  given the benefit of the doubt rather than dropped on a passing DNS
+  failure.
+  """
+  host = urlparse(url).hostname
+  if not host:
+    return None
+  family = address_family(host)
+  if family is not None:
+    return {family}
+  try:
+    return {info[0] for info in socket.getaddrinfo(host, None)}
+  except socket.gaierror:
+    return None
 
 
 class SourceAddressAdapter(HTTPAdapter):
@@ -137,6 +166,9 @@ class JobServer ():
   # last heartbeat failed, so a failure is logged once
   _addressSessions = None
   _failingAddresses = None
+  # addresses left unregistered because they can't reach their mPCC, so
+  # that's said once instead of on every heartbeat (#292)
+  _unreachableAddresses = None
   # why the last attempt to start a session failed, so a job server left
   # pointing at an mPCC it can't use says so once instead of every retry
   _sessionProblem = None
@@ -661,10 +693,46 @@ class JobServer ():
 
   def address_entries(self):
     ''' The addresses to register (#114): the configured ones, else those
-    on the interfaces that are up, found again on each heartbeat. '''
+    on the interfaces that are up, found again on each heartbeat.  Only
+    the ones that can reach the mPCC they'd register with (#292). '''
     if self.addressEntries is not None:
-      return self.addressEntries
-    return [{'address': address, 'mprovURL': self.mprovURL} for address in interface_addresses()]
+      entries = self.addressEntries
+    else:
+      entries = [{'address': address, 'mprovURL': self.mprovURL} for address in interface_addresses()]
+    return [entry for entry in entries if self.reaches_mpcc(entry)]
+
+  def reaches_mpcc(self, entry):
+    '''
+    Whether a heartbeat sent from this address could arrive at the mPCC it
+    would go to.  An address of a family that mPCC's URL doesn't have
+    can't: binding to it gives "Address family for hostname not supported"
+    every time (#292).  Registering it anyway would have the mPCC send
+    clients to an address this job server has never been heard from on,
+    which is what the per-address heartbeat exists to prevent (#114), so
+    it's left out instead.
+    '''
+    if self._unreachableAddresses is None:
+      self._unreachableAddresses = set()
+    address = entry['address']
+    url = entry.get('mprovURL') or self.mprovURL
+    family = address_family(address)
+    families = url_families(url)
+    # a host name is never bound to a source address anyway (address_session
+    # falls back to the main session), and an mPCC we can't resolve tells us
+    # nothing, so neither is a reason to drop the address
+    reachable = family is None or families is None or family in families
+    if reachable:
+      if address in self._unreachableAddresses:
+        self._unreachableAddresses.discard(address)
+        log.info(f"{address} can reach the mPCC at {url} again; registering it.")
+    elif address not in self._unreachableAddresses:
+      self._unreachableAddresses.add(address)
+      log.warning(
+        f"not registering {address}: the mPCC at {url} has no "
+        f"{'IPv6' if family == socket.AF_INET6 else 'IPv4'} address, so a heartbeat "
+        f"from it can't reach the mPCC and clients couldn't be sent to it."
+      )
+    return reachable
 
   def address_session(self, address):
     '''
