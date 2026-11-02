@@ -28,7 +28,7 @@ Caveat: in the `layerMerge()` fallback, group-level `dependsOn` entries are appe
 
 ## Writing scripts: the `MProvScript` SDK
 
-`src/mprov_jobserver/script.py` provides the `MProvScript` base class users can subclass in their scripts (they run inside the image chroot or on the booted host, where `mprov_jobserver` is installed — `image-update` pip-upgrades it inside the image before scripts run). It:
+`src/mprov_jobserver/script.py` provides the `MProvScript` base class users can subclass in their scripts (they run inside the image chroot or on the booted host, where `image-update` pip-upgrades `mprov_jobserver` inside the image before scripts run — pinned to the building job server's API version, #303). It:
 
 - loads `/etc/mprov/script-runner.yaml`, maps `global:` keys onto class attributes, and disables `!include` handling,
 - starts an API-key `requests.Session` against the mPCC and records the host's local `ip_address`,
