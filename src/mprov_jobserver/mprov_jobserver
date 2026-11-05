@@ -1,13 +1,46 @@
 #!/bin/bash
 # override this if you need to.
 export PYTHONUNBUFFERED=1
-pythonBinary=`which python3`
-if [ "$pythonBinary" == "" ]
-then
-  pythonBinary=`which python`
-fi
-pythonVersion=`$pythonBinary -V | awk '{print $2}'`
 
+# Prefer the Python interpreter installed alongside this launcher.
+scriptDir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -x "$scriptDir/python3" ]; then
+  pythonBinary="$scriptDir/python3"
+elif [ -x "$scriptDir/python" ]; then
+  pythonBinary="$scriptDir/python"
+else
+  # Fall back to PATH for installations without an adjacent interpreter.
+  pythonBinary="$(command -v python3)"
+  if [ -z "$pythonBinary" ]; then
+    pythonBinary="$(command -v python)"
+  fi
+fi
+
+if [ -z "$pythonBinary" ]; then
+  echo "Error: Python interpreter not found" >&2
+  exit 1
+fi
+
+pythonVersion=$("$pythonBinary" -V | awk '{print $2}')
+
+version_greater_equal()
+{
+    printf '%s\n%s\n' "$2" "$1" | sort --check=quiet --version-sort
+}
+
+die()
+{
+  echo "$1"
+  exit 1
+}
+
+version_greater_equal "${pythonVersion}" 3.8.0 || die "Error: need python 3.8 or above"
+
+# exec, so the job server replaces this script instead of running under it:
+# a SIGTERM sent here reaches the job server itself, which handles it, rather
+# than killing the script and orphaning the job server (#294).
+exec "$pythonBinary" -m mprov_jobserver.main "$@"
 version_greater_equal()
 {
     printf '%s\n%s\n' "$2" "$1" | sort --check=quiet --version-sort
