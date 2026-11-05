@@ -7,6 +7,7 @@ import sys
 import tempfile
 import json
 import shlex
+import signal
 import time
 import urllib.parse
 
@@ -40,6 +41,16 @@ class image_update(JobServerPlugin):
   imageDir = ""
   imageList = None
   depMods = [ 'repo-sync' ]
+  # How long the image-gen script runner may take before the build is
+  # failed, in seconds (#304).  Builds are legitimately long -- a big
+  # package set or an ansible run is nothing like the handful of minutes a
+  # small image takes -- so this is a safety net, not a schedule.  0 means
+  # no limit, for a site whose builds really do run longer than this.
+  scriptTimeout = 7200
+  # How long a timed-out script runner gets to stop on a TERM before it is
+  # killed outright.  A KILL runs no traps, so it costs us the script's own
+  # unmount and we do it ourselves instead; give it a moment first.
+  killGrace = 30
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -311,19 +322,60 @@ class image_update(JobServerPlugin):
         #   if response.status_code <= 199 or response.status_code >= 300:
         #     print(f"Error: Could not submit update job to mPCC, status code: {response.status_code}, image: {imageData['slug']}")
 
-  def unmountStaleBinds(self):
+  def unmountStaleBinds(self, imgDir=None):
     # A build killed with the job server (on a bare-metal install; a
     # container's mounts go with the container) leaves the host's dev,
     # proc, run and sys bound into its image tree (#183).  Nothing else
     # builds images here, so once at start-up, unmount those.
-    if not os.path.isdir(self.imageDir):
+    # With imgDir, only that one build's: script-runner.sh unmounts its own
+    # on any exit, but a run we had to SIGKILL never got to (#304).
+    under = self.imageDir if imgDir is None else imgDir
+    if not os.path.isdir(under):
       return
-    for point in mounts_under(self.imageDir):
+    for point in mounts_under(under):
       inImage = os.path.dirname(os.path.dirname(point)) == os.path.realpath(self.imageDir)
       if inImage and os.path.basename(point) in ("dev", "proc", "run", "sys"):
         log.warning(f"unmounting {point}, left by an image build that didn't finish.")
         if subprocess.run(["umount", point]).returncode != 0:
           subprocess.run(["umount", "-l", point])
+
+  def runImageScripts(self, script, imgDir, image):
+    """
+    Run the image-gen script runner, bounded by scriptTimeout (#304).
+    Returns True if it succeeded.
+
+    An unbounded run is why a blocked build never finishes and never says
+    why: nothing fails the job and the thread stays occupied (#303).
+
+    The kill goes to the process group, not just the script.  While bash
+    waits on a foreground command -- which is the chroot that is hung --
+    it defers its signal handlers, so a TERM to the script alone would sit
+    unhandled.  Killing the group ends the chroot, bash's wait returns,
+    and its TERM trap runs the EXIT trap that unmounts the binds (#183).
+    """
+    timeout = self.scriptTimeout or None
+    proc = subprocess.Popen([script], start_new_session=True)
+    try:
+      return proc.wait(timeout=timeout) == 0
+    except subprocess.TimeoutExpired:
+      log.error(f"image-gen scripts for {image} have run for over {timeout}s; stopping the build.")
+    try:
+      group = os.getpgid(proc.pid)
+    except ProcessLookupError:
+      return False
+    os.killpg(group, signal.SIGTERM)
+    try:
+      proc.wait(timeout=self.killGrace)
+    except subprocess.TimeoutExpired:
+      log.error(f"image-gen scripts for {image} didn't stop; killing them.")
+      try:
+        os.killpg(group, signal.SIGKILL)
+      except ProcessLookupError:
+        pass
+      proc.wait()
+      # SIGKILL runs no traps, so script-runner.sh never unmounted its binds
+      self.unmountStaleBinds(imgDir)
+    return False
 
   def handle_jobs(self):
     if self.js.firstrun:
@@ -579,7 +631,7 @@ class image_update(JobServerPlugin):
               conf.write(jenv.get_template('image-update/script-runner.yaml.j2').render(data))
 
           # a failed image-gen script fails the job, and no image is packed (#221)
-          if os.system(shlex.quote(imgDir + '/tmp/mprov/script-runner.sh')):
+          if not self.runImageScripts(imgDir + '/tmp/mprov/script-runner.sh', imgDir, imageDetails['slug']):
             log.error("while running image-gen scripts via job server, failing job.")
             self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
             continue
