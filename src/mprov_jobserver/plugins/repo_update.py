@@ -99,6 +99,17 @@ class repo_update(JobServerPlugin):
           log.error("Unable to parse response.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
+        # An unmanaged repo lives upstream; the mPCC only holds its URL for
+        # the images to point at, so there is nothing here to mirror.  The
+        # job used to run anyway and pull the whole upstream repo down
+        # (#307), which combined with mprov_control_center#463 meant a single
+        # job-server delete could mirror every repo on the site.  'managed'
+        # has to be there to count: an mPCC that doesn't send it at all is
+        # not telling us the repo is unmanaged.
+        if 'managed' in repo and not repo['managed']:
+          log.info(f"Repo {repo['id']} is not managed by the mPCC, nothing to mirror.")
+          self.js.update_job_status(self.jobModule, 4, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
         if repo['ostype'] is None:
           log.error(f"Repo {repo['id']} doesn't have an OS type set.  Exiting.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
