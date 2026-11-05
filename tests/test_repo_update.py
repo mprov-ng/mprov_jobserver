@@ -92,6 +92,41 @@ def test_repo_without_an_ostype_fails_the_job(js, update, commands):
   assert job_states(js) == [(3, 21)]
 
 
+def test_an_unmanaged_repo_is_not_mirrored(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}],
+                            "repos/5/": dict(REPO, ostype="rhel", managed=False)})
+  update.handle_jobs()
+  # the repo lives upstream: nothing to reposync, and the job is done (#307)
+  assert commands.run == []
+  assert job_states(js) == [(4, 21)]
+
+
+def test_an_unmanaged_repo_is_skipped_even_without_an_ostype(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}],
+                            "repos/5/": dict(REPO, ostype=None, managed=False)})
+  update.handle_jobs()
+  # an unmanaged repo needs no ostype to be left alone, so it doesn't fail
+  assert commands.run == []
+  assert job_states(js) == [(4, 21)]
+
+
+def test_a_managed_repo_is_still_mirrored(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}],
+                            "repos/5/": dict(REPO, ostype="rhel", managed=True)})
+  update.handle_jobs()
+  assert commands.matching("dnf reposync")
+  assert job_states(js) == [(4, 21)]
+
+
+def test_a_repo_from_an_mpcc_that_sends_no_managed_flag_is_mirrored(js, update, commands):
+  js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}],
+                            "repos/5/": dict(REPO, ostype="rhel")})
+  update.handle_jobs()
+  # no 'managed' key at all isn't the mPCC saying the repo is unmanaged
+  assert commands.matching("dnf reposync")
+  assert job_states(js) == [(4, 21)]
+
+
 def test_mpcc_error_for_the_repo_fails_the_job(js, update, commands):
   js.session.routes.update({JOBS: [{"id": 21, "params": {"repo_id": 5}}], "repos/5/": (404, None)})
   update.handle_jobs()
