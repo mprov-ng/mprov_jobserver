@@ -271,6 +271,91 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
+# the job server install's timeout (#317)
+
+def test_a_hung_pip_install_is_stopped_and_fails_the_job(js, plugin, images, commands, signals):
+  commands.hang = ["pip3"]
+  pending_build(js)
+  plugin.handle_jobs()
+
+  assert signals == [(4242, signal.SIGTERM)]
+  # the build stopped there: no script runner, nothing packed, job failed
+  assert not commands.matching("script-runner.sh")
+  assert not commands.matching("tar c -C")
+  assert job_states(js) == [(3, 9)]
+
+
+def test_a_pip_install_that_ignores_the_term_is_killed(js, plugin, images, commands, signals):
+  commands.hardHang = ["pip3"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert signals == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+  assert job_states(js) == [(3, 9)]
+
+
+def test_a_killed_pip_install_has_nothing_to_unmount(js, plugin, images, commands, signals, umounts, monkeypatch):
+  # the binds are made inside script-runner.sh, which runs later, so at
+  # this point there is nothing mounted in the image to clean up
+  img = str(images / "compute")
+  monkeypatch.setattr("mprov_jobserver.plugins.image_update.mounts_under",
+                      lambda path: [f"{img}/proc"])
+  commands.hardHang = ["pip3"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert umounts == []
+
+
+def test_the_install_is_bounded_by_its_own_timeout(js, plugin, images, commands, monkeypatch):
+  waits = {}
+  popen = commands.popen
+
+  def record(args, **kw):
+    proc = popen(args, **kw)
+    name = "pip" if "pip3" in args else "runner" if "script-runner.sh" in args[0] else None
+    if name:
+      wait = proc.wait
+
+      def record_wait(timeout=None, name=name, wait=wait):
+        waits.setdefault(name, timeout)
+        return wait(timeout=timeout)
+
+      proc.wait = record_wait
+    return proc
+
+  monkeypatch.setattr(subprocess, "Popen", record)
+  pending_build(js)
+  plugin.handle_jobs()
+  # its own knob, not the build's: raising the build ceiling must not
+  # silently raise the install's
+  assert waits == {"pip": 1800, "runner": 7200}
+
+
+def test_a_zero_pip_timeout_means_no_limit(js, plugin, images, commands, monkeypatch):
+  waits = []
+  plugin.pipTimeout = 0
+  popen = commands.popen
+
+  def record(args, **kw):
+    proc = popen(args, **kw)
+    if "pip3" in args:
+      wait = proc.wait
+      proc.wait = lambda timeout=None: waits.append(timeout) or wait(timeout=timeout)
+    return proc
+
+  monkeypatch.setattr(subprocess, "Popen", record)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert waits == [None]
+  assert job_states(js) == [(4, 9)]
+
+
+def test_the_pip_timeout_is_configurable(js, plugin):
+  assert plugin.pipTimeout == 1800
+  js.config_data["image-update"] = {"pipTimeout": 300}
+  JobServerPlugin.load_config(plugin)
+  assert plugin.pipTimeout == 300
+
+
 # the image-gen script runner's timeout (#304)
 
 @pytest.fixture
@@ -688,8 +773,10 @@ def test_the_image_gets_a_runner_of_our_own_api_version(js, plugin, commands):
   """
   pending_build(js)
   plugin.handle_jobs()
-  [install] = commands.matching("pip3 --no-cache-dir install")
-  assert f"--upgrade {shlex.quote(pip_requirement())}" in install
+  # an argument list, so the pin's '<' is one word by construction rather
+  # than by quoting (#317)
+  [install] = [args for args in commands.argv if "pip3" in args]
+  assert install[-2:] == ["--upgrade", pip_requirement()]
 
 
 def test_boot_files_failure_fails_the_job_and_skips_packing(js, plugin, commands, monkeypatch):

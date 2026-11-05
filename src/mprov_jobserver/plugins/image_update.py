@@ -51,6 +51,11 @@ class image_update(JobServerPlugin):
   # killed outright.  A KILL runs no traps, so it costs us the script's own
   # unmount and we do it ourselves instead; give it a moment first.
   killGrace = 30
+  # How long the job server's own install into the image may take (#317).
+  # Shorter than scriptTimeout on purpose: this is one pip install, not a
+  # build, but it still has to survive a slow mirror or a resolver having
+  # a bad day.  0 means no limit.
+  pipTimeout = 1800
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -339,26 +344,26 @@ class image_update(JobServerPlugin):
         if subprocess.run(["umount", point]).returncode != 0:
           subprocess.run(["umount", "-l", point])
 
-  def runImageScripts(self, script, imgDir, image):
+  def runBounded(self, argv, timeout, what, onKill=None):
     """
-    Run the image-gen script runner, bounded by scriptTimeout (#304).
-    Returns True if it succeeded.
+    Run argv with a time limit, and return True if it succeeded.  An
+    unbounded step is why a blocked build never finishes and never says
+    why: nothing fails the job and the thread stays occupied (#303, #304).
 
-    An unbounded run is why a blocked build never finishes and never says
-    why: nothing fails the job and the thread stays occupied (#303).
+    The kill goes to the process group, not just the command we started.
+    A shell waiting on a foreground command defers its signal handlers, so
+    a TERM to it alone would sit unhandled while the thing that is really
+    stuck carries on.  Killing the group ends the child too, so the parent
+    returns and gets to run its handlers.
 
-    The kill goes to the process group, not just the script.  While bash
-    waits on a foreground command -- which is the chroot that is hung --
-    it defers its signal handlers, so a TERM to the script alone would sit
-    unhandled.  Killing the group ends the chroot, bash's wait returns,
-    and its TERM trap runs the EXIT trap that unmounts the binds (#183).
+    onKill is called only when even SIGKILL was needed, for a caller with
+    cleaning up of its own that the killed command would have done.
     """
-    timeout = self.scriptTimeout or None
-    proc = subprocess.Popen([script], start_new_session=True)
+    proc = subprocess.Popen(argv, start_new_session=True)
     try:
-      return proc.wait(timeout=timeout) == 0
+      return proc.wait(timeout=timeout or None) == 0
     except subprocess.TimeoutExpired:
-      log.error(f"image-gen scripts for {image} have run for over {timeout}s; stopping the build.")
+      log.error(f"{what} has run for over {timeout}s; stopping it.")
     try:
       group = os.getpgid(proc.pid)
     except ProcessLookupError:
@@ -367,15 +372,27 @@ class image_update(JobServerPlugin):
     try:
       proc.wait(timeout=self.killGrace)
     except subprocess.TimeoutExpired:
-      log.error(f"image-gen scripts for {image} didn't stop; killing them.")
+      log.error(f"{what} didn't stop; killing it.")
       try:
         os.killpg(group, signal.SIGKILL)
       except ProcessLookupError:
         pass
       proc.wait()
-      # SIGKILL runs no traps, so script-runner.sh never unmounted its binds
-      self.unmountStaleBinds(imgDir)
+      if onKill is not None:
+        onKill()
     return False
+
+  def runImageScripts(self, script, imgDir, image):
+    """
+    Run the image-gen script runner, bounded by scriptTimeout (#304).
+
+    script-runner.sh unmounts the host's dev, proc, run and sys on any
+    exit, including the one its TERM trap makes (#183) -- but a SIGKILL
+    runs no traps, so that path unmounts them here instead.
+    """
+    return self.runBounded([script], self.scriptTimeout,
+                           f"image-gen scripts for {image}",
+                           onKill=lambda: self.unmountStaleBinds(imgDir))
 
   def handle_jobs(self):
     if self.js.firstrun:
@@ -533,8 +550,16 @@ class image_update(JobServerPlugin):
         # API version we do, rather than whatever is newest on PyPI: an
         # unpinned --upgrade put a 0.6 runner into images built against
         # older mPCCs, and those builds never finished (#303)
-        requirement = shlex.quote(pip_requirement())
-        if os.system(f"chroot {qimg} pip3 --no-cache-dir install --upgrade {requirement}"):
+        # bounded, and as an argument list: an install that blocks on a slow
+        # or stalled index would otherwise hang the build for ever, the same
+        # way the script runner did (#317).  Nothing is bind-mounted into
+        # the image yet -- script-runner.sh does that later -- so a killed
+        # install leaves nothing to unmount.  With no shell there is also
+        # nothing to quote, so the pin's '<' is safe by construction.
+        if not self.runBounded(["chroot", imgDir, "pip3", "--no-cache-dir",
+                                "install", "--upgrade", pip_requirement()],
+                               self.pipTimeout,
+                               f"installing the job server into {imageDetails['slug']}"):
           log.error("Unable to install mprov_jobserver python module.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
