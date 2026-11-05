@@ -132,6 +132,38 @@ def test_finishing_logs_the_outcome_and_duration(server, capsys, status, line):
   assert 89 <= seconds <= 120
 
 
+def test_an_orphaned_job_doesnt_claim_the_gap_as_a_run_time(server, capsys):
+  # 7.2h since it started, but nobody watched it run: the job server was
+  # down or hung for most of that (#305).
+  started = (datetime.now(timezone.utc) - timedelta(seconds=25927)).isoformat().replace("+00:00", "Z")
+  server.session.routes["jobs/46/"] = {"id": 46, "status": 2, "module": "image-update",
+                                       "params": {"imageId": "compute"}, "start_time": started}
+  server.update_job_status("image-update", 3, jobid=46, orphaned=True)
+  out = capsys.readouterr().out
+  assert "[E] app: job 46 image-update compute failed (last seen RUNNING " in out
+  # the bare "(NNNs)" a dashboard reads as a duration is not there
+  assert " failed (25927s)" not in out
+  seconds = int(out.split("last seen RUNNING ")[1].split("s ago)")[0])
+  assert 25927 <= seconds <= 25960
+
+
+def test_a_job_the_server_finishes_itself_still_reports_its_run_time(server, capsys):
+  # the fix is only for the orphan path: a normal finish is unchanged
+  started = (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat().replace("+00:00", "Z")
+  server.session.routes["jobs/47/"] = {"id": 47, "status": 2, "module": "repo-update",
+                                       "params": {"repo_id": 7}, "start_time": started}
+  server.update_job_status("repo-update", 4, jobid=47)
+  out = capsys.readouterr().out
+  assert "[I] app: job 47 repo-update 7 succeeded (" in out
+  assert "last seen RUNNING" not in out
+
+
+def test_an_orphaned_job_without_a_start_time_says_nothing_about_time(server, capsys):
+  server.session.routes["jobs/48/"] = {"id": 48, "status": 2, "module": "libgenders", "start_time": None}
+  server.update_job_status("libgenders", 3, jobid=48, orphaned=True)
+  assert "[E] app: job 48 libgenders failed\n" in capsys.readouterr().out
+
+
 def test_a_job_without_a_start_time_has_no_duration(server, capsys):
   server.session.routes["jobs/44/"] = {"id": 44, "status": 2, "module": "libgenders", "start_time": None}
   server.update_job_status("libgenders", 4, jobid=44)

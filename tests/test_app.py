@@ -11,6 +11,7 @@ import socket
 import sys
 import time
 import types
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -932,6 +933,20 @@ def test_several_modules_are_asked_for_as_a_json_list(server):
   server.session.routes["jobs/41/"] = {"id": 41, "status": 2}
   assert server.fail_orphaned_jobs(["dns-update", "dns-delete"], "x") == 1
   assert failed_jobs(server) == ["jobs/41/"]
+
+
+def test_a_swept_orphan_is_logged_as_last_seen_running(server, capsys):
+  # the sweep runs long after the job stopped being watched, so the gap to
+  # now isn't a run time and the line mustn't present it as one (#305)
+  started = (datetime.now(timezone.utc) - timedelta(seconds=25927)).isoformat().replace("+00:00", "Z")
+  server.runonce = False
+  server.session.routes["jobs/?jobserver=5&status=2"] = [{"id": 49, "module": "image-update"}]
+  server.session.routes["jobs/49/"] = {"id": 49, "status": 2, "module": "image-update",
+                                       "params": {"imageId": "compute"}, "start_time": started}
+  assert server.fail_orphaned_jobs(None, "it was running when this job server stopped") == 1
+  out = capsys.readouterr().out
+  assert "last seen RUNNING " in out
+  assert " failed (25927s)" not in out
 
 
 @pytest.mark.parametrize("reply", [(500, {"detail": "x"}), (200, {"detail": "x"})])
