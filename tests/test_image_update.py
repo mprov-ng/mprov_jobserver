@@ -11,6 +11,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import types
@@ -22,6 +23,7 @@ import yaml
 import mprov_jobserver.app as app
 from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
+from mprov_jobserver.plugins.plugin import JobServerPlugin
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
 from mprov_jobserver.version import pip_requirement
 
@@ -269,6 +271,112 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
+# the image-gen script runner's timeout (#304)
+
+@pytest.fixture
+def signals(monkeypatch):
+  """ Record the process groups the plugin signals, instead of signalling. """
+  sent = []
+  monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+  monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+  return sent
+
+
+def test_the_script_runner_runs_in_its_own_session(js, plugin, images, commands, monkeypatch):
+  # the kill has to reach the chroot, not just the script, so the runner
+  # needs a process group of its own
+  sessions = []
+  popen = commands.popen
+  monkeypatch.setattr(subprocess, "Popen",
+                      lambda args, **kw: sessions.append((args, kw.get("start_new_session"))) or popen(args, **kw))
+  pending_build(js)
+  plugin.handle_jobs()
+  [(args, new_session)] = [s for s in sessions if "script-runner.sh" in s[0][0]]
+  assert args == [f"{images}/compute/tmp/mprov/script-runner.sh"]
+  assert new_session is True
+
+
+def test_a_hung_script_runner_is_stopped_and_fails_the_job(js, plugin, images, commands, signals):
+  commands.hang = ["script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+
+  # TERM to the whole group; it stopped, so no KILL was needed
+  assert signals == [(4242, signal.SIGTERM)]
+  # the build stopped there: nothing packed, and the job failed (#221)
+  assert not commands.matching("tar c -C")
+  assert job_states(js) == [(3, 9)]
+
+
+def test_a_script_runner_that_ignores_the_term_is_killed(js, plugin, images, commands, signals):
+  commands.hardHang = ["script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+
+  assert signals == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+  assert job_states(js) == [(3, 9)]
+
+
+@pytest.fixture
+def umounts(monkeypatch):
+  """ Record the umount commands, which go through subprocess.run. """
+  done = []
+  monkeypatch.setattr(subprocess, "run",
+                      lambda args, **kw: done.append(args) or types.SimpleNamespace(returncode=0))
+  return done
+
+
+def test_a_killed_runners_binds_are_unmounted(js, plugin, images, commands, signals, umounts, monkeypatch):
+  # a KILL runs no traps, so script-runner.sh never unmounted its own (#183)
+  img = str(images / "compute")
+  monkeypatch.setattr("mprov_jobserver.plugins.image_update.mounts_under",
+                      lambda path: [f"{img}/proc", f"{img}/dev"])
+  commands.hardHang = ["script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+
+  assert ["umount", f"{img}/proc"] in umounts
+  assert ["umount", f"{img}/dev"] in umounts
+
+
+def test_a_runner_that_stops_on_the_term_is_left_to_unmount_itself(js, plugin, images, commands, signals, umounts, monkeypatch):
+  img = str(images / "compute")
+  monkeypatch.setattr("mprov_jobserver.plugins.image_update.mounts_under",
+                      lambda path: [f"{img}/proc"])
+  commands.hang = ["script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+
+  # its EXIT trap did that; unmounting behind it would race the next build
+  assert ["umount", f"{img}/proc"] not in umounts
+
+
+def test_a_zero_timeout_means_no_limit(js, plugin, images, commands, monkeypatch):
+  waits = []
+  plugin.scriptTimeout = 0
+  popen = commands.popen
+
+  def record(args, **kw):
+    proc = popen(args, **kw)
+    if "script-runner.sh" in args[0]:
+      wait = proc.wait
+      proc.wait = lambda timeout=None: waits.append(timeout) or wait(timeout=timeout)
+    return proc
+
+  monkeypatch.setattr(subprocess, "Popen", record)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert waits == [None]
+  assert job_states(js) == [(4, 9)]
+
+
+def test_the_timeout_is_configurable(js, plugin):
+  assert plugin.scriptTimeout == 7200
+  js.config_data["image-update"] = {"scriptTimeout": 600}
+  JobServerPlugin.load_config(plugin)
+  assert plugin.scriptTimeout == 600
+
+
 def test_dracut_gets_only_real_modules_of_the_image_kernel(js, plugin, images, commands):
   # dracut stops at a built-in or unknown module and drops every driver
   # after it (#206), so those are left out of --add-drivers.
@@ -302,11 +410,12 @@ def test_dracut_module_needs_to_be_a_module_of_every_image_kernel(js, plugin, im
 def test_script_runner_config_is_runonce_script_runner(js, plugin, images, commands, monkeypatch):
   # Capture jobserver.yaml before it's removed, when the script runs.
   seen = {}
-  def system(cmd):
-    if cmd.endswith("/tmp/mprov/script-runner.sh"):
+  popen = commands.popen
+  def run(args, **kwargs):
+    if args[0].endswith("/tmp/mprov/script-runner.sh"):
       seen["config"] = (images / "compute/tmp/mprov/jobserver.yaml").read_text()
-    return commands(cmd)
-  monkeypatch.setattr(os, "system", system)
+    return popen(args, **kwargs)
+  monkeypatch.setattr(subprocess, "Popen", run)
   pending_build(js)
   plugin.handle_jobs()
   config = yaml.load(seen["config"].replace("- !include", "# !include"), Loader=yaml.SafeLoader)
@@ -322,11 +431,12 @@ def test_the_image_config_leaves_out_the_hosts_ca_bundle(js, plugin, images, com
   ca.write_text("ca")
   js.config_data["global"]["caBundle"] = str(ca)
   seen = {}
-  def system(cmd):
-    if cmd.endswith("/tmp/mprov/script-runner.sh"):
+  popen = commands.popen
+  def run(args, **kwargs):
+    if args[0].endswith("/tmp/mprov/script-runner.sh"):
       seen["config"] = (images / "compute/tmp/mprov/jobserver.yaml").read_text()
-    return commands(cmd)
-  monkeypatch.setattr(os, "system", system)
+    return popen(args, **kwargs)
+  monkeypatch.setattr(subprocess, "Popen", run)
   pending_build(js)
   plugin.handle_jobs()
   config = yaml.load(seen["config"].replace("- !include", "# !include"), Loader=yaml.SafeLoader)
@@ -801,16 +911,18 @@ def test_rhel_links_the_newest_kernel_and_initramfs(js, rhel, images, commands):
 def test_jobserver_yaml_is_0600_in_a_0700_dir(js, plugin, images, commands, monkeypatch):
   seen = {}
 
-  def system(cmd):
-    if cmd.endswith("/tmp/mprov/script-runner.sh"):
+  popen = commands.popen
+
+  def run(args, **kwargs):
+    if args[0].endswith("/tmp/mprov/script-runner.sh"):
       mprov = images / "compute/tmp/mprov"
       seen["dir_mode"] = stat.S_IMODE(os.stat(mprov).st_mode)
       seen["plugins_mode"] = stat.S_IMODE(os.stat(mprov / "plugins").st_mode)
       seen["file_mode"] = stat.S_IMODE(os.stat(mprov / "jobserver.yaml").st_mode)
       seen["content"] = (mprov / "jobserver.yaml").read_text()
-    return commands(cmd)
+    return popen(args, **kwargs)
 
-  monkeypatch.setattr(os, "system", system)
+  monkeypatch.setattr(subprocess, "Popen", run)
   pending_build(js)
   plugin.handle_jobs()
   assert seen["dir_mode"] == 0o700

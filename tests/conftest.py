@@ -166,6 +166,14 @@ class Commands:
   def __init__(self):
     self.run = []
     self.fail = []
+    # commands whose process doesn't finish: it times out on its first
+    # wait, and on every wait if it's in hardHang -- a process that
+    # ignores the TERM and has to be killed (#304).
+    self.hang = []
+    self.hardHang = []
+    # the argument lists passed to Popen, unflattened: a path with a space
+    # in it can't be recovered from the joined command string
+    self.argv = []
 
   def __call__(self, cmd):
     self.run.append(cmd)
@@ -179,13 +187,20 @@ class Commands:
     subprocess.Popen for an argument list: recorded joined with spaces, like
     an os.system command.  A process writing to a file writes b"PACKED".
     """
+    self.argv.append(list(args))
     return FakeProcess(self, " ".join(args), stdout)
 
 
 class FakeProcess:
+  pid = 4242
+
   def __init__(self, commands, cmd, stdout):
     commands.run.append(cmd)
+    self.cmd = cmd
     self.returncode = 1 if any(f in cmd for f in commands.fail) else 0
+    self.hangs = any(h in cmd for h in commands.hang + commands.hardHang)
+    self.keepsHanging = any(h in cmd for h in commands.hardHang)
+    self.waits = 0
     if stdout == subprocess.PIPE:
       self.stdout = FakePipe()
     else:
@@ -193,7 +208,10 @@ class FakeProcess:
       if hasattr(stdout, "write"):
         stdout.write(b"PACKED")
 
-  def wait(self):
+  def wait(self, timeout=None):
+    self.waits += 1
+    if timeout is not None and self.hangs and (self.keepsHanging or self.waits == 1):
+      raise subprocess.TimeoutExpired(self.cmd, timeout)
     return self.returncode
 
 

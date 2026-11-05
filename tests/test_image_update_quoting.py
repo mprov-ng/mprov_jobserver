@@ -70,8 +70,10 @@ def test_an_image_path_with_a_space_stays_one_argument(js, plugin, images, comma
   # image_update's own commands: resolv.conf, script-runner.sh, the old .img
   [cp] = commands.matching("/etc/resolv.conf")
   assert argv(cp)[-1] == f"{img}/etc/resolv.conf"
-  [runner] = commands.matching("script-runner.sh")
-  assert argv(runner) == [f"{img}/tmp/mprov/script-runner.sh"]
+  # the runner is one argv element by construction now, no shell involved,
+  # so check the list Popen was given rather than re-splitting a string
+  [runner] = [args for args in commands.argv if "script-runner.sh" in args[0]]
+  assert runner == [f"{img}/tmp/mprov/script-runner.sh"]
   # the old .img isn't removed with a shell command any more: tar leaves it
   # out (#232); tar itself runs from an argument list
   assert not [cmd for cmd in commands.run if cmd.startswith("rm ") and ".img" in cmd]
