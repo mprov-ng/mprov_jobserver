@@ -109,11 +109,17 @@ def job_subject(job):
   return ""
 
 
-def log_job(job_module, job, status):
+def log_job(job_module, job, status, orphaned=False):
   """
   One line per job transition, in a fixed form a log search (Loki, Grafana)
   can match: "job 42 image-update compute started", then "succeeded" or
   "failed" with how long it ran, from the job's start_time (#103).
+
+  An orphan is a job nobody watched finish, so there is no run time to
+  report: the gap from its start_time to now covers however long this job
+  server was down or hung as well.  Those say "last seen RUNNING 25927s
+  ago" instead, so a reader -- or a dashboard built on this format -- can
+  tell the two apart rather than reading downtime as a 7-hour build (#305).
   """
   module = job.get('module') or job_module
   what = f"job {job['id']} {module}{job_subject(job)}"
@@ -125,7 +131,8 @@ def log_job(job_module, job, status):
     started = datetime.fromisoformat(str(job.get('start_time')).replace('Z', '+00:00'))
     if started.tzinfo is None:
       started = started.replace(tzinfo=timezone.utc)
-    took = f" ({int((datetime.now(timezone.utc) - started).total_seconds())}s)"
+    since = int((datetime.now(timezone.utc) - started).total_seconds())
+    took = f" (last seen RUNNING {since}s ago)" if orphaned else f" ({since}s)"
   except ValueError:
     pass
   if status == 4:
@@ -402,7 +409,7 @@ class JobServer ():
 
 
   
-  def update_job_status(self, job_module, status, jobid=None,jobquery=""):
+  def update_job_status(self, job_module, status, jobid=None,jobquery="",orphaned=False):
     data = {
       'pk': job_module,
       'status': status,
@@ -481,7 +488,7 @@ class JobServer ():
         log.error("the mPCC refused the update of job " + str(data['id']) + ":")
         log.error(response.json())
         continue
-      log_job(job_module, job, status)
+      log_job(job_module, job, status, orphaned=orphaned)
 
     return updateCount
     # return True
@@ -535,7 +542,7 @@ class JobServer ():
       if not isinstance(job, dict) or 'id' not in job:
         continue
       log.error(f"failing job {job['id']} ({job.get('module')}): {reason}.")
-      self.update_job_status(job.get('module', ''), 3, jobid=job['id'])
+      self.update_job_status(job.get('module', ''), 3, jobid=job['id'], orphaned=True)
       failed += 1
     return failed
 
