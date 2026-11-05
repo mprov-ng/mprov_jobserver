@@ -62,11 +62,16 @@ def test_an_image_path_with_a_space_stays_one_argument(js, plugin, images, comma
   img = f"{store}/compute"
   installs = [argv(cmd) for cmd in commands.matching("--installroot=")]
   assert installs and all(f"--installroot={img}" in args for args in installs)
-  chroots = [argv(cmd) for cmd in commands.matching("chroot ")]
-  # the pinned requirement has a < in it, so it has to survive as one
-  # argument rather than becoming a shell redirection (#303)
-  assert any(pip_requirement() in args for args in chroots)
+  # the shell-quoted chroots; the job server's install isn't one any more
+  # and is checked as an argument list below
+  chroots = [argv(cmd) for cmd in commands.matching("chroot ") if "pip3" not in cmd]
   assert chroots and all(args[0] == "chroot" and args[1] == img for args in chroots)
+  # the job server's install runs without a shell now, so the pinned
+  # requirement's < is one argument by construction, and the image path
+  # stays whole even with a space in it (#303, #317)
+  [install] = [args for args in commands.argv if "pip3" in args]
+  assert install[:2] == ["chroot", img]
+  assert install[-2:] == ["--upgrade", pip_requirement()]
   # image_update's own commands: resolv.conf, script-runner.sh, the old .img
   [cp] = commands.matching("/etc/resolv.conf")
   assert argv(cp)[-1] == f"{img}/etc/resolv.conf"
