@@ -236,7 +236,7 @@ def make_bundle(path, version, files=None, marker=True):
   """
   A node-image bundle tarball (#309) at path: MPROV_BUNDLE_VERSION, a
   bin/mprov_jobserver and a relative bin/python3 symlink, like the real one
-  as `tar czf ... -C /usr/lib/mprov .` makes it.
+  as `tar czf ... -C /usr/libexec/mprov .` makes it.
   """
   import io
   import tarfile

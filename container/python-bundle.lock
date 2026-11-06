@@ -1,5 +1,5 @@
 # The CPython that the job server's portable bundle is built on (#309):
-# a python-build-standalone release, unpacked at /usr/lib/mprov in node
+# a python-build-standalone release, unpacked at /usr/libexec/mprov in node
 # images.  Sourced by the Dockerfile's bundle stage.  To update it, take the
 # x86_64-unknown-linux-gnu-install_only tarball's line from the release's
 # SHA256SUMS:

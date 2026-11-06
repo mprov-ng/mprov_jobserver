@@ -1,6 +1,6 @@
 #!/bin/sh
 # Install the job server with the pip command in $PIP (e.g. "pip3", or
-# "/usr/lib/mprov/bin/python3 -m pip"), pinned by the container's exact
+# "/usr/libexec/mprov/bin/python3 -m pip"), pinned by the container's exact
 # dependency versions (#166).  Used by both Dockerfile stages, so the image
 # and the bundle it carries (#309) get the same job server.
 #

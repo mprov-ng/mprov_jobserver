@@ -1,6 +1,6 @@
 # The job server as a portable Python tree, for node images (#309): a
 # python-build-standalone CPython with the job server and its dependencies
-# installed in it.  image-update unpacks it at /usr/lib/mprov in each image
+# installed in it.  image-update unpacks it at /usr/libexec/mprov in each image
 # it builds, instead of pip-installing onto the image's own Python.
 #
 # Its own stage, on EL8 whatever the image below is based on (#111): the
@@ -18,25 +18,25 @@ RUN set -e; \
     curl -fsSL --retry 5 -o /tmp/python.tar.gz \
         "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PBS_PYTHON}+${PBS_RELEASE}-x86_64-unknown-linux-gnu-install_only.tar.gz"; \
     echo "${PBS_SHA256}  /tmp/python.tar.gz" | sha256sum -c -; \
-    mkdir -p /usr/lib/mprov; \
-    tar xzf /tmp/python.tar.gz -C /usr/lib/mprov --strip-components=1; \
+    mkdir -p /usr/libexec/mprov; \
+    tar xzf /tmp/python.tar.gz -C /usr/libexec/mprov --strip-components=1; \
     rm /tmp/python.tar.gz
 COPY dist/ /tmp/dist/
 COPY container/requirements.txt /tmp/container-requirements.txt
 COPY container/install_jobserver.sh /tmp/install_jobserver.sh
 # python-build-standalone was built with clang, which its sysconfig names as
 # the compiler for extensions; build pyparted and netifaces with EL8's gcc.
-RUN CC=gcc CXX=g++ PIP="/usr/lib/mprov/bin/python3 -m pip" sh /tmp/install_jobserver.sh
+RUN CC=gcc CXX=g++ PIP="/usr/libexec/mprov/bin/python3 -m pip" sh /tmp/install_jobserver.sh
 # Fail here, not on a node, if something the job server or the baked node
 # scripts import didn't build (mprov_scripts#86).
-RUN /usr/lib/mprov/bin/python3 -c 'import mprov_jobserver.main, mprov_jobserver.script, parted, netifaces, pyroute2, sh, yaml, requests, jinja2, psutil'
+RUN /usr/libexec/mprov/bin/python3 -c 'import mprov_jobserver.main, mprov_jobserver.script, parted, netifaces, pyroute2, sh, yaml, requests, jinja2, psutil'
 # MPROV_BUNDLE_VERSION says which job server is in it; image-update only
 # unpacks a bundle of its own version.
 RUN set -e; \
-    v=$(/usr/lib/mprov/bin/python3 -c 'from importlib.metadata import version; print(version("mprov_jobserver"))'); \
-    echo "$v" > /usr/lib/mprov/MPROV_BUNDLE_VERSION; \
+    v=$(/usr/libexec/mprov/bin/python3 -c 'from importlib.metadata import version; print(version("mprov_jobserver"))'); \
+    echo "$v" > /usr/libexec/mprov/MPROV_BUNDLE_VERSION; \
     mkdir /out; \
-    tar czf "/out/mprov-jobserver-${v}-x86_64.tar.gz" -C /usr/lib/mprov .
+    tar czf "/out/mprov-jobserver-${v}-x86_64.tar.gz" -C /usr/libexec/mprov .
 
 # Just the bundle tarball, for the release to attach for job servers
 # installed with pip: `docker buildx build --target bundle-export

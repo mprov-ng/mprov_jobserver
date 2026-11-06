@@ -60,7 +60,7 @@ for `script-runner` and the `MProvScript` class that the node scripts in
 [mprov_scripts](https://github.com/mprov-ng/mprov_scripts) are built on.
 Since 0.7.0 it goes in as a **bundle**: a self-contained Python 3.11 with
 the job server and its dependencies installed in it, unpacked at
-`/usr/lib/mprov` in the image, with `/usr/local/bin/mprov_jobserver` a link
+`/usr/libexec/mprov` in the image, with `/usr/local/bin/mprov_jobserver` a link
 to it. The image's own Python isn't used or changed, an image build needs
 no PyPI access, and the image always gets exactly the version of the job
 server that built it.

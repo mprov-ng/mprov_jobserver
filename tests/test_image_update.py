@@ -278,13 +278,13 @@ def test_the_image_gets_the_bundle_and_the_link_to_it(js, plugin, images, comman
   pending_build(js)
   plugin.handle_jobs()
   img = images / "compute"
-  assert (img / "usr/lib/mprov/MPROV_BUNDLE_VERSION").read_text().strip() == jobserver_version()
-  assert (img / "usr/lib/mprov/bin/mprov_jobserver").is_file()
+  assert (img / "usr/libexec/mprov/MPROV_BUNDLE_VERSION").read_text().strip() == jobserver_version()
+  assert (img / "usr/libexec/mprov/bin/mprov_jobserver").is_file()
   # the bundle's own relative symlink survives the unpack
-  assert os.readlink(img / "usr/lib/mprov/bin/python3") == "python3.11"
+  assert os.readlink(img / "usr/libexec/mprov/bin/python3") == "python3.11"
   # what script-runner.sh and the systemd units call
-  assert os.readlink(img / "usr/local/bin/mprov_jobserver") == "/usr/lib/mprov/bin/mprov_jobserver"
-  assert not (img / "usr/lib/mprov.new").exists()
+  assert os.readlink(img / "usr/local/bin/mprov_jobserver") == "/usr/libexec/mprov/bin/mprov_jobserver"
+  assert not (img / "usr/libexec/mprov.new").exists()
   assert job_states(js) == [(4, 9)]
 
 
@@ -298,20 +298,20 @@ def test_no_pip_install_and_no_network_for_the_job_server(js, plugin, images, co
 
 
 def test_a_rebuild_replaces_the_old_bundle(js, plugin, images, commands):
-  old = images / "compute/usr/lib/mprov"
+  old = images / "compute/usr/libexec/mprov"
   old.mkdir(parents=True)
   (old / "leftover").write_text("from the last build")
   pending_build(js)
   plugin.handle_jobs()
   assert not (old / "leftover").exists()
   assert (old / "MPROV_BUNDLE_VERSION").exists()
-  assert not (images / "compute/usr/lib/mprov.old").exists()
+  assert not (images / "compute/usr/libexec/mprov.old").exists()
 
 
 def test_a_link_left_where_the_bundle_goes_is_replaced_not_followed(js, plugin, images, commands, tmp_path):
   outside = tmp_path / "outside"
   outside.mkdir()
-  lib = images / "compute/usr/lib"
+  lib = images / "compute/usr/libexec"
   lib.mkdir(parents=True)
   (lib / "mprov").symlink_to(outside)
   pending_build(js)
@@ -320,11 +320,11 @@ def test_a_link_left_where_the_bundle_goes_is_replaced_not_followed(js, plugin, 
   assert list(outside.iterdir()) == []
 
 
-def test_a_usr_lib_that_leads_out_of_the_image_fails_the_job(js, plugin, images, commands, tmp_path):
-  outside = tmp_path / "host-usr-lib"
+def test_a_usr_libexec_that_leads_out_of_the_image_fails_the_job(js, plugin, images, commands, tmp_path):
+  outside = tmp_path / "host-usr-libexec"
   outside.mkdir()
   (images / "compute/usr").mkdir(parents=True)
-  (images / "compute/usr/lib").symlink_to(outside)
+  (images / "compute/usr/libexec").symlink_to(outside)
   pending_build(js)
   plugin.handle_jobs()
   assert list(outside.iterdir()) == []
@@ -350,7 +350,7 @@ def test_a_bundle_of_another_version_fails_the_job(js, plugin, images, commands,
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9)]
   assert "0.6.0" in caplog.text
-  assert not (images / "compute/usr/lib/mprov").exists()
+  assert not (images / "compute/usr/libexec/mprov").exists()
 
 
 def test_a_bundle_with_no_version_marker_fails_the_job(js, plugin, images, commands, tmp_path):
@@ -366,7 +366,7 @@ def test_the_python_bundle_setting_is_used(js, plugin, images, commands, tmp_pat
                                     files={"bin/mprov_jobserver": b"#!/bin/bash\n", "bin/python3.11": b"", "mine": b"1"})
   pending_build(js)
   plugin.handle_jobs()
-  assert (images / "compute/usr/lib/mprov/mine").exists()
+  assert (images / "compute/usr/libexec/mprov/mine").exists()
 
 
 def test_the_python_bundle_setting_is_configurable(js, plugin):
@@ -377,7 +377,7 @@ def test_the_python_bundle_setting_is_configurable(js, plugin):
 
 
 def test_a_bundle_that_wont_unpack_keeps_the_old_one(js, plugin, images, commands, tmp_path):
-  old = images / "compute/usr/lib/mprov"
+  old = images / "compute/usr/libexec/mprov"
   old.mkdir(parents=True)
   (old / "MPROV_BUNDLE_VERSION").write_text("previous\n")
   # a real marker, then a member that tries to leave the bundle: the "tar"
@@ -397,7 +397,7 @@ def test_a_bundle_that_wont_unpack_keeps_the_old_one(js, plugin, images, command
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9)]
   assert (old / "MPROV_BUNDLE_VERSION").read_text() == "previous\n"
-  assert not (images / "compute/usr/lib/mprov.new").exists()
+  assert not (images / "compute/usr/libexec/mprov.new").exists()
   assert not (images / "compute/usr/escape").exists()
 
 

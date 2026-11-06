@@ -417,7 +417,7 @@ class UpdateImage(JobServerPlugin):
 
     # install and copy the kernel image to the image root
     # The job server and the baked node scripts run on the bundled Python
-    # at /usr/lib/mprov (#309), so EL8 images no longer need python38 and
+    # at /usr/libexec/mprov (#309), so EL8 images no longer need python38 and
     # the alternatives that pointed python3 at it (#312).  EL9 keeps its
     # distro python3 packages for anything else in the image that uses them.
     # parted, not parted-devel: the bundle's pyparted needs only the

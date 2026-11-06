@@ -29,7 +29,7 @@ log = get_logger(__name__)
 # a bundle goes in a node image.  BUNDLE_LINK is the path script-runner.sh
 # and the systemd units call.
 BUNDLE_DIR = "/usr/share/mprov"
-BUNDLE_PREFIX = "/usr/lib/mprov"
+BUNDLE_PREFIX = "/usr/libexec/mprov"
 BUNDLE_LINK = "/usr/local/bin/mprov_jobserver"
 RELEASES_URL = "https://github.com/mprov-ng/mprov_jobserver/releases"
 
