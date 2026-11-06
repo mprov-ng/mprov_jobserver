@@ -21,6 +21,7 @@ import psutil
 from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from mprov_jobserver.log import get_logger, configure as log_configure
+from mprov_jobserver.config import merge_config
 from mprov_jobserver.version import install as version_install
 
 log = get_logger(__name__)
@@ -250,12 +251,14 @@ class JobServer ():
       # Get the path out of the yaml file
     file_name = os.path.join(os.path.dirname(loader.name), node.value)
     
-    # we have a glob, so we will iterate.
-    result = {}
-    for file in glob.glob(file_name):
+    # we have a glob, so we will iterate.  sorted() so that, when two files
+    # set the same global setting, which one wins doesn't depend on the
+    # directory order.
+    documents = []
+    for file in sorted(glob.glob(file_name)):
       with open(file) as inputfile:
-        result.update(yaml.load(inputfile, Loader=yaml.FullLoader)[0])
-    return result
+        documents.append(yaml.load(inputfile, Loader=yaml.FullLoader)[0])
+    return merge_config(documents)
 
 
 
@@ -275,12 +278,10 @@ class JobServer ():
     with open(self.configfile, "r") as yamlfile:
       self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
 
-    # flatten the config space
-    result = {}
-    for entry in self.config_data:
-      result.update(entry)
-    self.config_data = result
-  
+    # flatten the config space; `global:` is merged across documents, so a
+    # plugin file can add global settings (#301)
+    self.config_data = merge_config(self.config_data)
+
     # pp = pprint.PrettyPrinter(indent=2,width=100,)
     # pp.pprint(self.config_data)
     # map the global config on to our object

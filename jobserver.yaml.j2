@@ -11,6 +11,14 @@
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.
     myaddress: {{env['MPROV_ADDRESS']}} # set this to the address of this jobserver.
+{#- Optional settings, written only when their variable is set (#301).
+    tojson quotes the value, and JSON is YAML. #}
+{%- if env.get('MPROV_CA_BUNDLE') %}
+    caBundle: {{ env['MPROV_CA_BUNDLE'] | tojson }}
+{%- endif %}
+{%- if env.get('MPROV_LOG_LEVEL') %}
+    logLevel: {{ env['MPROV_LOG_LEVEL'] | tojson }}
+{%- endif %}
     jobmodules: 
 {%- for mod in env['MPROV_MODS'].split() %}
       - {{mod}}
