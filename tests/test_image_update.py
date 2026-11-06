@@ -25,7 +25,8 @@ from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.plugin import JobServerPlugin
 from mprov_jobserver.plugins.image_update_mod.rhel import UpdateImage
-from mprov_jobserver.version import pip_requirement
+from mprov_jobserver.version import jobserver_version
+from conftest import make_bundle
 
 # Bound at import, before the no_processes fixture stubs subprocess.run out,
 # for the test that runs the rendered script-runner.sh.
@@ -271,89 +272,163 @@ def test_builds_an_image(js, plugin, images, commands):
   assert job_states(js) == [(4, 9)]
 
 
-# the job server install's timeout (#317)
+# the job server goes into the image as a bundle (#309)
 
-def test_a_hung_pip_install_is_stopped_and_fails_the_job(js, plugin, images, commands, signals):
-  commands.hang = ["pip3"]
+def test_the_image_gets_the_bundle_and_the_link_to_it(js, plugin, images, commands):
   pending_build(js)
   plugin.handle_jobs()
-
-  assert signals == [(4242, signal.SIGTERM)]
-  # the build stopped there: no script runner, nothing packed, job failed
-  assert not commands.matching("script-runner.sh")
-  assert not commands.matching("tar c -C")
-  assert job_states(js) == [(3, 9)]
-
-
-def test_a_pip_install_that_ignores_the_term_is_killed(js, plugin, images, commands, signals):
-  commands.hardHang = ["pip3"]
-  pending_build(js)
-  plugin.handle_jobs()
-  assert signals == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
-  assert job_states(js) == [(3, 9)]
-
-
-def test_a_killed_pip_install_has_nothing_to_unmount(js, plugin, images, commands, signals, umounts, monkeypatch):
-  # the binds are made inside script-runner.sh, which runs later, so at
-  # this point there is nothing mounted in the image to clean up
-  img = str(images / "compute")
-  monkeypatch.setattr("mprov_jobserver.plugins.image_update.mounts_under",
-                      lambda path: [f"{img}/proc"])
-  commands.hardHang = ["pip3"]
-  pending_build(js)
-  plugin.handle_jobs()
-  assert umounts == []
-
-
-def test_the_install_is_bounded_by_its_own_timeout(js, plugin, images, commands, monkeypatch):
-  waits = {}
-  popen = commands.popen
-
-  def record(args, **kw):
-    proc = popen(args, **kw)
-    name = "pip" if "pip3" in args else "runner" if "script-runner.sh" in args[0] else None
-    if name:
-      wait = proc.wait
-
-      def record_wait(timeout=None, name=name, wait=wait):
-        waits.setdefault(name, timeout)
-        return wait(timeout=timeout)
-
-      proc.wait = record_wait
-    return proc
-
-  monkeypatch.setattr(subprocess, "Popen", record)
-  pending_build(js)
-  plugin.handle_jobs()
-  # its own knob, not the build's: raising the build ceiling must not
-  # silently raise the install's
-  assert waits == {"pip": 1800, "runner": 7200}
-
-
-def test_a_zero_pip_timeout_means_no_limit(js, plugin, images, commands, monkeypatch):
-  waits = []
-  plugin.pipTimeout = 0
-  popen = commands.popen
-
-  def record(args, **kw):
-    proc = popen(args, **kw)
-    if "pip3" in args:
-      wait = proc.wait
-      proc.wait = lambda timeout=None: waits.append(timeout) or wait(timeout=timeout)
-    return proc
-
-  monkeypatch.setattr(subprocess, "Popen", record)
-  pending_build(js)
-  plugin.handle_jobs()
-  assert waits == [None]
+  img = images / "compute"
+  assert (img / "usr/libexec/mprov/MPROV_BUNDLE_VERSION").read_text().strip() == jobserver_version()
+  assert (img / "usr/libexec/mprov/bin/mprov_jobserver").is_file()
+  # the bundle's own relative symlink survives the unpack
+  assert os.readlink(img / "usr/libexec/mprov/bin/python3") == "python3.11"
+  # what script-runner.sh and the systemd units call
+  assert os.readlink(img / "usr/local/bin/mprov_jobserver") == "/usr/libexec/mprov/bin/mprov_jobserver"
+  assert not (img / "usr/libexec/mprov.new").exists()
   assert job_states(js) == [(4, 9)]
 
 
-def test_the_pip_timeout_is_configurable(js, plugin):
-  assert plugin.pipTimeout == 1800
+def test_no_pip_install_and_no_network_for_the_job_server(js, plugin, images, commands):
+  # no pip at all: nothing to hang on a stalled index (#317), and the image
+  # build needs no PyPI (#309)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert not [args for args in commands.argv if "pip3" in args]
+  assert not commands.matching("pip3")
+
+
+def test_a_rebuild_replaces_the_old_bundle(js, plugin, images, commands):
+  old = images / "compute/usr/libexec/mprov"
+  old.mkdir(parents=True)
+  (old / "leftover").write_text("from the last build")
+  pending_build(js)
+  plugin.handle_jobs()
+  assert not (old / "leftover").exists()
+  assert (old / "MPROV_BUNDLE_VERSION").exists()
+  assert not (images / "compute/usr/libexec/mprov.old").exists()
+
+
+def test_a_link_left_where_the_bundle_goes_is_replaced_not_followed(js, plugin, images, commands, tmp_path):
+  outside = tmp_path / "outside"
+  outside.mkdir()
+  lib = images / "compute/usr/libexec"
+  lib.mkdir(parents=True)
+  (lib / "mprov").symlink_to(outside)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert not (lib / "mprov").is_symlink()
+  assert list(outside.iterdir()) == []
+
+
+def test_a_usr_libexec_that_leads_out_of_the_image_fails_the_job(js, plugin, images, commands, tmp_path):
+  outside = tmp_path / "host-usr-libexec"
+  outside.mkdir()
+  (images / "compute/usr").mkdir(parents=True)
+  (images / "compute/usr/libexec").symlink_to(outside)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert list(outside.iterdir()) == []
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+
+
+def test_no_bundle_fails_the_job_and_says_what_to_download(js, plugin, images, commands, tmp_path, caplog):
+  plugin.pythonBundle = str(tmp_path / "nosuch.tar.gz")
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("script-runner.sh")
+  assert not commands.matching("tar c")
+  message = caplog.text
+  assert f"mprov-jobserver-{jobserver_version()}-x86_64.tar.gz" in message
+  assert "pythonBundle" in message
+
+
+def test_a_bundle_of_another_version_fails_the_job(js, plugin, images, commands, tmp_path, caplog):
+  plugin.pythonBundle = make_bundle(tmp_path / "old.tar.gz", "0.6.0")
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert "0.6.0" in caplog.text
+  assert not (images / "compute/usr/libexec/mprov").exists()
+
+
+def test_a_bundle_with_no_version_marker_fails_the_job(js, plugin, images, commands, tmp_path):
+  plugin.pythonBundle = make_bundle(tmp_path / "nomarker.tar.gz", "x", marker=False)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+
+
+def test_the_python_bundle_setting_is_used(js, plugin, images, commands, tmp_path):
+  ours = jobserver_version()
+  plugin.pythonBundle = make_bundle(tmp_path / "mine.tar.gz", ours,
+                                    files={"bin/mprov_jobserver": b"#!/bin/bash\n", "bin/python3.11": b"", "mine": b"1"})
+  pending_build(js)
+  plugin.handle_jobs()
+  assert (images / "compute/usr/libexec/mprov/mine").exists()
+
+
+def test_the_python_bundle_setting_is_configurable(js, plugin):
+  assert plugin.pythonBundle == ""
+  js.config_data["image-update"] = {"pythonBundle": "/srv/mprov-jobserver.tar.gz"}
+  JobServerPlugin.load_config(plugin)
+  assert plugin.bundlePath() == "/srv/mprov-jobserver.tar.gz"
+
+
+def test_a_bundle_that_wont_unpack_keeps_the_old_one(js, plugin, images, commands, tmp_path):
+  old = images / "compute/usr/libexec/mprov"
+  old.mkdir(parents=True)
+  (old / "MPROV_BUNDLE_VERSION").write_text("previous\n")
+  # a real marker, then a member that tries to leave the bundle: the "tar"
+  # filter refuses it
+  import tarfile, io
+  bad = tmp_path / "bad.tar.gz"
+  with tarfile.open(bad, "w:gz") as tar:
+    data = f"{jobserver_version()}\n".encode()
+    info = tarfile.TarInfo("./MPROV_BUNDLE_VERSION")
+    info.size = len(data)
+    tar.addfile(info, io.BytesIO(data))
+    escape = tarfile.TarInfo("../../escape")
+    escape.size = 1
+    tar.addfile(escape, io.BytesIO(b"x"))
+  plugin.pythonBundle = str(bad)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert (old / "MPROV_BUNDLE_VERSION").read_text() == "previous\n"
+  assert not (images / "compute/usr/libexec/mprov.new").exists()
+  assert not (images / "compute/usr/escape").exists()
+
+
+def test_an_old_pip_installed_job_server_is_uninstalled(js, plugin, images, commands):
+  (images / "compute/usr/local/lib/python3.9/site-packages/mprov_jobserver").mkdir(parents=True)
+  pending_build(js)
+  plugin.handle_jobs()
+  [uninstall] = [args for args in commands.argv if "uninstall" in args]
+  assert uninstall == ["chroot", str(images / "compute"), "pip3", "uninstall", "-y", "mprov_jobserver"]
+  assert job_states(js) == [(4, 9)]
+
+
+def test_a_failed_uninstall_only_warns(js, plugin, images, commands, caplog):
+  (images / "compute/usr/local/lib/python3.8/site-packages/mprov_jobserver").mkdir(parents=True)
+  commands.fail = ["pip3 uninstall"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert "Unable to uninstall the old pip-installed job server" in caplog.text
+  assert job_states(js) == [(4, 9)]
+
+
+def test_no_old_install_means_no_uninstall(js, plugin, images, commands):
+  pending_build(js)
+  plugin.handle_jobs()
+  assert not [args for args in commands.argv if "uninstall" in args]
+
+
+def test_a_0_6_config_with_pip_timeout_is_still_accepted(js, plugin, caplog):
   js.config_data["image-update"] = {"pipTimeout": 300}
   JobServerPlugin.load_config(plugin)
-  assert plugin.pipTimeout == 300
+  assert "Unknown config entry" not in caplog.text
 
 
 # the image-gen script runner's timeout (#304)
@@ -757,26 +832,12 @@ def test_unknown_ostype_fails_the_job(js, plugin, commands):
   assert commands.run == []
 
 
-def test_jobserver_install_failure_fails_the_job(js, plugin, commands):
-  commands.fail = ["pip3 --no-cache-dir install --upgrade"]
+def test_jobserver_install_failure_fails_the_job(js, plugin, commands, tmp_path):
+  plugin.pythonBundle = str(tmp_path / "nosuch.tar.gz")
   pending_build(js)
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9)]
   assert not commands.matching("tar c")
-
-
-def test_the_image_gets_a_runner_of_our_own_api_version(js, plugin, commands):
-  """
-  An unpinned --upgrade put whatever was newest on PyPI into the image, so
-  an image built against an older mPCC got a runner that refused to talk to
-  it and the build never finished (#303).
-  """
-  pending_build(js)
-  plugin.handle_jobs()
-  # an argument list, so the pin's '<' is one word by construction rather
-  # than by quoting (#317)
-  [install] = [args for args in commands.argv if "pip3" in args]
-  assert install[-2:] == ["--upgrade", pip_requirement()]
 
 
 def test_boot_files_failure_fails_the_job_and_skips_packing(js, plugin, commands, monkeypatch):
@@ -945,12 +1006,19 @@ def rhel(js, images, commands):
   return module
 
 
-def test_rhel_8_uses_python38(js, rhel, images, commands):
+@pytest.mark.parametrize("version", ["8", "9"])
+def test_rhel_images_get_no_python_for_the_job_server(js, rhel, images, commands, version):
+  # the job server and node scripts run on the bundle (#309): no python38
+  # on EL8, no alternatives (#312), and no pip installs into the image
   rhel.imageDetails = image()
-  rhel.imageDetails["osdistro"]["version"] = "8"
+  rhel.imageDetails["osdistro"]["version"] = version
   rhel.handle_jobs()
-  assert commands.matching(" python38-pyyaml")
-  assert commands.matching(f"chroot {images}/compute alternatives --set python3 /usr/bin/python3.8")
+  assert not commands.matching("python38")
+  assert not commands.matching("alternatives --set")
+  assert not commands.matching("pip3")
+  # the bundle's pyparted needs the runtime libparted from parted
+  [install] = commands.matching(" install kernel ")
+  assert " parted " in install and "parted-devel" not in install
   assert rhel.threadOk
 
 
@@ -1087,9 +1155,10 @@ def two_pending_builds(js):
   })
 
 
-def test_failed_image_doesnt_stop_the_others(js, plugin, images, commands):
+def test_failed_image_doesnt_stop_the_others(js, plugin, images, commands, monkeypatch):
   # returning after the first image failed left job 10 running (#220)
-  commands.fail = [f"{images}/compute pip3 --no-cache-dir install"]
+  install = plugin.installBundle
+  monkeypatch.setattr(plugin, "installBundle", lambda imgDir, slug: slug != "compute" and install(imgDir, slug))
   two_pending_builds(js)
   plugin.handle_jobs()
   assert job_states(js) == [(3, 9), (4, 10)]

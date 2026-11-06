@@ -42,4 +42,4 @@ jobs:
       - name: ShellCheck
         run: |
           shellcheck --version
-          shellcheck -S error install_mprov_jobserver.sh start_server.sh gen_changelog.sh repack_image
+          shellcheck -S error install_mprov_jobserver.sh start_server.sh gen_changelog.sh repack_image container/install_jobserver.sh

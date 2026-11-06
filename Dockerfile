@@ -1,3 +1,49 @@
+# The job server as a portable Python tree, for node images (#309): a
+# python-build-standalone CPython with the job server and its dependencies
+# installed in it.  image-update unpacks it at /usr/libexec/mprov in each image
+# it builds, instead of pip-installing onto the image's own Python.
+#
+# Its own stage, on EL8 whatever the image below is based on (#111): the
+# compiled extensions (pyparted, netifaces) built here need only EL8's
+# glibc, so the bundle runs on EL8 and EL9 nodes.
+FROM docker.io/rockylinux/rockylinux:8 AS bundle
+# parted-devel is in PowerTools on EL8
+RUN printf '%s\n' 'timeout=15' 'minrate=50k' 'retries=10' >> /etc/dnf/dnf.conf && \
+    dnf -y --enablerepo=powertools install gcc make parted-devel pkgconf-pkg-config tar gzip && \
+    dnf -y clean all
+COPY container/python-bundle.lock /tmp/python-bundle.lock
+# Unpacked at its final path: pip writes absolute shebangs into bin/.
+RUN set -e; \
+    . /tmp/python-bundle.lock; \
+    curl -fsSL --retry 5 -o /tmp/python.tar.gz \
+        "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/cpython-${PBS_PYTHON}+${PBS_RELEASE}-x86_64-unknown-linux-gnu-install_only.tar.gz"; \
+    echo "${PBS_SHA256}  /tmp/python.tar.gz" | sha256sum -c -; \
+    mkdir -p /usr/libexec/mprov; \
+    tar xzf /tmp/python.tar.gz -C /usr/libexec/mprov --strip-components=1; \
+    rm /tmp/python.tar.gz
+COPY dist/ /tmp/dist/
+COPY container/requirements.txt /tmp/container-requirements.txt
+COPY container/install_jobserver.sh /tmp/install_jobserver.sh
+# python-build-standalone was built with clang, which its sysconfig names as
+# the compiler for extensions; build pyparted and netifaces with EL8's gcc.
+RUN CC=gcc CXX=g++ PIP="/usr/libexec/mprov/bin/python3 -m pip" sh /tmp/install_jobserver.sh
+# Fail here, not on a node, if something the job server or the baked node
+# scripts import didn't build (mprov_scripts#86).
+RUN /usr/libexec/mprov/bin/python3 -c 'import mprov_jobserver.main, mprov_jobserver.script, parted, netifaces, pyroute2, sh, yaml, requests, jinja2, psutil'
+# MPROV_BUNDLE_VERSION says which job server is in it; image-update only
+# unpacks a bundle of its own version.
+RUN set -e; \
+    v=$(/usr/libexec/mprov/bin/python3 -c 'from importlib.metadata import version; print(version("mprov_jobserver"))'); \
+    echo "$v" > /usr/libexec/mprov/MPROV_BUNDLE_VERSION; \
+    mkdir /out; \
+    tar czf "/out/mprov-jobserver-${v}-x86_64.tar.gz" -C /usr/libexec/mprov .
+
+# Just the bundle tarball, for the release to attach for job servers
+# installed with pip: `docker buildx build --target bundle-export
+# --output type=local,dest=<dir> .` (ci_build.yml).
+FROM scratch AS bundle-export
+COPY --from=bundle /out/ /
+
 # Start with Rocky Linux 8.8 as the base image
 # Use the full URL to avoid confusion with podman builds.
 FROM docker.io/rockylinux/rockylinux:8.8
@@ -42,30 +88,16 @@ RUN dnf update -y && \
 
 # install the mprov_jobserver python module and some other useful mods
 RUN dnf -y install python3.11-pip python3.11-devel
-# Install the job server from the wheel in dist/.  CI always builds one from
-# the checkout first (ci_build.yml, dockerimage-dev.yml); for a local build,
-# run `python -m build --wheel` first.  With no wheel in dist/ (only its
-# .placeholder), this installs the latest release from PyPI instead, which
-# is NOT the checked-out code (#320).  With more than one wheel in dist/,
-# the build fails rather than guess which one to install (#322).
+# Install the job server from the wheel in dist/, with the exact dependency
+# versions for this image (#166).  install_jobserver.sh says what happens
+# with no wheel or several (#320, #322).
 COPY dist/ /tmp/dist/
-# the exact dependency versions for this image (#166)
 COPY container/requirements.txt /tmp/container-requirements.txt
-# `set --` puts the glob's matches in $1..$N; with no match, $1 is the
-# unexpanded pattern, which doesn't exist.
-RUN set -e; \
-    set -- /tmp/dist/*.whl; \
-    if [ ! -e "$1" ]; then \
-        echo "No wheel in dist/: installing the latest mprov_jobserver release from PyPI, NOT the checked-out code."; \
-        pip3 --no-cache-dir install -c /tmp/container-requirements.txt mprov_jobserver pyyaml requests jinja2; \
-    elif [ "$#" -gt 1 ]; then \
-        echo "dist/ has $# wheels, expected one:" "$@" >&2; \
-        echo "Remove the old ones (rm dist/*.whl), rebuild the wheel and build again." >&2; \
-        exit 1; \
-    else \
-        pip3 uninstall -y mprov-jobserver; \
-        pip3 install -c /tmp/container-requirements.txt "$1"; \
-    fi
+COPY container/install_jobserver.sh /tmp/install_jobserver.sh
+RUN PIP=pip3 sh /tmp/install_jobserver.sh
+
+# The node-image bundle from the first stage (#309).
+COPY --from=bundle /out/ /usr/share/mprov/
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \

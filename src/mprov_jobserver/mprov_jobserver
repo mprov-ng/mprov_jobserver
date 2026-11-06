@@ -4,7 +4,7 @@ export PYTHONUNBUFFERED=1
 
 # Prefer the Python interpreter installed alongside this launcher.  Resolve
 # symlinks first: in a node image /usr/local/bin/mprov_jobserver is a link
-# into the bundled Python at /usr/lib/mprov/bin (#309), and the interpreter
+# into the bundled Python at /usr/libexec/mprov/bin (#309), and the interpreter
 # is next to the target, not next to the link (#310).
 scriptDir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 

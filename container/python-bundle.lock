@@ -1,0 +1,9 @@
+# The CPython that the job server's portable bundle is built on (#309):
+# a python-build-standalone release, unpacked at /usr/libexec/mprov in node
+# images.  Sourced by the Dockerfile's bundle stage.  To update it, take the
+# x86_64-unknown-linux-gnu-install_only tarball's line from the release's
+# SHA256SUMS:
+# https://github.com/astral-sh/python-build-standalone/releases
+PBS_RELEASE=20261021
+PBS_PYTHON=3.11.17
+PBS_SHA256=7cc8d9dce9ea23c31267e7f244005c8979da04794b7737a3a30e62b03abeb120
