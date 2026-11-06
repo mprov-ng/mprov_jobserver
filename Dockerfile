@@ -42,9 +42,11 @@ RUN dnf update -y && \
 
 # install the mprov_jobserver python module and some other useful mods
 RUN dnf -y install python3.11-pip python3.11-devel
-# this line will pull in any built .whls to build the image, for development purposes.
-# or, if we are running in CI, pull it from pypi.
-# RUN mkdir -p /tmp/dist
+# Install the job server from the wheel in dist/.  CI always builds one from
+# the checkout first (ci_build.yml, dockerimage-dev.yml); for a local build,
+# run `python -m build --wheel` first.  With no wheel in dist/ (only its
+# .placeholder), this installs the latest release from PyPI instead, which
+# is NOT the checked-out code (#320).
 COPY dist/ /tmp/dist/
 # the exact dependency versions for this image (#166)
 COPY container/requirements.txt /tmp/container-requirements.txt
