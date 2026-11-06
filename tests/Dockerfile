@@ -15,5 +15,7 @@ COPY tests/ /tests/
 # test_repack_image.py runs the repo-root script at ../repack_image relative
 # to /tests, so ship it at the filesystem root like start_server.sh.
 COPY repack_image /repack_image
+# test_config.py renders the container's config template at ../ too.
+COPY jobserver.yaml.j2 /jobserver.yaml.j2
 WORKDIR /tests
 ENTRYPOINT ["python3", "-m", "pytest", "-v", "-p", "no:cacheprovider", "/tests"]

@@ -4,6 +4,7 @@ import socket
 from mprov_jobserver.tls import ca_bundle
 import yaml, os, sys, time
 from mprov_jobserver.log import get_logger
+from mprov_jobserver.config import merge_config
 from mprov_jobserver.version import VERSION_HEADER
 
 log = get_logger(__name__)
@@ -53,11 +54,8 @@ class MProvScript():
     with open(self.configfile, "r") as yamlfile:
       self.config_data = yaml.load(yamlfile, Loader=yaml.FullLoader)
 
-    # flatten the config space
-    result = {}
-    for entry in self.config_data:
-      result.update(entry)
-    self.config_data = result
+    # flatten the config space, the same way as the job server (#301)
+    self.config_data = merge_config(self.config_data)
 
     # map the global config on to our object
     for config_entry in self.config_data['global'].keys():

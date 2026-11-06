@@ -82,6 +82,8 @@ On start-up the container renders `/etc/mprov/jobserver.yaml` from these:
 | `MPROV_ADDRESS` | this job server's address, as the nodes reach it |
 | `MPROV_MODS` | the job modules to run, space separated — see *Available job modules* |
 | `MPROV_ARGS` | arguments for the job server itself (default `-c /etc/mprov/jobserver.yaml`) |
+| `MPROV_CA_BUNDLE` | optional: `caBundle`, the CA certificate file for an `https` mPCC whose certificate is from a site or self-signed CA, e.g. `/etc/mprov/mpcc-ca.pem` |
+| `MPROV_LOG_LEVEL` | optional: `logLevel`, one of `error`, `warning`, `info` (the default) or `debug` |
 | `TZ` | the container's time zone |
 
 With mprov-compose these live in `.env`, copied from `stack.env.dist`.
@@ -94,24 +96,29 @@ restart.
   which are on the volume, are not regenerated, and are pulled in by the
   `!include` at the end of the generated file.
 - **Global settings with no environment variable of their own** —
-  `caBundle`, `hostId`, `logLevel`, `logTimestamps`, `addresses` — have
-  nowhere to go in the generated file. Put them in a file of your own on the
-  volume, say `/etc/mprov/jobserver-local.yaml`, and point the job server at
-  it instead:
+  `hostId`, `logTimestamps`, `addresses`, a `heartbeatInterval` other than
+  10 — go in a plugin file of their own, say
+  `/etc/mprov/plugins/local.yaml`, with just the settings you want:
 
   ```
-  MPROV_ARGS=-c /etc/mprov/jobserver-local.yaml
+  - global:
+      hostId: 'rack4-js01'
+      logTimestamps: True
   ```
 
-  That file is yours, so it must carry the whole `global:` section,
-  including `mprovURL`, `apikey`, `myaddress` and `jobmodules` — the
-  environment variables above no longer apply once you stop using the
-  generated file. Copy the generated one as a starting point.
+  The `global:` settings from every file are merged, so this adds to the
+  generated section rather than replacing it: `mprovURL`, `apikey` and the
+  rest still come from the environment. Where a setting is in both, the
+  plugin file wins, and between plugin files the one whose name sorts last
+  wins. (Before 0.7.0 a second `global:` replaced the whole section, so the
+  only way was a complete config of your own passed with `MPROV_ARGS=-c`;
+  that still works, but is no longer needed.)
 
 Here is the whole `global:` section with everything it takes. The container
-generates only the first few — `mprovURL`, `apikey`, `heartbeatInterval`,
-`myaddress` and `jobmodules` — so the commented-out ones below are the ones
-that need a config file of your own, as above:
+generates `mprovURL`, `apikey`, `heartbeatInterval`, `myaddress` and
+`jobmodules`, plus `caBundle` and `logLevel` when `MPROV_CA_BUNDLE` and
+`MPROV_LOG_LEVEL` are set; the other commented-out ones below go in a plugin
+file, as above:
 ```
 - global:
     # This points to your mprov control center instance.
