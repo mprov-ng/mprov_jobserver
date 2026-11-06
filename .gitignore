@@ -154,3 +154,6 @@ src/mprov_jobserver/bin/slugify
 
 # Local environment for dev-docker-compose.yml; copy stack.env.example
 stack.env
+
+# Per-PR git worktrees (git worktree add .worktree/<n> ...)
+.worktree/
