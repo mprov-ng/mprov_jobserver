@@ -7,8 +7,9 @@ if [ -e /etc/mprov/apikey ]
 then
   . /etc/mprov/apikey
 fi
-# let's template our config out based on env vars
-python3 -c 'import os
+# let's template our config out based on env vars, on the job server's own
+# Python: in the image, /usr/bin/python3 is the OS's and has no jinja2 (#111)
+/usr/libexec/mprov/bin/python3 -c 'import os
 import sys
 import jinja2
 sys.stdout.write(jinja2.Template(sys.stdin.read()).render(env=os.environ))
