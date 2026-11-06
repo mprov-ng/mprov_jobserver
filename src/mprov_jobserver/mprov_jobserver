@@ -38,7 +38,7 @@ die()
   exit 1
 }
 
-version_greater_equal "${pythonVersion}" 3.8.0 || die "Error: need python 3.8 or above"
+version_greater_equal "${pythonVersion}" 3.11.0 || die "Error: need python 3.11 or above"
 
 # exec, so the job server replaces this script instead of running under it:
 # a SIGTERM sent here reaches the job server itself, which handles it, rather

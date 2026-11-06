@@ -52,6 +52,11 @@ access.
 > **Installing on bare metal is not supported.** The package is still on
 > PyPI and `pip install mprov_jobserver` works, but nothing here documents
 > or tests running the job server as a system service.
+>
+> From 0.7.0 the package needs **Python 3.11 or newer**: the container image
+> has it, and a host installing with pip needs it too. Node images don't
+> need any particular Python for the job server, which goes into them with
+> its own (see below), so any EL8 or EL9 image works.
 
 ### How nodes get the job server
 

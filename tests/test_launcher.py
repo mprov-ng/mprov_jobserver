@@ -124,11 +124,11 @@ def test_launcher_rejects_old_python(tmp_path):
     """Reject Python versions below the minimum supported version."""
     returncode, stdout, stderr = run_launcher(
         tmp_path,
-        adjacent={"python3": "3.7.0"},
+        adjacent={"python3": "3.10.12"},
     )
 
     assert returncode != 0
-    assert "need python 3.8 or above" in stdout
+    assert "need python 3.11 or above" in stdout
     assert "illegal option" not in stderr.lower()
     assert "unrecognized option" not in stderr.lower()
 
