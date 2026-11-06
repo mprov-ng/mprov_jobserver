@@ -46,11 +46,26 @@ RUN dnf -y install python3.11-pip python3.11-devel
 # the checkout first (ci_build.yml, dockerimage-dev.yml); for a local build,
 # run `python -m build --wheel` first.  With no wheel in dist/ (only its
 # .placeholder), this installs the latest release from PyPI instead, which
-# is NOT the checked-out code (#320).
+# is NOT the checked-out code (#320).  With more than one wheel in dist/,
+# the build fails rather than guess which one to install (#322).
 COPY dist/ /tmp/dist/
 # the exact dependency versions for this image (#166)
 COPY container/requirements.txt /tmp/container-requirements.txt
-RUN if [ -e /tmp/dist/*.whl ]; then pip3 uninstall -y mprov-jobserver; pip3 install -c /tmp/container-requirements.txt /tmp/dist/*.whl; else pip3 --no-cache-dir install -c /tmp/container-requirements.txt mprov_jobserver pyyaml requests jinja2; fi; 
+# `set --` puts the glob's matches in $1..$N; with no match, $1 is the
+# unexpanded pattern, which doesn't exist.
+RUN set -e; \
+    set -- /tmp/dist/*.whl; \
+    if [ ! -e "$1" ]; then \
+        echo "No wheel in dist/: installing the latest mprov_jobserver release from PyPI, NOT the checked-out code."; \
+        pip3 --no-cache-dir install -c /tmp/container-requirements.txt mprov_jobserver pyyaml requests jinja2; \
+    elif [ "$#" -gt 1 ]; then \
+        echo "dist/ has $# wheels, expected one:" "$@" >&2; \
+        echo "Remove the old ones (rm dist/*.whl), rebuild the wheel and build again." >&2; \
+        exit 1; \
+    else \
+        pip3 uninstall -y mprov-jobserver; \
+        pip3 install -c /tmp/container-requirements.txt "$1"; \
+    fi
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \
