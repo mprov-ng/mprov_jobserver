@@ -2,8 +2,11 @@
 # override this if you need to.
 export PYTHONUNBUFFERED=1
 
-# Prefer the Python interpreter installed alongside this launcher.
-scriptDir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Prefer the Python interpreter installed alongside this launcher.  Resolve
+# symlinks first: in a node image /usr/local/bin/mprov_jobserver is a link
+# into the bundled Python at /usr/lib/mprov/bin (#309), and the interpreter
+# is next to the target, not next to the link (#310).
+scriptDir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 
 if [ -x "$scriptDir/python3" ]; then
   pythonBinary="$scriptDir/python3"
@@ -36,23 +39,6 @@ die()
 }
 
 version_greater_equal "${pythonVersion}" 3.8.0 || die "Error: need python 3.8 or above"
-
-# exec, so the job server replaces this script instead of running under it:
-# a SIGTERM sent here reaches the job server itself, which handles it, rather
-# than killing the script and orphaning the job server (#294).
-exec "$pythonBinary" -m mprov_jobserver.main "$@"
-version_greater_equal()
-{
-    printf '%s\n%s\n' "$2" "$1" | sort --check=quiet --version-sort
-}
-
-die() 
-{
-  echo $1
-  exit 1
-}
-
-version_greater_equal "${pythonVersion}" 3.8.0 ||  die "Error: need python 3.8 or above"
 
 # exec, so the job server replaces this script instead of running under it:
 # a SIGTERM sent here reaches the job server itself, which handles it, rather

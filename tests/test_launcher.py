@@ -149,7 +149,7 @@ def test_launcher_falls_back_to_path_python(tmp_path):
     )
 
     # Provide required shell utilities without exposing system python3.
-    for command in ("awk", "sort", "dirname", "pwd"):
+    for command in ("awk", "sort", "dirname", "readlink"):
         executable = shutil.which(command)
         assert executable is not None
         (fake_bin / command).symlink_to(executable)
@@ -169,3 +169,60 @@ def test_launcher_falls_back_to_path_python(tmp_path):
 
     assert process.returncode == 0, stderr
     assert stdout.strip() == "path-python"
+
+
+def run_through_symlink(tmp_path, link_target):
+    """
+    Lay out a node image's bundle (#309): the launcher and its python3 in
+    lib/mprov/bin, a python3 on PATH as well, and bin/mprov_jobserver a
+    symlink to the launcher.  Run the launcher through the link, the way
+    script-runner.sh and the systemd units call it.
+    """
+    bundle_bin = tmp_path / "lib" / "mprov" / "bin"
+    link_dir = tmp_path / "local" / "bin"
+    other_bin = tmp_path / "other-bin"
+    for d in (bundle_bin, link_dir, other_bin):
+        d.mkdir(parents=True)
+
+    launcher = bundle_bin / "mprov_jobserver"
+    shutil.copy2(LAUNCHER, launcher)
+    launcher.chmod(0o755)
+    create_fake_python(bundle_bin / "python3", marker="bundled-python3")
+    create_fake_python(other_bin / "python3", marker="path-python3")
+
+    link = link_dir / "mprov_jobserver"
+    link.symlink_to(link_target(launcher, link_dir))
+
+    env = os.environ.copy()
+    env["PATH"] = f"{other_bin}:/usr/bin:/bin"
+    # Popen, not subprocess.run: conftest.py refuses run() for the plugins.
+    process = subprocess.Popen(
+        [str(link)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+    stdout, stderr = process.communicate(timeout=10)
+    return process.returncode, stdout.strip(), stderr.strip()
+
+
+def test_launcher_run_through_a_symlink_uses_the_targets_python(tmp_path):
+    """The interpreter next to the link's target wins, not PATH's (#310)."""
+    returncode, stdout, stderr = run_through_symlink(
+        tmp_path, lambda launcher, link_dir: launcher
+    )
+
+    assert returncode == 0, stderr
+    assert stdout == "bundled-python3"
+
+
+def test_launcher_run_through_a_relative_symlink(tmp_path):
+    """A relative link, as `ln -s ../../lib/mprov/bin/...` makes, works too."""
+    returncode, stdout, stderr = run_through_symlink(
+        tmp_path, lambda launcher, link_dir: os.path.relpath(launcher, link_dir)
+    )
+
+    assert returncode == 0, stderr
+    assert stdout == "bundled-python3"
