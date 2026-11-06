@@ -7,7 +7,9 @@ import sys
 import tempfile
 import json
 import shlex
+import shutil
 import signal
+import tarfile
 import time
 import urllib.parse
 
@@ -19,9 +21,31 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from os.path import dirname, basename, isfile, join
 import glob
 from mprov_jobserver.log import get_logger
-from mprov_jobserver.version import pip_requirement
+from mprov_jobserver.version import jobserver_version
 
 log = get_logger(__name__)
+
+# Where the job server image keeps the node-image bundle (#309), and where
+# a bundle goes in a node image.  BUNDLE_LINK is the path script-runner.sh
+# and the systemd units call.
+BUNDLE_DIR = "/usr/share/mprov"
+BUNDLE_PREFIX = "/usr/lib/mprov"
+BUNDLE_LINK = "/usr/local/bin/mprov_jobserver"
+RELEASES_URL = "https://github.com/mprov-ng/mprov_jobserver/releases"
+
+
+def bundle_name(version):
+  return f"mprov-jobserver-{version}-x86_64.tar.gz"
+
+
+def inside(imgDir, path):
+  """
+  True if path, with every symlink in it resolved, is still in imgDir.  The
+  image tree comes from an image we unpacked, which may have put a symlink
+  where we're about to write, pointing out at the host (#169).
+  """
+  root = os.path.realpath(imgDir)
+  return os.path.realpath(path).startswith(root + os.sep)
 
 jenv = Environment(
     loader=PackageLoader("mprov_jobserver"),
@@ -51,11 +75,17 @@ class image_update(JobServerPlugin):
   # killed outright.  A KILL runs no traps, so it costs us the script's own
   # unmount and we do it ourselves instead; give it a moment first.
   killGrace = 30
-  # How long the job server's own install into the image may take (#317).
-  # Shorter than scriptTimeout on purpose: this is one pip install, not a
-  # build, but it still has to survive a slow mirror or a resolver having
-  # a bad day.  0 means no limit.
+  # No longer used: the job server goes into images as a bundle, not with
+  # pip (#309).  Kept so a 0.6 config that sets it (#317) doesn't log an
+  # unknown-setting error at every start.
   pipTimeout = 1800
+  # The node-image bundle to unpack into each image (#309).  Empty means the
+  # one the job server image carries, in BUNDLE_DIR.  A job server installed
+  # with pip has none, so it sets this to a downloaded release tarball.
+  pythonBundle = ""
+  # How long uninstalling a 0.6-era pip-installed job server from an image
+  # being rebuilt may take.
+  pipUninstallTimeout = 300
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -382,6 +412,92 @@ class image_update(JobServerPlugin):
         onKill()
     return False
 
+  def bundlePath(self):
+    if self.pythonBundle:
+      return self.pythonBundle
+    return os.path.join(BUNDLE_DIR, bundle_name(jobserver_version()))
+
+  def removePipInstall(self, imgDir, image):
+    """
+    Uninstall a job server that a 0.6 build pip-installed onto the image's
+    own Python (#309).  Left in place, a rebuilt image would carry a stale
+    one beside the bundle.  Best effort: it only logs a warning.
+    """
+    if not glob.glob(os.path.join(imgDir, "usr/local/lib/python3*/site-packages/mprov_jobserver")):
+      return
+    if not self.runBounded(["chroot", imgDir, "pip3", "uninstall", "-y", "mprov_jobserver"],
+                           self.pipUninstallTimeout,
+                           f"removing the old pip-installed job server from {image}"):
+      log.warning(f"Unable to uninstall the old pip-installed job server from {image}; "
+                  f"the image keeps it, unused, beside {BUNDLE_PREFIX}.")
+
+  def installBundle(self, imgDir, image):
+    """
+    Put the job server into the image as the bundle: a self-contained
+    Python with the job server in it, unpacked at BUNDLE_PREFIX, with
+    BUNDLE_LINK pointing into it (#309).  It needs no network and no
+    Python in the image, and it is always the job server that built the
+    image: a bundle of any other version is refused.  Returns True if done.
+    """
+    ours = jobserver_version()
+    path = self.bundlePath()
+    if not os.path.isfile(path):
+      log.error(f"No job server bundle at {path}, so {image} can't be built. A job server "
+                f"installed with pip has none built in: download {bundle_name(ours)} from "
+                f"{RELEASES_URL}/tag/v{ours} and set pythonBundle: to its path in the "
+                f"image-update section of the config.")
+      return False
+
+    target = imgDir + BUNDLE_PREFIX
+    new = target + ".new"
+    old = target + ".old"
+    link = imgDir + BUNDLE_LINK
+    for where in (os.path.dirname(target), os.path.dirname(link)):
+      os.makedirs(where, exist_ok=True)
+      if not inside(imgDir, where):
+        log.error(f"{where} leads out of the image tree; not installing the job server into {image}.")
+        return False
+
+    try:
+      with tarfile.open(path) as tar:
+        try:
+          marker = tar.extractfile("./MPROV_BUNDLE_VERSION")
+        except KeyError:
+          marker = None
+        theirs = marker.read().decode().strip() if marker else None
+        if theirs != ours:
+          log.error(f"{path} holds job server {theirs or 'of an unknown version'}, not {ours}; "
+                    f"an image must get the job server that builds it. Use {bundle_name(ours)}.")
+          return False
+        for stale in (new, old):
+          if os.path.lexists(stale):
+            shutil.rmtree(stale) if os.path.isdir(stale) and not os.path.islink(stale) else os.unlink(stale)
+        os.mkdir(new, 0o755)
+        # the "tar" filter keeps the bundle's own relative symlinks
+        # (bin/python3 -> python3.11) but refuses anything that would land
+        # outside it
+        tar.extractall(new, filter="tar")
+    except (OSError, tarfile.TarError) as err:
+      log.error(f"Unable to unpack {path} into {image}: {err}")
+      if os.path.isdir(new):
+        shutil.rmtree(new, ignore_errors=True)
+      return False
+
+    # swap the new bundle in; a failure above left any old one in place
+    if os.path.islink(target) or os.path.isfile(target):
+      os.unlink(target)
+    elif os.path.isdir(target):
+      os.rename(target, old)
+    os.rename(new, target)
+    if os.path.isdir(old):
+      shutil.rmtree(old, ignore_errors=True)
+
+    if os.path.lexists(link):
+      os.unlink(link)
+    os.symlink(BUNDLE_PREFIX + "/bin/mprov_jobserver", link)
+    log.info(f"installed job server {ours} into {image} at {BUNDLE_PREFIX}.")
+    return True
+
   def runImageScripts(self, script, imgDir, image):
     """
     Run the image-gen script runner, bounded by scriptTimeout (#304).
@@ -546,21 +662,15 @@ class image_update(JobServerPlugin):
         qimg = shlex.quote(imgDir)
         # copy in the system resolv.conf
         os.system(f"/bin/cp -f /etc/resolv.conf {qimg}/etc/resolv.conf")
-        # pin what goes into the image to a job server that speaks the same
-        # API version we do, rather than whatever is newest on PyPI: an
-        # unpinned --upgrade put a 0.6 runner into images built against
-        # older mPCCs, and those builds never finished (#303)
-        # bounded, and as an argument list: an install that blocks on a slow
-        # or stalled index would otherwise hang the build for ever, the same
-        # way the script runner did (#317).  Nothing is bind-mounted into
-        # the image yet -- script-runner.sh does that later -- so a killed
-        # install leaves nothing to unmount.  With no shell there is also
-        # nothing to quote, so the pin's '<' is safe by construction.
-        if not self.runBounded(["chroot", imgDir, "pip3", "--no-cache-dir",
-                                "install", "--upgrade", pip_requirement()],
-                               self.pipTimeout,
-                               f"installing the job server into {imageDetails['slug']}"):
-          log.error("Unable to install mprov_jobserver python module.")
+        # the job server goes into the image as a bundle with its own
+        # Python, not pip-installed onto the image's (#309): no PyPI, no
+        # resolver to hang (#317), and always exactly our own version, which
+        # is stricter than the old API-version pin (#303).  Nothing is
+        # bind-mounted into the image yet -- script-runner.sh does that
+        # later -- so a failure here leaves nothing to unmount.
+        self.removePipInstall(imgDir, imageDetails['slug'])
+        if not self.installBundle(imgDir, imageDetails['slug']):
+          log.error("Unable to install the job server into the image.")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 

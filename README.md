@@ -53,21 +53,32 @@ access.
 > PyPI and `pip install mprov_jobserver` works, but nothing here documents
 > or tests running the job server as a system service.
 
-### The PyPI package is still used — by nodes, not by job servers
+### How nodes get the job server
 
-Don't mistake "the job server runs in a container" for "the package is
-obsolete". Every system image built by `image-update` installs
-`mprov_jobserver` from PyPI inside the image:
-
-```
-chroot <image> pip3 --no-cache-dir install --upgrade mprov_jobserver
-```
-
-That is how a provisioned node gets `script-runner` and the `MProvScript`
-class that the node scripts in
+Every system image built by `image-update` gets a copy of the job server,
+for `script-runner` and the `MProvScript` class that the node scripts in
 [mprov_scripts](https://github.com/mprov-ng/mprov_scripts) are built on.
-Nodes are not containers, so the package stays published and supported for
-that use.
+Since 0.7.0 it goes in as a **bundle**: a self-contained Python 3.11 with
+the job server and its dependencies installed in it, unpacked at
+`/usr/lib/mprov` in the image, with `/usr/local/bin/mprov_jobserver` a link
+to it. The image's own Python isn't used or changed, an image build needs
+no PyPI access, and the image always gets exactly the version of the job
+server that built it.
+
+The container image carries the bundle for its own version, in
+`/usr/share/mprov/`. A job server installed with pip has none built in:
+download `mprov-jobserver-<version>-x86_64.tar.gz` for its version from the
+[release](https://github.com/mprov-ng/mprov_jobserver/releases) and point
+`image-update` at it, or image builds fail with a message saying so:
+
+```
+- image-update:
+    pythonBundle: '/srv/mprov/mprov-jobserver-0.7.0-x86_64.tar.gz'
+```
+
+Images built before 0.7.0 have the job server pip-installed onto their own
+Python. Rebuilding one with 0.7.0 removes that copy and puts the bundle in
+its place.
 
 ## Setup
 

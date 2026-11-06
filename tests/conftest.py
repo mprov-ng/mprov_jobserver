@@ -230,3 +230,43 @@ def commands(monkeypatch):
   monkeypatch.setattr(os, "system", recorder)
   monkeypatch.setattr(subprocess, "Popen", recorder.popen)
   return recorder
+
+
+def make_bundle(path, version, files=None, marker=True):
+  """
+  A node-image bundle tarball (#309) at path: MPROV_BUNDLE_VERSION, a
+  bin/mprov_jobserver and a relative bin/python3 symlink, like the real one
+  as `tar czf ... -C /usr/lib/mprov .` makes it.
+  """
+  import io
+  import tarfile
+  files = {"bin/mprov_jobserver": b"#!/bin/bash\n", "bin/python3.11": b"\x7fELF"} if files is None else files
+  if marker:
+    files = {"MPROV_BUNDLE_VERSION": f"{version}\n".encode(), **files}
+  with tarfile.open(path, "w:gz") as tar:
+    for name, data in files.items():
+      info = tarfile.TarInfo("./" + name)
+      info.size = len(data)
+      info.mode = 0o755
+      tar.addfile(info, io.BytesIO(data))
+    link = tarfile.TarInfo("./bin/python3")
+    link.type = tarfile.SYMTYPE
+    link.linkname = "python3.11"
+    tar.addfile(link)
+  return str(path)
+
+
+@pytest.fixture(autouse=True)
+def node_bundle(tmp_path_factory, monkeypatch):
+  """
+  The bundle the job server image carries, of our own version, so an image
+  build finds one (#309).  Tests about a missing or wrong bundle set the
+  plugin's pythonBundle instead.
+  """
+  from mprov_jobserver.plugins import image_update
+  from mprov_jobserver.version import jobserver_version
+  where = tmp_path_factory.mktemp("share-mprov")
+  ours = jobserver_version()
+  make_bundle(where / image_update.bundle_name(ours), ours)
+  monkeypatch.setattr(image_update, "BUNDLE_DIR", str(where))
+  return where

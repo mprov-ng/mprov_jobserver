@@ -92,6 +92,22 @@ jobs:
             ghcr.io/mprov-ng/mprov-jobserver:latest
           push: ${{ github.event_name == 'release' }}
 
+      # The node-image bundle the image carries (#309), attached to the
+      # release for job servers installed with pip, which point their
+      # image-update pythonBundle setting at it.  Same builder, so the bundle
+      # stage comes from the image build's cache.
+      - name: Attach the node-image bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker buildx build --target bundle-export --output type=local,dest=bundle-out .
+          ls -l bundle-out
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            gh release upload "$tag" bundle-out/mprov-jobserver-*-x86_64.tar.gz --clobber
+          else
+            echo "Dry run: would attach bundle-out/* to the $tag release."
+          fi
+
       # main builds as the next release plus .devN (see dockerimage-dev.yml),
       # so start the next one: v0.0.63 sets VERSION to 0.0.64.dev0.  Skipped
       # if main is already past it, e.g. for a release of an older branch.

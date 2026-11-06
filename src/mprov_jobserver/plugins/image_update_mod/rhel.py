@@ -416,15 +416,19 @@ class UpdateImage(JobServerPlugin):
     self.disable_stock_repos(imgDir, f"chroot {qimg} dnf -y config-manager --disable")
 
     # install and copy the kernel image to the image root
+    # The job server and the baked node scripts run on the bundled Python
+    # at /usr/lib/mprov (#309), so EL8 images no longer need python38 and
+    # the alternatives that pointed python3 at it (#312).  EL9 keeps its
+    # distro python3 packages for anything else in the image that uses them.
+    # parted, not parted-devel: the bundle's pyparted needs only the
+    # runtime libparted.so.2, which is in parted on EL8 and EL9.
     if float(imageDetails['osdistro']['version']) >= 9 :
-      pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch glibc-langpack-en" 
-      
+      pythonpkgs = " python3 python3-devel python3-pyyaml python3-devel python3-requests python3-jinja2.noarch glibc-langpack-en"
     else:
-      pythonpkgs = " python38 python38-pip python38-devel python38-pyyaml python38-devel python38-requests python38-jinja2.noarch glibc-langpack-en"
-      
+      pythonpkgs = " glibc-langpack-en"
 
-    log.info(f'chroot {qimg} dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
-    if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+    log.info(f'chroot {qimg} dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs)
+    if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
       # if this fails, let's try to rebuild the rpm db
       if os.system(f'chroot {qimg} rpm --rebuilddb'):
         log.error("unable to install required packages into image filesystem")
@@ -433,7 +437,7 @@ class UpdateImage(JobServerPlugin):
         return
       else:
         # we succeeded so try to run the original command again.
-        if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted-devel gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
+        if os.system(f'chroot {qimg}  dnf -y  --releasever=' + ver  + f'  install kernel wget jq parted gcc grub2 mdadm rsync grub2-efi-x64 grub2-efi-x64-modules dosfstools ipmitool python3-dnf-plugin-versionlock.noarch' + pythonpkgs):
           # still failed, uh... let's die.
           log.error("Unable to use dnf for some reason.  Bailing.")
           log.error("No image generated.")
@@ -443,18 +447,6 @@ class UpdateImage(JobServerPlugin):
 
     # set up a version lock on the kernel
     os.system(f'chroot {qimg} dnf -y versionlock kernel*')
-
-    if float(imageDetails['osdistro']['version']) < 9 :
-      os.system(f'chroot {qimg} alternatives --set python3 /usr/bin/python3.8')
-      os.system(f'chroot {qimg} alternatives --set python /usr/bin/python3.8')
-      os.system(f'chroot {qimg} alternatives --set pip3 /usr/bin/pip3.8')
-
-    # pip install some stuff
-    if os.system(f"chroot {qimg} pip3 install sh pyparted==3.11.7 requests"):
-      log.error("uanble to install pip packages into image filesystem")
-      self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
-      self.threadOk = False
-      return
 
     if os.path.exists(imgDir + '/' + imageDetails['slug'] + '.vmlinuz'):
       try:

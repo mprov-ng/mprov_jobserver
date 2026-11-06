@@ -325,22 +325,3 @@ def test_a_script_runner_session_warns_instead(monkeypatch):
   assert version.warn_response in server.session.hooks["response"]
   assert version.check_response not in server.session.hooks["response"]
 
-
-# pip_requirement(): what an image build installs into the image
-
-@pytest.mark.parametrize("ours,expected", [
-  ("0.6.0", "mprov_jobserver>=0.6,<0.7"),
-  ("0.6.1.dev0", "mprov_jobserver>=0.6,<0.7"),
-  ("0.9.4", "mprov_jobserver>=0.9,<0.10"),
-  ("1.0.0", "mprov_jobserver>=1.0,<1.1"),
-])
-def test_an_image_gets_a_runner_of_our_own_api_version(monkeypatch, ours, expected):
-  monkeypatch.setattr(version, "jobserver_version", lambda: ours)
-  assert version.pip_requirement() == expected
-
-
-def test_an_unknown_version_doesnt_pin_the_image_to_nothing(monkeypatch):
-  """ 0.0 means we couldn't read our own version; >=0.0,<0.1 would install
-  nothing at all, which is worse than the unpinned install it replaces. """
-  monkeypatch.setattr(version, "jobserver_version", lambda: "not-a-version")
-  assert version.pip_requirement() == "mprov_jobserver"

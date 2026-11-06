@@ -140,21 +140,6 @@ def warn_response(response, *args, **kwargs):
   return response
 
 
-def pip_requirement():
-  '''
-  What an image build installs into the image it is building (#303): a job
-  server that speaks the same API version this one does, rather than
-  whatever is newest on PyPI.  The bound comes from our own version, so it
-  doesn't need editing at each release.
-  '''
-  ours = api_version()
-  if ours == '0.0':
-    # we don't know our own version; pinning to 0.0 would install nothing
-    return 'mprov_jobserver'
-  major, minor = ours.split('.')
-  return f'mprov_jobserver>={major}.{minor},<{major}.{int(minor) + 1}'
-
-
 def install(session, enforce=True):
   ''' Send our version on a session's requests, and check the mPCC's on its
   replies.  Hooks aren't inherited when a session is copied, so every
