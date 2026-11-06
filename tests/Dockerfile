@@ -8,8 +8,10 @@ ARG JOBSERVER_IMAGE=ghcr.io/mprov-ng/mprov-jobserver:dev
 FROM ${JOBSERVER_IMAGE}
 
 # genders for nodeattr, which checks the genders files libgenders writes.
+# pytest goes into the job server's own Python, the bundle (#111), so the
+# tests run on the interpreter and packages that ship.
 RUN dnf -y install genders && dnf -y clean all && \
-    pip3 --no-cache-dir install pytest
+    /usr/libexec/mprov/bin/python3 -m pip --no-cache-dir install pytest
 
 COPY tests/ /tests/
 # test_repack_image.py runs the repo-root script at ../repack_image relative
@@ -21,4 +23,4 @@ COPY jobserver.yaml.j2 /jobserver.yaml.j2
 # relative to /tests.
 COPY src/mprov_jobserver/mprov_jobserver /src/mprov_jobserver/mprov_jobserver
 WORKDIR /tests
-ENTRYPOINT ["python3", "-m", "pytest", "-v", "-p", "no:cacheprovider", "/tests"]
+ENTRYPOINT ["/usr/libexec/mprov/bin/python3", "-m", "pytest", "-v", "-p", "no:cacheprovider", "/tests"]

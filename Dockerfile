@@ -44,36 +44,40 @@ RUN set -e; \
 FROM scratch AS bundle-export
 COPY --from=bundle /out/ /
 
-# Start with Rocky Linux 8.8 as the base image
+# The job server image, on Rocky Linux 9 (#111).  Its dnf and rpm build
+# the node images and sync the repos, so its OS version matters: a Rocky 8
+# rpm can only read a Rocky 9 image's sqlite rpm database.
 # Use the full URL to avoid confusion with podman builds.
-FROM docker.io/rockylinux/rockylinux:8.8
+FROM docker.io/rockylinux/rockylinux:9.8
 
 # For every dnf command below: give up on a mirror that stalls for 15
 # seconds or crawls below 50 kB/s and move on to the next one, instead of
 # waiting on it, and retry dropped connections.
 RUN printf '%s\n' 'timeout=15' 'minrate=50k' 'retries=10' >> /etc/dnf/dnf.conf
 
-# install epel repo
-RUN dnf install -y epel-release
+# dnf-plugins-core for config-manager here and reposync in repo-update
+RUN dnf install -y epel-release dnf-plugins-core
 
 # Use EPEL's main server instead of the mirror list, which sometimes hands
 # out mirrors with bad certificates or stale metadata and fails the build.
-RUN sed -i -e 's|^metalink=|#metalink=|' \
+# EL9's EPEL also ships Cisco's openh264 repo, which has no such server to
+# point at and nothing we use: turn it off.
+RUN dnf config-manager --set-disabled epel-cisco-openh264 && \
+    sed -i -e 's|^metalink=|#metalink=|' \
         -e 's|^#baseurl=https://download.example/|baseurl=https://dl.fedoraproject.org/|' \
         /etc/yum.repos.d/epel*.repo
 
-# enable powertools repo
-RUN dnf config-manager --enable powertools
+# CRB is EL9's name for EL8's PowerTools
+RUN dnf config-manager --set-enabled crb
 
-# we need dev tools
+# the dnsmasq module builds iPXE from source at start-up (git, make, gcc,
+# and mkisofs from genisoimage)
 RUN dnf groupinstall -y "Development Tools"
 
-# Update system and install necessary dependencies
+# Update the system and install what the job modules run.  No Python
+# packages: the job server runs on its own Python, below.
 RUN dnf update -y && \
-    dnf install -y \   
-    python38 \
-    python38-devel \
-    python38-pip \
+    dnf install -y \
     git \
     wget \
     iproute \
@@ -81,28 +85,29 @@ RUN dnf update -y && \
     tcpdump \
     ipmitool \
     which \
-    parted-devel \
-    gcc \
+    parted \
     genisoimage \
-    procps
+    procps \
+    rsync \
+    cpio
 
-# install the mprov_jobserver python module and some other useful mods
-RUN dnf -y install python3.11-pip python3.11-devel
-# Install the job server from the wheel in dist/, with the exact dependency
-# versions for this image (#166).  install_jobserver.sh says what happens
-# with no wheel or several (#320, #322).
-COPY dist/ /tmp/dist/
-COPY container/requirements.txt /tmp/container-requirements.txt
-COPY container/install_jobserver.sh /tmp/install_jobserver.sh
-RUN PIP=pip3 sh /tmp/install_jobserver.sh
-
-# The node-image bundle from the first stage (#309).
+# The job server runs from the same bundle the node images get (#309,
+# #111): one Python for the job server, the same in the container as on
+# the nodes, and none of the image's own.  EL9's /usr/bin/python3 is the
+# platform Python that dnf needs; nothing here uses it.  The tarball stays
+# in /usr/share/mprov/ for image-update to unpack into images.
 COPY --from=bundle /out/ /usr/share/mprov/
+RUN set -e; \
+    mkdir -p /usr/libexec/mprov; \
+    tar xzf /usr/share/mprov/mprov-jobserver-*-x86_64.tar.gz -C /usr/libexec/mprov; \
+    ln -s /usr/libexec/mprov/bin/mprov_jobserver /usr/local/bin/mprov_jobserver; \
+    test "$(readlink -f /usr/local/bin/mprov_jobserver)" = /usr/libexec/mprov/bin/mprov_jobserver; \
+    /usr/libexec/mprov/bin/python3 -c 'import mprov_jobserver.main'
 
 RUN mkdir -p /etc/mprov && \
     chmod 700 /etc/mprov/ && \
     chown root:root /etc/mprov && \
-    cp /usr/local/lib/python3.*/site-packages/mprov_jobserver/plugins/ /etc/mprov/ -R
+    cp /usr/libexec/mprov/lib/python3.*/site-packages/mprov_jobserver/plugins/ /etc/mprov/ -R
 
 COPY start_server.sh /
 RUN chmod 755 /start_server.sh
