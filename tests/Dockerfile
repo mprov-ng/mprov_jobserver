@@ -17,5 +17,8 @@ COPY tests/ /tests/
 COPY repack_image /repack_image
 # test_config.py renders the container's config template at ../ too.
 COPY jobserver.yaml.j2 /jobserver.yaml.j2
+# test_launcher.py runs the checkout's launcher at ../src/mprov_jobserver/
+# relative to /tests.
+COPY src/mprov_jobserver/mprov_jobserver /src/mprov_jobserver/mprov_jobserver
 WORKDIR /tests
 ENTRYPOINT ["python3", "-m", "pytest", "-v", "-p", "no:cacheprovider", "/tests"]

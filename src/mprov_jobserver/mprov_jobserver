@@ -1,25 +1,44 @@
 #!/bin/bash
 # override this if you need to.
 export PYTHONUNBUFFERED=1
-pythonBinary=`which python3`
-if [ "$pythonBinary" == "" ]
-then
-  pythonBinary=`which python`
+
+# Prefer the Python interpreter installed alongside this launcher.  Resolve
+# symlinks first: in a node image /usr/local/bin/mprov_jobserver is a link
+# into the bundled Python at /usr/lib/mprov/bin (#309), and the interpreter
+# is next to the target, not next to the link (#310).
+scriptDir="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+
+if [ -x "$scriptDir/python3" ]; then
+  pythonBinary="$scriptDir/python3"
+elif [ -x "$scriptDir/python" ]; then
+  pythonBinary="$scriptDir/python"
+else
+  # Fall back to PATH for installations without an adjacent interpreter.
+  pythonBinary="$(command -v python3)"
+  if [ -z "$pythonBinary" ]; then
+    pythonBinary="$(command -v python)"
+  fi
 fi
-pythonVersion=`$pythonBinary -V | awk '{print $2}'`
+
+if [ -z "$pythonBinary" ]; then
+  echo "Error: Python interpreter not found" >&2
+  exit 1
+fi
+
+pythonVersion=$("$pythonBinary" -V | awk '{print $2}')
 
 version_greater_equal()
 {
     printf '%s\n%s\n' "$2" "$1" | sort --check=quiet --version-sort
 }
 
-die() 
+die()
 {
-  echo $1
+  echo "$1"
   exit 1
 }
 
-version_greater_equal "${pythonVersion}" 3.8.0 ||  die "Error: need python 3.8 or above"
+version_greater_equal "${pythonVersion}" 3.8.0 || die "Error: need python 3.8 or above"
 
 # exec, so the job server replaces this script instead of running under it:
 # a SIGTERM sent here reaches the job server itself, which handles it, rather
