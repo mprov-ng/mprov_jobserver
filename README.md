@@ -134,8 +134,20 @@ from a template on every start, so your changes are gone at the next
 restart.
 
 - **Per-module settings** go in the plugin files in `/etc/mprov/plugins/`,
-  which are on the volume, are not regenerated, and are pulled in by the
-  `!include` at the end of the generated file.
+  which are on the volume and are pulled in by the `!include` at the end of
+  the generated file.
+
+  From 0.7.0 the container brings the config it ships up to date on every
+  start (#334). It installs any shipped file that's missing and replaces
+  one an earlier release shipped, as long as you haven't edited it. A
+  plugin file you have edited is kept, and the new default is written
+  beside it as `<name>.yaml.new` (not included) for you to merge. Once your
+  file matches the default again, the `.new` is removed. An edited
+  `jobserver.yaml.j2` is replaced, and yours is kept as
+  `jobserver.yaml.j2.bak`; use the environment or `plugins/local.yaml`
+  instead. The plugin code (`*.py`) earlier images copied into
+  `/etc/mprov/plugins/` is removed. Nothing else in `/etc/mprov` is
+  touched.
 - **Global settings with no environment variable of their own** —
   `hostId`, `logTimestamps`, `addresses`, a `heartbeatInterval` other than
   10 — go in a plugin file of their own, say

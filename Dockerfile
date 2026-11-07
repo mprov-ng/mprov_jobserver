@@ -110,15 +110,19 @@ RUN set -e; \
     test "$(readlink -f /usr/local/bin/mprov_jobserver)" = /usr/libexec/mprov/bin/mprov_jobserver; \
     /usr/libexec/mprov/bin/python3 -c 'import mprov_jobserver.main'
 
-RUN mkdir -p /etc/mprov && \
-    chmod 700 /etc/mprov/ && \
-    chown root:root /etc/mprov && \
-    cp /usr/libexec/mprov/lib/python3.*/site-packages/mprov_jobserver/plugins/ /etc/mprov/ -R
+# The config the container ships: its template and the plugin configs,
+# kept pristine in /usr/share/mprov/config.  /etc/mprov is a volume shared
+# with the mPCC (mprov-compose's mprov-conf), which Docker seeds only while
+# it's empty, so it ships empty here and start_server.sh brings it up to
+# date from this copy on every start (#334, mprov-ng/mprov-compose#21).
+RUN set -e; \
+    mkdir -p /etc/mprov /usr/share/mprov/config/plugins; \
+    chmod 700 /etc/mprov; \
+    cp /usr/libexec/mprov/lib/python3.*/site-packages/mprov_jobserver/plugins/*.yaml /usr/share/mprov/config/plugins/
+COPY jobserver.yaml.j2 container/shipped-config.sha256 /usr/share/mprov/config/
 
 COPY start_server.sh /
 RUN chmod 755 /start_server.sh
-
-COPY jobserver.yaml.j2 /etc/mprov/
 
 # # setup for a systemd container
 # RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == \
