@@ -10,3 +10,4 @@ pyroute2==0.8.1
 dnspython>=2.0
 distro
 psutil
+cryptography>=42 # https://pypi.org/project/cryptography/ - Apache 2.0 or BSD; the job server's key and certificate (mprov_control_center#381)

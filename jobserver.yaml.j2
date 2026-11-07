@@ -4,9 +4,14 @@
     # e.g. "http://<IP of internal interface>/"
     
     mprovURL: {{env['MPROV_URL']}}
-    # this is the api key for your mprov control center so that the 
-    # jobserver can login and do stuff.
-    apikey: {{env['MPROV_APIKEY']}}
+{#- The job server enrolls with the mPCC for a certificate of its own, with
+    the token in MPROV_ENROLL_TOKEN or /etc/mprov/enroll_token, and keeps it
+    in MPROV_TLS_DIR (default /var/lib/mprov/tls).  The shared API key is
+    only a fallback until then, deprecated, and gone in 0.8.0
+    (mprov_control_center#381). #}
+{%- if env.get('MPROV_APIKEY') %}
+    apikey: {{ env['MPROV_APIKEY'] | tojson }}
+{%- endif %}
     # this is the interval which this jobserver will check in with the mPCC
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.

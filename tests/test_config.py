@@ -162,6 +162,18 @@ def test_the_template_sets_ca_bundle_and_log_level_from_the_environment():
   assert section["myaddress"] == "10.0.0.2"
 
 
+def test_the_template_leaves_the_api_key_out_without_one():
+  """ The shared key is only a fallback now (mprov_control_center#381): a
+  job server that enrolls has none. """
+  env = {k: v for k, v in ENV.items() if k != "MPROV_APIKEY"}
+  assert "apikey" not in global_section(env)
+  assert "apikey" not in global_section({**env, "MPROV_APIKEY": ""})
+
+
+def test_the_template_quotes_the_api_key():
+  assert global_section({**ENV, "MPROV_APIKEY": "a1b2.c3: d4"})["apikey"] == "a1b2.c3: d4"
+
+
 def test_the_rendered_template_loads_in_the_job_server(tmp_path, monkeypatch):
   monkeypatch.setattr(JobServer, "use_ca_bundle", lambda self: None)
   (tmp_path / "plugins").mkdir()
