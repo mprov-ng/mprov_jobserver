@@ -129,6 +129,18 @@ class FakeJobServer:
     # set to False to report no pending jobs to the plugin.
     self.has_jobs = True
 
+  # the real job server's bookkeeping for an mPCC it can't reach (#337), for
+  # the tests that bind the real update_job_status() to this fake
+  _unreachableModules = None
+
+  def mpcc_unreachable(self, module, err):
+    from mprov_jobserver.app import JobServer
+    JobServer.mpcc_unreachable(self, module, err)
+
+  def mpcc_reachable(self, module):
+    from mprov_jobserver.app import JobServer
+    JobServer.mpcc_reachable(self, module)
+
   def update_job_status(self, module, status, jobid=None, jobquery=None):
     # Report a pending job, so set_job_running() lets the plugin run.
     self.job_updates.append((module, status, jobquery))

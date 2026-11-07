@@ -1,6 +1,7 @@
 from time import sleep
 import threading
 import os
+import requests
 from mprov_jobserver.log import get_logger
 
 log = get_logger(__name__)
@@ -97,8 +98,21 @@ class JobServerPlugin(threading.Thread):
     return False
 
   def run(self):
-    if self.load_config():
-      self.handle_jobs()
+    try:
+      if self.load_config():
+        self.handle_jobs()
+    except requests.RequestException as err:
+      # The mPCC went away mid-run (e.g. it's restarting).  Say so in one
+      # line, not a traceback (#337).  The job server starts the module
+      # again on its next heartbeat, and fails a job it left RUNNING, which
+      # nothing is working on any more (#180).
+      self.failed = True
+      module = self.jobModule or type(self).__name__
+      unreachable = getattr(self.js, 'mpcc_unreachable', None)
+      if callable(unreachable):
+        unreachable(module, err)
+      else:
+        log.error(f"{module}: unable to reach the mPCC: {err}")
     
 
   def load_config(self):

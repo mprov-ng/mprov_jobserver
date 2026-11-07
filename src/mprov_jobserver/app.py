@@ -208,6 +208,9 @@ class JobServer ():
   # addresses left unregistered because they can't reach their mPCC, so
   # that's said once instead of on every heartbeat (#292)
   _unreachableAddresses = None
+  # job modules whose last call to the mPCC couldn't reach it, so a module
+  # says so once while the mPCC is down, not on every run (#337)
+  _unreachableModules = None
   # why the last attempt to start a session failed, so a job server left
   # pointing at an mPCC it can't use says so once instead of every retry
   _sessionProblem = None
@@ -476,7 +479,14 @@ class JobServer ():
     else:
       # finishing: only the jobs of this module we're running (#112)
       queryURL = self.mprovURL + 'jobs/?jobserver=' + str(self.id) + '&module=' + job_module + '&status=2'
-    response = self.session.get( queryURL )
+    try:
+      response = self.session.get(queryURL)
+    except requests.RequestException as err:
+      # e.g. the mPCC restarting: no jobs this run, rather than a traceback
+      # that ends the module's thread (#337)
+      self.mpcc_unreachable(job_module, err)
+      return False
+    self.mpcc_reachable(job_module)
     if response.status_code <= 199 or response.status_code >=300:
 
         log.error(f"Server returned error {response.status_code}. ")
@@ -518,7 +528,11 @@ class JobServer ():
       data['id'] = job['id']
       data['jobserver'] = self.id
       # print(data)
-      response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
+      try:
+        response = self.session.patch(self.mprovURL + 'jobs/' + str(data['id']) + '/', data=json.dumps(data))
+      except requests.RequestException as err:
+        self.mpcc_unreachable(job_module, err)
+        continue
       updateCount += 1
 
       if response.status_code == 400:
@@ -533,6 +547,26 @@ class JobServer ():
     #print(job_module + " " + str(status))
     pass
 
+  def mpcc_unreachable(self, job_module, err):
+    '''
+    A job module couldn't reach the mPCC (#337).  Said once per module
+    while it's down: the module runs again on every heartbeat, and the main
+    loop already says when the mPCC itself is unreachable.
+    '''
+    if self._unreachableModules is None:
+      self._unreachableModules = set()
+    if job_module in self._unreachableModules:
+      log.debug(f"{job_module}: still unable to reach the mPCC: {err}")
+      return
+    self._unreachableModules.add(job_module)
+    log.error(f"{job_module}: unable to reach the mPCC: {err}; trying again on its next run.")
+
+  def mpcc_reachable(self, job_module):
+    ''' A job module reached the mPCC again. '''
+    if self._unreachableModules and job_module in self._unreachableModules:
+      self._unreachableModules.discard(job_module)
+      log.info(f"{job_module}: reached the mPCC again.")
+
   def claim_job(self, job_module, job):
     '''
     Claim a pending job for this job server with POST jobs/<id>/claim/.
@@ -540,7 +574,11 @@ class JobServer ():
     step.  Returns True if we got it, False if another job server did, it
     isn't pending any more, or the claim failed.
     '''
-    response = self.session.post(self.mprovURL + 'jobs/' + str(job['id']) + '/claim/', data=json.dumps({'jobserver': self.id}))
+    try:
+      response = self.session.post(self.mprovURL + 'jobs/' + str(job['id']) + '/claim/', data=json.dumps({'jobserver': self.id}))
+    except requests.RequestException as err:
+      self.mpcc_unreachable(job_module, err)
+      return False
     if response.status_code == 200:
       log_job(job_module, job, 2)
       return True
