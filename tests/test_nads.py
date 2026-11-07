@@ -66,7 +66,8 @@ def host(monkeypatch, frames):
   monkeypatch.setattr(nads_module.netifaces, "ifaddresses",
                       lambda iface: {nads_module.AF_PACKET: [{"addr": MAC}]})
   monkeypatch.setattr(nads_module, "DMIDecode",
-                      lambda: types.SimpleNamespace(manufacturer=lambda: "Dell Inc.", model=lambda: "R650"))
+                      lambda: types.SimpleNamespace(manufacturer=lambda: "Dell Inc.", model=lambda: "R650",
+                                                    serial_number=lambda: "ABC1234"))
   return ifaces
 
 
@@ -104,9 +105,21 @@ def test_registers_switch_port_and_mac(js, plugin, host, frames):
   assert plugin.handle_jobs() is True
   # the URL has a double slash (#115)
   assert register_writes(js) == [
-    {"switch": "leaf01", "port": "5", "vendor": "Dell Inc.", "model": "R650", "mac": MAC},
+    {"switch": "leaf01", "port": "5", "vendor": "Dell Inc.", "model": "R650",
+     "serial": "ABC1234", "mac": MAC},
   ]
   assert plugin.provIntf == "eth0"
+
+
+def test_registers_without_a_serial_when_dmidecode_cant_read_it(js, plugin, host, frames, monkeypatch):
+  def no_serial():
+    raise IndexError("list index out of range")
+  monkeypatch.setattr(nads_module, "DMIDecode",
+                      lambda: types.SimpleNamespace(manufacturer=lambda: "Dell Inc.", model=lambda: "R650",
+                                                    serial_number=no_serial))
+  frames.append(lldp_frame())
+  assert plugin.handle_jobs() is True
+  assert register_writes(js)[0]["serial"] is None
 
 
 def test_reboots_after_registering_when_set_to(js, plugin, host, frames, commands):
