@@ -85,6 +85,31 @@ Images built before 0.7.0 have the job server pip-installed onto their own
 Python. Rebuilding one with 0.7.0 removes that copy and puts the bundle in
 its place.
 
+### Building images from a published base image
+
+An OS distro on the mPCC can name a base image (`base_image_url`, with
+its `base_image_checksum`). New images for that distro start from it
+instead of being bootstrapped with `dnf --installroot`. The base can be:
+
+- a container image archive (OCI layout, e.g. Rocky's `Container-Base`)
+  or a root filesystem tarball;
+- since 0.7.0, a cloud disk image: qcow2 (e.g. Rocky's `GenericCloud`) or
+  raw, either one optionally xz compressed or the only file in a tarball
+  (as Debian ships them).
+
+The job server works out the format from the file itself, so the URL can
+end in anything.
+
+Disk images are read with libguestfs, which the container image includes.
+It copies the files out from inside a small VM of its own, so the host
+never mounts the image's filesystems. The first build from a disk image
+also builds that VM's appliance and caches it in `/var/lib/mprov/guestfs`.
+libguestfs uses `/dev/kvm` when the job server can open it. Without it,
+the copy runs under emulation and takes several minutes longer.
+
+A job server installed with pip needs `guestfs-tools` installed on its
+host to use a disk image.
+
 ## Setup
 
 Create an API key in the mPCC for the job server, then give the container

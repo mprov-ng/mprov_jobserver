@@ -65,6 +65,21 @@ def test_the_base_images_identity_is_reset(js, rhel, images, commands, downloads
   assert "UUID" not in (images / "compute/etc/fstab").read_text()
 
 
+def test_the_base_machines_boot_menu_and_name_are_removed(js, rhel, images, commands, monkeypatch):
+  archive = tar_bytes(BASE + [("etc/hostname", b"rocky-cloud\n"), ("boot", None), ("boot/grub2", None),
+                              ("boot/grub2/grub.cfg", b"root=UUID=abc\n")])
+  def download(url, dest, get=None):
+    with open(dest, "wb") as f:
+      f.write(archive)
+    return hashlib.sha256(archive).hexdigest()
+  monkeypatch.setattr(base_image, "download", download)
+  from_base(rhel, checksum="sha256:" + hashlib.sha256(archive).hexdigest())
+  rhel.handle_jobs()
+  assert rhel.threadOk
+  assert not (images / "compute/etc/hostname").exists()
+  assert not (images / "compute/boot/grub2/grub.cfg").exists()
+
+
 def test_cloud_init_and_the_base_kernel_are_removed(js, rhel, images, commands, downloads):
   from_base(rhel)
   rhel.handle_jobs()

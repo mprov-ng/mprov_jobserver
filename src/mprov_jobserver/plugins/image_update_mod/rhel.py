@@ -168,6 +168,9 @@ class UpdateImage(JobServerPlugin):
       unmasked = base_image.unmask_units(imgDir)
       if unmasked:
         log.info(f"Unmasked the base image's {', '.join(unmasked)}")
+      removed = base_image.clean_unpacked(imgDir)
+      if removed:
+        log.info(f"Removed the base image's {', '.join(removed)}")
       base_image.write_marker(imgDir, url, sha256)
     except (base_image.BaseImageError, OSError) as err:
       log.error(f"unable to use the base image: {err}")
