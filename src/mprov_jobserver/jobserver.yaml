@@ -3,9 +3,21 @@
     # This URL should point to the internal IP address or hostname and include a trailing slash
     # e.g. "http://<IP of internal interface>/"
     
+    # From 0.7.0, https://, with a name the mPCC's certificate is for.
     mprovURL: ""
-    # this is the api key for your mprov control center so that the 
-    # jobserver can login and do stuff.
+    # The job server enrolls with the mPCC for a certificate of its own: with
+    # a one-time token from the mPCC (manage.py mprov_enroll_token), checking
+    # the mPCC by the CA fingerprint printed with it (or against caBundle)
+    # before the token is sent.  Unset, MPROV_ENROLL_TOKEN and
+    # MPROV_CA_FINGERPRINT; the token can also be in enroll_token next to
+    # this file.  Not needed once enrolled.
+    # enrollToken: ''
+    # caFingerprint: ''
+    # where the key and certificate are kept.  Unset, MPROV_TLS_DIR, else
+    # /var/lib/mprov/tls.
+    # tlsDir: '/var/lib/mprov/tls'
+    # deprecated: the shared API key, used only with no certificate or
+    # token, and gone in 0.8.0.
     apikey: ''
     # this is the interval which this jobserver will check in with the mPCC
     heartbeatInterval: 10

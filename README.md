@@ -112,14 +112,17 @@ host to use a disk image.
 
 ## Setup
 
-Create an API key in the mPCC for the job server, then give the container
-its settings **in the environment** — not by editing a configuration file.
-On start-up the container renders `/etc/mprov/jobserver.yaml` from these:
+Give the container its settings **in the environment** — not by editing a
+configuration file. On start-up the container renders
+`/etc/mprov/jobserver.yaml` from these:
 
 | variable | what it sets |
 |---|---|
-| `MPROV_URL` | the mPCC's URL, e.g. `http://10.0.0.1`. Use an address or an internal name, **not** `localhost` |
-| `MPROV_APIKEY` | the mPCC API key. In a full mprov-compose stack this is generated and filled in for you |
+| `MPROV_URL` | the mPCC's URL, e.g. `https://10.0.0.1`. Use an address or an internal name, **not** `localhost`. From 0.7.0 it must be `https://`, with a host name or address the mPCC's certificate is for: the job server authenticates with a certificate of its own (see *Enrolling with the mPCC*) |
+| `MPROV_ENROLL_TOKEN` | a one-time enrollment token from the mPCC, if there isn't one in `/etc/mprov/enroll_token`. In a full mprov-compose stack the mPCC writes one there for you |
+| `MPROV_CA_FINGERPRINT` | the SHA-256 fingerprint of the mPCC's CA, shown with the token, to check the mPCC by before the token is sent. Not needed with `MPROV_CA_BUNDLE`, or with the mPCC's `ca.crt` in `/etc/mprov` (mprov-compose) |
+| `MPROV_TLS_DIR` | where the job server keeps its key and certificate, default `/var/lib/mprov/tls`. Keep it on storage that survives the container being recreated |
+| `MPROV_APIKEY` | deprecated: the shared mPCC API key, used only by a job server with no certificate and no token. An mPCC with `MPROV_SHARED_KEY_MODE=off` refuses it, and 0.8.0 drops it |
 | `MPROV_ADDRESS` | this job server's address, as the nodes reach it |
 | `MPROV_MODS` | the job modules to run, space separated — see *Available job modules* |
 | `MPROV_ARGS` | arguments for the job server itself (default `-c /etc/mprov/jobserver.yaml`) |
@@ -128,6 +131,33 @@ On start-up the container renders `/etc/mprov/jobserver.yaml` from these:
 | `TZ` | the container's time zone |
 
 With mprov-compose these live in `.env`, copied from `stack.env.dist`.
+
+### Enrolling with the mPCC
+
+From 0.7.0 each job server has an identity of its own instead of the API key
+every agent used to share (mprov-ng/mprov_control_center#381): a key it
+makes itself, which never leaves the host, and a certificate the mPCC's CA
+signs for it, good for 90 days.
+
+- **The first start** enrolls with a one-time token: `MPROV_ENROLL_TOKEN`,
+  else the one the mPCC in the same compose stack writes to
+  `/etc/mprov/enroll_token`. For a job server elsewhere, make a token in the
+  mPCC (`manage.py mprov_enroll_token`, which prints the CA fingerprint to
+  set as `MPROV_CA_FINGERPRINT` too). The token is a secret, so it is only
+  sent to an mPCC whose certificate checks out: against `MPROV_CA_BUNDLE`,
+  the CA with that fingerprint, or the mPCC's `ca.crt` in `/etc/mprov`.
+- **The key and certificate** are kept in `MPROV_TLS_DIR`
+  (`/var/lib/mprov/tls`): `jobserver.pem` (0600) and the mPCC's `ca.crt`.
+  Lose them and the job server needs a new token.
+- **Renewal** is automatic, with a new key, in the certificate's last 29
+  days.
+- **A refused certificate** (revoked in the mPCC, expired, or its job server
+  deleted) is dropped, and the job server enrolls again with the next token
+  it finds. In a compose stack the mPCC writes a fresh one at its next start,
+  once no job server has an active certificate.
+- **Without a certificate or a token** the job server falls back to
+  `MPROV_APIKEY`, with a warning, and keeps trying to enroll. That fallback
+  goes in 0.8.0.
 
 **Don't edit `/etc/mprov/jobserver.yaml` in a container.** It is written
 from a template on every start, so your changes are gone at the next
@@ -160,28 +190,40 @@ restart.
   ```
 
   The `global:` settings from every file are merged, so this adds to the
-  generated section rather than replacing it: `mprovURL`, `apikey` and the
-  rest still come from the environment. Where a setting is in both, the
+  generated section rather than replacing it: `mprovURL` and the rest
+  still come from the environment. Where a setting is in both, the
   plugin file wins, and between plugin files the one whose name sorts last
   wins. (Before 0.7.0 a second `global:` replaced the whole section, so the
   only way was a complete config of your own passed with `MPROV_ARGS=-c`;
   that still works, but is no longer needed.)
 
 Here is the whole `global:` section with everything it takes. The container
-generates `mprovURL`, `apikey`, `heartbeatInterval`, `myaddress` and
-`jobmodules`, plus `caBundle` and `logLevel` when `MPROV_CA_BUNDLE` and
-`MPROV_LOG_LEVEL` are set; the other commented-out ones below go in a plugin
-file, as above:
+generates `mprovURL`, `heartbeatInterval`, `myaddress` and `jobmodules`, plus
+`apikey`, `caBundle` and `logLevel` when `MPROV_APIKEY`, `MPROV_CA_BUNDLE`
+and `MPROV_LOG_LEVEL` are set; `tlsDir`, `enrollToken` and `caFingerprint`
+default to `MPROV_TLS_DIR`, `MPROV_ENROLL_TOKEN` and `MPROV_CA_FINGERPRINT`;
+the other commented-out ones below go in a plugin file, as above:
 ```
 - global:
     # This points to your mprov control center instance.
     # This URL should point to the internal IP address or hostname and include a trailing slash
     # e.g. "http://<IP of internal interface>/"
     
-    mprovURL: "http://mprov.local.cluster"
-    # this is the api key for your mprov control center so that the 
-    # jobserver can login and do stuff.
-    apikey: 'kjangknfdasjhngurwegqfdbjhn'
+    mprovURL: "https://mprov.local.cluster"
+    # where this job server keeps its key and certificate (jobserver.pem) and
+    # the mPCC's CA (ca.crt).  Unset, MPROV_TLS_DIR, else /var/lib/mprov/tls.
+    # tlsDir: '/var/lib/mprov/tls'
+    # the one-time token to enroll with, if there's no certificate yet.
+    # Unset, MPROV_ENROLL_TOKEN, else the first line of enrollTokenFile
+    # (unset, enroll_token next to this file).
+    # enrollToken: '...'
+    # enrollTokenFile: '/etc/mprov/enroll_token'
+    # the SHA-256 fingerprint of the mPCC's CA, to check it by before the
+    # token is sent.  Unset, MPROV_CA_FINGERPRINT.  Not needed with caBundle,
+    # or with the mPCC's ca.crt next to this file.
+    # caFingerprint: '9865...df2d'
+    # deprecated: the shared API key, used only with no certificate or token.
+    # apikey: 'kjangknfdasjhngurwegqfdbjhn'
     # this is the interval which this jobserver will check in with the mPCC
     heartbeatInterval: 10
     # runonce: True # uncomment to run the jobserver once and exit.

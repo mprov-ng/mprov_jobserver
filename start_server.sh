@@ -1,8 +1,10 @@
 #!/bin/bash
 MPROV_ARGS=${MPROV_ARGS:="-c /etc/mprov/jobserver.yaml"}
 
-# if a file exists for a generated apikey, let's source it
-# because it likely came from an mpcc container.
+# the shared API key the mPCC in the same compose stack generates, if it
+# still does: only a fallback for a job server that has no certificate and
+# no enrollment token, deprecated, and gone in 0.8.0
+# (mprov_control_center#381)
 if [ -e /etc/mprov/apikey ]
 then
   . /etc/mprov/apikey

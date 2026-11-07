@@ -23,6 +23,7 @@ from requests.adapters import HTTPAdapter
 from mprov_jobserver.log import get_logger, configure as log_configure
 from mprov_jobserver.config import merge_config
 from mprov_jobserver.version import install as version_install
+from mprov_jobserver import identity as ident
 
 log = get_logger(__name__)
 
@@ -32,6 +33,9 @@ SKIPPED_INTERFACES = ("lo", "docker", "veth", "br-", "virbr", "podman", "cni")
 # seconds to wait for an address's heartbeat: a network that drops packets
 # mustn't hold up the job server's main loop (#114)
 ADDRESS_HEARTBEAT_TIMEOUT = 5
+# how often to check whether this job server's certificate is due for
+# renewal (mprov_control_center#381)
+RENEW_CHECK_EVERY = 3600
 
 
 def interface_addresses():
@@ -158,9 +162,36 @@ class JobServer ():
   jobmodules = []
   running_threads = {}
   config_data = {}
+  # the shared API key: the fallback for a job server with no certificate
+  # and no enrollment token, until 0.8.0 (mprov_control_center#381)
   apikey = ""
-  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
+  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102),
+  # or, once enrolled, the CA the mPCC sent with the certificate
   caBundle = ""
+  # this job server's own key and certificate (mprov_control_center#381),
+  # in jobserver.pem and the mPCC's CA in ca.crt.  Unset: MPROV_TLS_DIR,
+  # else /var/lib/mprov/tls.
+  tlsDir = ""
+  # the one-time token to enroll with: unset, MPROV_ENROLL_TOKEN, else the
+  # first line of enrollTokenFile (unset, enroll_token next to the config
+  # file, where the mPCC in the same compose stack writes one)
+  enrollToken = ""
+  enrollTokenFile = ""
+  # the SHA-256 fingerprint of the mPCC's CA, to check it by before the
+  # token is sent; unset, MPROV_CA_FINGERPRINT.  Not needed with caBundle,
+  # or with the mPCC's ca.crt next to the config file.
+  caFingerprint = ""
+  # how this job server authenticates: 'cert', 'apikey' or None (not yet)
+  auth = None
+  _caBundleSet = False
+  _certFingerprint = None
+  # the certificate the mPCC refused (revoked, expired, its job server
+  # deleted) and the token it refused, so neither is tried again
+  _refusedCert = None
+  _refusedToken = None
+  _identityProblem = None
+  _sharedKeyRefused = False
+  _nextRenewCheck = 0.0
   # this host's stable id for the mPCC; unset, a random one is kept in
   # host-id next to the config file (#113)
   hostId = ""
@@ -304,6 +335,10 @@ class JobServer ():
     except ValueError as err:
       log.error(f"invalid addresses in 'global': {err}")
       sys.exit(1)
+    self.tlsDir = self.tlsDir or os.environ.get('MPROV_TLS_DIR') or ident.DEFAULT_TLS_DIR
+    self.enrollToken = self.enrollToken or os.environ.get('MPROV_ENROLL_TOKEN') or ""
+    self.enrollTokenFile = self.enrollTokenFile or self.beside_config('enroll_token')
+    self.caFingerprint = self.caFingerprint or os.environ.get('MPROV_CA_FINGERPRINT') or ""
     self.use_ca_bundle()
     if not log_configure(self.logLevel, self.logTimestamps):
       log.error(f"logLevel {self.logLevel!r} isn't one of error, warning, info or debug.")
@@ -381,6 +416,7 @@ class JobServer ():
           #print(".", sep=None)
           if not self.runonce and not retried:
             self.register_server()
+          self.maybe_renew()
           counter=0
         counter+=1
         time.sleep(1)
@@ -563,15 +599,9 @@ class JobServer ():
   def register_server(self):
     if not self.register:
       return
-    # get my hostname from platform
-    myHostname = platform.node()
-    if "." in myHostname:
-      # remove the domain if one exists
-      myHostname, _ = myHostname.split(".", 1)
-
     # setup or server info register payload
     data = {
-        'name': myHostname,
+        'name': self.hostname(),
         'address': self.ip_address,
         'jobmodules': self.jobmodules,
         'one_minute_load': os.getloadavg()[0]
@@ -590,7 +620,9 @@ class JobServer ():
     # the mPCC knows us by this id, if it says it can, instead of by our
     # name, so a rename or another host with our name doesn't take over or
     # split our registration (#113)
-    if 'host-id' in self.features:
+    # an mPCC only lets a certificate register its own host id, so it's
+    # always sent then (mprov_control_center#381)
+    if 'host-id' in self.features or self.auth == 'cert':
       hostId = self.host_id()
       if hostId:
         data['host_id'] = hostId
@@ -745,8 +777,8 @@ class JobServer ():
   def address_session(self, address):
     '''
     A session that sends from address, so its heartbeat goes out on that
-    address's network (#114), sharing the main session's headers (the API
-    key) and certificate checks.  A host name can't be bound: the main
+    address's network (#114), sharing the main session's headers, client
+    certificate and certificate checks.  A host name can't be bound: the main
     session is used.
     '''
     try:
@@ -759,6 +791,9 @@ class JobServer ():
       session = requests.Session()
       session.headers = self.session.headers
       session.verify = self.session.verify
+      # this job server's certificate goes along too (mprov_control_center#381)
+      session.cert = getattr(self.session, 'cert', None)
+      session.hooks['response'].append(self.auth_refused)
       # hooks aren't copied with the headers, so the version check has to
       # be put on this session too (#287)
       version_install(session, enforce=self.register)
@@ -833,10 +868,200 @@ class JobServer ():
     self._hostIdValue = value
     return value or None
 
+  def hostname(self):
+    ''' This host's name without its domain, as the mPCC knows it. '''
+    return platform.node().split(".", 1)[0]
+
+  def beside_config(self, name):
+    ''' The path of name in the config file's directory (/etc/mprov). '''
+    return os.path.join(os.path.dirname(os.path.abspath(self.configfile)), name)
+
+  def identity_problem(self, problem):
+    ''' Log why this job server can't authenticate, once, not on every retry. '''
+    if problem != self._identityProblem:
+      self._identityProblem = problem
+      log.error(problem)
+
+  def use_identity(self):
+    '''
+    Set the session up to authenticate (mprov_control_center#381), with,
+    in order: this job server's certificate; a new one, enrolled with a
+    token; the shared API key (deprecated, until 0.8.0).  False if there's
+    none of them yet, which is said once.  A job server that doesn't
+    register (-d, -m) never enrolls, but uses a certificate there already
+    is.
+    '''
+    identity = ident.Identity(self.tlsDir)
+    cert = identity.usable()
+    if cert is not None and ident.fingerprint(cert) == self._refusedCert:
+      cert = None
+    if cert is not None and not self.mprovURL.startswith('https://'):
+      self.identity_problem(f"this job server's certificate can only be used over HTTPS; "
+                            f"mprovURL is {self.mprovURL}.  Set MPROV_URL to https://.")
+      cert = None
+    elif cert is None and self.register:
+      cert = self.enroll(identity)
+    if cert is not None:
+      self.use_certificate(identity, cert)
+      return True
+    if self.apikey or not self.register:
+      self.use_apikey()
+      return True
+    # with a token, enroll() has said why it didn't work
+    if ident.token_from(self.enrollToken, self.enrollTokenFile) is None:
+      self.identity_problem(
+        "this job server has no certificate and nothing to enroll with: set MPROV_ENROLL_TOKEN (or global "
+        f"enrollToken) to an enrollment token from the mPCC, or put one in {self.enrollTokenFile}.  "
+        "Will keep trying.")
+    return False
+
+  def use_apikey(self):
+    ''' Authenticate with the shared API key: the fallback until 0.8.0. '''
+    if self.auth != 'apikey' and self.register:
+      log.warning("authenticating with the shared API key, which is deprecated: an mPCC with "
+                  "MPROV_SHARED_KEY_MODE=off refuses it, and 0.8.0 drops it.  Enroll this job server "
+                  "with a token from the mPCC instead (MPROV_ENROLL_TOKEN).")
+    self.auth = 'apikey'
+    self.session.cert = None
+    # as before #381: a script runner may have none (the nads image)
+    self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    self._addressSessions = None
+
+  def use_certificate(self, identity, cert):
+    ''' Authenticate with cert, the certificate in identity. '''
+    fp = ident.fingerprint(cert)
+    if self.auth != 'cert' or self._certFingerprint != fp:
+      log.info(f"authenticating with this job server's certificate, valid until "
+               f"{cert.not_valid_after_utc:%Y-%m-%d} UTC.")
+    self.auth = 'cert'
+    self._certFingerprint = fp
+    self._identityProblem = None
+    self.session.cert = identity.credential_path
+    if not self._caBundleSet and os.path.isfile(identity.ca_path):
+      self.session.verify = identity.ca_path
+    self.session.headers.pop('Authorization', None)
+    # rebuilt with the new certificate when next used
+    self._addressSessions = None
+
+  def enrollment_trust(self, identity):
+    '''
+    What to check the mPCC's certificate against before sending it the
+    token: caBundle, the CA whose fingerprint is configured, or the mPCC's
+    ca.crt next to the config file.  Never nothing: the token is a secret.
+    Raises ident.EnrollError if there's no way to check.
+    '''
+    if self._caBundleSet:
+      return self.caBundle
+    if self.caFingerprint:
+      identity.save_ca(ident.fetch_ca(self.mprovURL, self.caFingerprint))
+      return identity.ca_path
+    beside = self.beside_config(ident.CA_CERT)
+    if os.path.isfile(beside):
+      return beside
+    raise ident.EnrollError(
+      "can't check the mPCC's certificate, so the enrollment token isn't sent: set MPROV_CA_FINGERPRINT "
+      "(or global caFingerprint) to the CA fingerprint the mPCC shows with the token, set caBundle, or "
+      f"put the mPCC's ca.crt in {beside}.", retry=True)
+
+  def enroll(self, identity):
+    ''' A new certificate, enrolled with the token; None if there's no
+    token, or enrolling failed (which is said once). '''
+    token = ident.token_from(self.enrollToken, self.enrollTokenFile)
+    if token is None or ident.token_id(token) == self._refusedToken:
+      return None
+    if not self.mprovURL.startswith('https://'):
+      self.identity_problem(f"enrolling needs HTTPS, and mprovURL is {self.mprovURL}.  Set MPROV_URL to https://.")
+      return None
+    hostId = self.host_id()
+    if not hostId:
+      self.identity_problem("this job server can't enroll without a host id (see above).")
+      return None
+    try:
+      verify = self.enrollment_trust(identity)
+      key_pem, cert_pem, ca_pem = ident.enroll(self.mprovURL, verify, token, hostId, self.hostname())
+      identity.save(key_pem, cert_pem, ca_pem)
+    except ident.EnrollError as err:
+      if not err.retry:
+        self._refusedToken = ident.token_id(token)
+      self.identity_problem(f"unable to enroll with the mPCC: {err}")
+      return None
+    except OSError as err:
+      self.identity_problem(f"unable to save this job server's certificate in {identity.tls_dir}: {err}")
+      return None
+    cert = identity.usable()
+    if cert is not None:
+      self._refusedCert = None
+      log.info(f"enrolled with the mPCC at {self.mprovURL} as {self.hostname()} ({hostId}).")
+    return cert
+
+  def auth_refused(self, response, *args, **kwargs):
+    '''
+    A session hook for the mPCC refusing how this job server authenticates
+    (mprov_control_center#381):
+    - its certificate (401, revoked, expired, or its job server deleted):
+      stop using it, and look for a token to enroll again with when the
+      session restarts;
+    - the shared API key (403, an mPCC with MPROV_SHARED_KEY_MODE=off): try
+      to enroll at the next heartbeat instead of within the hour.
+    '''
+    if (response.status_code == 401 and self.auth == 'cert'
+        and 'TLS-Client-Certificate' in response.headers.get('WWW-Authenticate', '')):
+      if self._refusedCert != self._certFingerprint:
+        log.error("the mPCC refused this job server's certificate: it was revoked or has expired, or the job "
+                  "server was deleted.  It needs a new enrollment token (MPROV_ENROLL_TOKEN).")
+      self._refusedCert = self._certFingerprint
+      self.auth = None
+      self.sessionOk = False
+    elif (response.status_code == 403 and self.auth == 'apikey'
+          and "shared API key isn't accepted" in (response.text or '')):
+      if not self._sharedKeyRefused:
+        self._sharedKeyRefused = True
+        log.error("the mPCC no longer accepts the shared API key: this job server needs an enrollment token "
+                  "(MPROV_ENROLL_TOKEN, or the mPCC's enroll_token).")
+      self._nextRenewCheck = 0.0
+    return response
+
+  def maybe_renew(self):
+    '''
+    Checked at most once an hour: renew this job server's certificate in
+    its renewal window, or, for one still on the shared API key, enroll if
+    it now can (a token, or the mPCC's CA to check it against, turned up).
+    '''
+    if self.auth not in ('cert', 'apikey'):
+      return
+    now = time.monotonic()
+    if now < self._nextRenewCheck:
+      return
+    self._nextRenewCheck = now + RENEW_CHECK_EVERY
+    identity = ident.Identity(self.tlsDir)
+    if self.auth == 'apikey':
+      cert = self.enroll(identity) if self.register else None
+      if cert is not None:
+        self.use_certificate(identity, cert)
+      return
+    cert = identity.usable()
+    if cert is None or not identity.due(cert):
+      return
+    try:
+      issued = ident.renew(self.session, self.mprovURL, self.hostname())
+      if issued is None:
+        log.debug("the mPCC says this job server's certificate isn't due for renewal yet.")
+        return
+      identity.save(*issued)
+    except (ident.EnrollError, OSError) as err:
+      log.warning(f"unable to renew this job server's certificate (valid until "
+                  f"{cert.not_valid_after_utc:%Y-%m-%d} UTC): {err}.  Will try again in an hour.")
+      return
+    renewed = identity.usable()
+    if renewed is not None:
+      log.info("renewed this job server's certificate.")
+      self.use_certificate(identity, renewed)
+
   def use_ca_bundle(self):
     # verify the mPCC's certificate against the configured caBundle or the
     # OS bundle (#102).  An admin's REQUESTS_CA_BUNDLE still wins, as it
     # does for any requests program.
+    self._caBundleSet = bool(self.caBundle)
     try:
       self.caBundle = ca_bundle(self.caBundle)
     except FileNotFoundError as err:
@@ -846,11 +1071,13 @@ class JobServer ():
       self.session.verify = self.caBundle
 
   def startSession(self):
-    
-    self.session.headers.update({
-      'Authorization': 'Api-Key ' + self.apikey,
-      'Content-Type': 'application/json'
-      })
+    if not self.use_identity():
+      self.sessionOk = False
+      time.sleep(10)
+      return False
+    self.session.headers.update({'Content-Type': 'application/json'})
+    if self.auth_refused not in self.session.hooks['response']:
+      self.session.hooks['response'].append(self.auth_refused)
     # A script runner (-d, and -m) is a short-lived client of whatever mPCC
     # the site has, not a job server registering with it, so a version
     # mismatch is a warning there rather than a refusal: refusing hangs it
