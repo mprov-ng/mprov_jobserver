@@ -29,7 +29,7 @@ Config keys (`plugins/dnsmasq.yaml`): `enableDNS`, `enableDHCP`, `enableTFTP`, `
 
 1. Disable Intel i40e firmware LLDP interception (`/sys/kernel/debug/i40e/*/command`), re-enabled at the end.
 2. For each operstate-UP interface (pyroute2/netifaces), open a raw AF_PACKET socket in promisc mode and hand-parse LLDP TLVs (code adapted from lldp.discovery) up to `maxLLDPWait` seconds, extracting the neighbor System Name (switch) and Port ID.
-3. POST `/systems/register` with `{switch, port, vendor, model (dmidecode), mac}` — but only when **both** the switch and the port were learned; a node registered against a switch with no port could never be provisioned (#149). The parsed LLDP Port ID has its leading subtype byte dropped, which the mPCC's stored value doesn't carry. Optionally `/sbin/reboot` when `reboot: True`.
+3. POST `/systems/register` with `{switch, port, vendor, model, serial (dmidecode), mac}` — but only when **both** the switch and the port were learned; a node registered against a switch with no port could never be provisioned (#149). The `serial` is whatever dmidecode reports — the mPCC drops placeholder values itself, and an unreadable serial must never stop registration (#331). The parsed LLDP Port ID has its leading subtype byte dropped, which the mPCC's stored value doesn't carry. Optionally `/sbin/reboot` when `reboot: True`.
 
 Config (`nads.yaml`): `provIntf`, `maxLLDPWait: 60`, `reboot: False`. The mPCC then knows the node's exact port and can drive PXE provisioning of it. The public `nads` systemimage is also the script-runner fallback entity (see [Script Execution](../workflows/script-execution.md)).
 
