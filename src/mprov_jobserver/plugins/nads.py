@@ -160,6 +160,20 @@ class ifreq(Structure):
                 ("ifr_flags", c_short)]
 
 
+
+def serial_number(dmi):
+  """ The system's serial number from dmidecode, or None if it can't be read.
+
+  The mPCC drops placeholder values ("To Be Filled By O.E.M.", "n/a", ...)
+  itself, so send whatever dmidecode reports.  A missing serial must never
+  stop the node registering.
+  """
+  try:
+    return dmi.serial_number()
+  except Exception as e:
+    log.debug(f"Couldn't read the serial number: {e}")
+    return None
+
 class nads(JobServerPlugin):
   jobModule = 'nads'
   provIntf = ''
@@ -310,6 +324,7 @@ class nads(JobServerPlugin):
       'port': self.port,
       'vendor': dmi.manufacturer(),
       'model': dmi.model(),
+      'serial': serial_number(dmi),
       'mac': self.mac,
     }
     log.info("Attempting to register with MPCC...")
