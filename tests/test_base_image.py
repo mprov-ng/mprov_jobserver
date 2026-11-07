@@ -249,8 +249,141 @@ def test_absolute_member_names_stay_in_the_image(tmp_path, root, workdir):
 
 
 def test_refuses_something_that_isnt_a_tar(tmp_path, root, workdir):
-  with pytest.raises(BaseImageError, match="isn't a tar archive"):
-    unpack(tmp_path, b"QFI\xfb qcow2", root, workdir)
+  with pytest.raises(BaseImageError, match="isn't an archive or disk image"):
+    unpack(tmp_path, b"<html>not found</html>", root, workdir)
+
+
+# disk images (#279)
+
+def disk(kind):
+  """ The first 4K of a disk image of this kind. """
+  head = bytearray(4096)
+  if kind == "qcow2":
+    head[:4] = b"QFI\xfb"
+  elif kind == "mbr":
+    head[510:512] = b"\x55\xaa"
+  elif kind == "gpt":
+    head[512:520] = b"EFI PART"
+  elif kind == "xfs":
+    head[:4] = b"XFSB"
+  elif kind == "ext4":
+    head[1080:1082] = b"\x53\xef"
+  return bytes(head)
+
+
+def xz(data):
+  import lzma
+  return lzma.compress(data, format=lzma.FORMAT_XZ)
+
+
+@pytest.mark.parametrize("data, fmt", [
+  (disk("qcow2"), "qcow2"), (disk("mbr"), "raw"), (disk("gpt"), "raw"),
+  (disk("xfs"), "raw"), (disk("ext4"), "raw"),
+  (xz(disk("mbr")), "xz"),
+  (tar_bytes(BASE), "tar"), (tar_bytes(BASE, mode="w"), "tar"), (tar_bytes(BASE, mode="w:xz"), "tar"),
+])
+def test_detects_the_format_from_the_contents(tmp_path, data, fmt):
+  path = tmp_path / "base-image"
+  path.write_bytes(data)
+  assert base_image.detect_format(str(path)) == fmt
+
+
+class Guestfish:
+  """ Stands in for running guestfish: records the call and writes a tarball where tar-out is asked to. """
+  def __init__(self, tar=None, returncode=0, stderr=""):
+    self.tar = tar_bytes(BASE) if tar is None else tar
+    self.returncode, self.stderr = returncode, stderr
+    self.calls = []
+
+  def __call__(self, argv, env=None, **kwargs):
+    self.calls.append((argv, env, kwargs))
+    image = argv[argv.index("-a") + 1]
+    self.image = open(image, "rb").read()
+    if self.returncode == 0:
+      with open(argv[argv.index("tar-out") + 2], "wb") as f:
+        f.write(self.tar)
+    import subprocess
+    return subprocess.CompletedProcess(argv, self.returncode, "", self.stderr)
+
+
+@pytest.fixture
+def guestfish(monkeypatch, tmp_path):
+  monkeypatch.setattr(base_image.shutil, "which", lambda name: "/usr/bin/" + name)
+  monkeypatch.setattr(base_image, "GUESTFS_CACHE", str(tmp_path / "guestfs"))
+  monkeypatch.delenv("LIBGUESTFS_BACKEND", raising=False)
+  monkeypatch.delenv("LIBGUESTFS_CACHEDIR", raising=False)
+  return Guestfish()
+
+
+def unpack_disk(tmp_path, data, root, workdir, run):
+  archive = tmp_path / "base-image"
+  archive.write_bytes(data)
+  base_image.unpack(str(archive), str(root), str(workdir), "x86_64", run=run)
+
+
+def test_a_qcow2_image_is_read_with_libguestfs_and_unpacked(tmp_path, root, workdir, guestfish):
+  unpack_disk(tmp_path, disk("qcow2"), root, workdir, guestfish)
+  (argv, env, kwargs), = guestfish.calls
+  assert argv[:6] == ["/usr/bin/guestfish", "--ro", "--format=qcow2", "-a", str(tmp_path / "base-image"), "-i"]
+  assert argv[6:] == ["tar-out", "/", str(workdir / "rootfs.tar"), "numericowner:true"]
+  assert env["LIBGUESTFS_BACKEND"] == "direct"
+  assert env["LIBGUESTFS_CACHEDIR"] == str(tmp_path / "guestfs")
+  assert (tmp_path / "guestfs").is_dir()
+  assert (root / "etc/os-release").read_text() == "ID=rocky\n"
+  assert (root / "bin").is_symlink()
+
+
+def test_a_sites_libguestfs_settings_are_kept(tmp_path, root, workdir, guestfish, monkeypatch):
+  monkeypatch.setenv("LIBGUESTFS_BACKEND", "libvirt")
+  monkeypatch.setenv("LIBGUESTFS_CACHEDIR", str(tmp_path / "mine"))
+  unpack_disk(tmp_path, disk("mbr"), root, workdir, guestfish)
+  (argv, env, kwargs), = guestfish.calls
+  assert "--format=raw" in argv
+  assert env["LIBGUESTFS_BACKEND"] == "libvirt"
+  assert env["LIBGUESTFS_CACHEDIR"] == str(tmp_path / "mine")
+
+
+def test_an_xz_compressed_raw_image_is_decompressed_first(tmp_path, root, workdir, guestfish):
+  unpack_disk(tmp_path, xz(disk("gpt")), root, workdir, guestfish)
+  (argv, env, kwargs), = guestfish.calls
+  assert "--format=raw" in argv
+  assert guestfish.image == disk("gpt")
+
+
+def test_a_tarball_of_one_disk_image_is_read_as_that_disk(tmp_path, root, workdir, guestfish):
+  # Debian's genericcloud tar.xz holds just disk.raw
+  raw = disk("mbr") + bytes(3 * 1024 * 1024) + b"end"
+  unpack_disk(tmp_path, tar_bytes([("disk.raw", raw)], mode="w:xz"), root, workdir, guestfish)
+  (argv, env, kwargs), = guestfish.calls
+  assert "--format=raw" in argv
+  assert guestfish.image == raw
+  assert (root / "etc/os-release").exists()
+
+
+def test_a_rootfs_tarball_doesnt_go_near_libguestfs(tmp_path, root, workdir, guestfish):
+  unpack_disk(tmp_path, tar_bytes(BASE + [("disk.raw", disk("mbr"))]), root, workdir, guestfish)
+  assert guestfish.calls == []
+  assert (root / "disk.raw").exists()
+
+
+def test_without_guestfish_a_disk_image_fails_naming_the_package(tmp_path, root, workdir, guestfish, monkeypatch):
+  monkeypatch.setattr(base_image.shutil, "which", lambda name: None)
+  with pytest.raises(BaseImageError, match="guestfs-tools"):
+    unpack_disk(tmp_path, disk("qcow2"), root, workdir, guestfish)
+  assert guestfish.calls == []
+
+
+def test_a_guestfish_failure_fails_with_its_message(tmp_path, root, workdir, monkeypatch, guestfish):
+  failing = Guestfish(returncode=1, stderr="libguestfs: trace\nguestfish: no operating system was found on this disk\n")
+  with pytest.raises(BaseImageError, match="no operating system was found"):
+    unpack_disk(tmp_path, disk("qcow2"), root, workdir, failing)
+  assert list(root.iterdir()) == []
+
+
+def test_the_disks_files_get_the_same_checks_as_a_tarball(tmp_path, root, workdir, guestfish):
+  bad = Guestfish(tar=tar_bytes([("etc", ("symlink", "/etc")), ("etc/passwd", b"x")]))
+  with pytest.raises(BaseImageError, match="through a symlink"):
+    unpack_disk(tmp_path, disk("qcow2"), root, workdir, bad)
 
 
 # after unpacking
@@ -263,6 +396,41 @@ def test_reset_identity_empties_machine_id_and_fstab(root):
   assert (root / "etc/machine-id").read_text() == ""
   assert not (root / "etc/fstab").is_symlink()
   assert "UUID" not in (root / "etc/fstab").read_text()
+
+
+def test_clean_unpacked_removes_the_machines_boot_menu_name_and_host_keys(root):
+  for name in ("boot/loader/entries/abc-5.14.0.conf", "boot/grub2/grub.cfg", "boot/efi/EFI/rocky/grub.cfg",
+               "etc/hostname", "etc/ssh/ssh_host_ed25519_key", "etc/ssh/ssh_host_ed25519_key.pub",
+               "etc/ssh/sshd_config", "boot/grub2/grubenv",
+               "boot/vmlinuz-0-rescue-abc", "boot/initramfs-0-rescue-abc.img", "boot/vmlinuz-5.14.0"):
+    (root / name).parent.mkdir(parents=True, exist_ok=True)
+    (root / name).write_text("x")
+  assert base_image.clean_unpacked(str(root)) == [
+    "/boot/loader/entries/abc-5.14.0.conf", "/boot/grub2/grub.cfg", "/boot/efi/EFI/rocky/grub.cfg",
+    "/boot/vmlinuz-0-rescue-abc", "/boot/initramfs-0-rescue-abc.img", "/etc/hostname", "/etc/ssh/ssh_host_ed25519_key", "/etc/ssh/ssh_host_ed25519_key.pub"]
+  assert (root / "etc/ssh/sshd_config").exists()
+  assert (root / "boot/grub2/grubenv").exists()
+  assert (root / "boot/vmlinuz-5.14.0").exists()
+  assert base_image.clean_unpacked(str(root)) == []
+
+
+def test_clean_unpacked_never_reaches_through_a_link(root, tmp_path):
+  outside = tmp_path / "host-etc"
+  outside.mkdir()
+  (outside / "hostname").write_text("buildhost")
+  (root / "etc").symlink_to(outside)
+  with pytest.raises(BaseImageError, match="through a symlink"):
+    base_image.clean_unpacked(str(root))
+  assert (outside / "hostname").read_text() == "buildhost"
+
+
+def test_clean_unpacked_removes_a_linked_hostname_not_its_target(root, tmp_path):
+  outside = tmp_path / "hostname"
+  outside.write_text("buildhost")
+  (root / "etc").mkdir()
+  (root / "etc/hostname").symlink_to(outside)
+  assert base_image.clean_unpacked(str(root)) == ["/etc/hostname"]
+  assert outside.read_text() == "buildhost"
 
 
 def test_unmask_units_removes_the_bases_masks_only(root):

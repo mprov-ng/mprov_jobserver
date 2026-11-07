@@ -91,6 +91,12 @@ RUN dnf update -y && \
     rsync \
     cpio
 
+# guestfs-tools reads cloud disk images (qcow2, raw) as image bases (#279),
+# in a small VM of its own with this kernel; image-update caches that VM's
+# appliance in /var/lib/mprov/guestfs.  Without its weak dependencies:
+# they'd add 2GB (linux-firmware, Java, GTK and more) the VM doesn't need.
+RUN dnf install -y --setopt=install_weak_deps=False guestfs-tools
+
 # The job server runs from the same bundle the node images get (#309,
 # #111): one Python for the job server, the same in the container as on
 # the nodes, and none of the image's own.  EL9's /usr/bin/python3 is the

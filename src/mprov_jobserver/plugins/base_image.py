@@ -1,14 +1,18 @@
 # Fetch, verify and unpack a published OS image as the base of a system
 # image (#92), instead of bootstrapping one with the distro's package
-# manager.  Nothing here is specific to one distro: the distro's
-# image_update_mod sub-module decides when to use it and what to install
-# on top.
+# manager: a container image or root filesystem tarball, or a cloud disk
+# image (qcow2 or raw, #279).  Nothing here is specific to one distro: the
+# distro's image_update_mod sub-module decides when to use it and what to
+# install on top.
+import glob
 import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
 import stat
+import subprocess
 import tarfile
 from urllib.parse import urlparse
 
@@ -35,6 +39,18 @@ DOCKER_LIST = 'application/vnd.docker.distribution.manifest.list.v2+json'
 
 # downloads: seconds to connect, and between bytes
 TIMEOUT = (30, 300)
+
+# Disk images are read with libguestfs, in its own small VM: the host
+# kernel never mounts the image's filesystems, and LVM inside the image
+# stays inside that VM.  Its appliance is built on first use and cached
+# here, which the container has on the host, so it outlives restarts.
+GUESTFS_CACHE = '/var/lib/mprov/guestfs'
+# seconds for guestfish to copy a disk image's files out; without KVM it
+# runs under emulation, which is slow
+GUESTFS_TIMEOUT = 2 * 60 * 60
+
+QCOW2_MAGIC = b'QFI\xfb'
+XZ_MAGIC = b'\xfd7zXZ\x00'
 
 
 class BaseImageError(Exception):
@@ -292,16 +308,169 @@ def _extract_layout(archive, dest):
       tar.extract(member, dest, set_attrs=False, **kwargs)
 
 
-def unpack(archive, root, workdir, arch='x86_64'):
+def _is_disk(head):
+  """ Whether these first bytes of a file start a raw disk or filesystem. """
+  return (head[510:512] == b'\x55\xaa'          # MBR (and GPT's protective MBR)
+          or head[512:520] == b'EFI PART'         # GPT
+          or head[:4] == b'XFSB'                  # an XFS filesystem
+          or head[1080:1082] == b'\x53\xef')     # an ext2/3/4 filesystem
+
+
+# compressed tarballs (and xz on its own): gzip, bzip2, xz
+COMPRESSED = (b'\x1f\x8b', b'BZh', XZ_MAGIC)
+
+
+def detect_format(path):
   """
-  Unpack a base image archive into root: an OCI image archive (index.json
-  and blobs/, as Rocky's Container-Base images are) or a plain root
-  filesystem tarball.  workdir is scratch space outside root.
+  What the downloaded base image is: 'qcow2', 'tar' (a tarball, compressed
+  or not), 'xz' (something else xz compressed: decompress it and look
+  again) or 'raw' (a disk or a bare filesystem).  Read from its contents,
+  not its URL, which needn't end in the format's suffix.  Anything else is
+  taken for a tarball, so that unpacking it says why it can't be read.
+
+  Compressed data is told apart by its magic before the disk signatures
+  are looked for, as compressed bytes could happen to contain one.  A disk
+  is looked for before asking tarfile, which takes a file that starts with
+  a block of zeros (a GPT disk without boot code, a bare ext4 filesystem)
+  for an empty tarball.
+  """
+  with open(path, 'rb') as f:
+    head = f.read(4096)
+  if head.startswith(QCOW2_MAGIC):
+    return 'qcow2'
+  if head.startswith(XZ_MAGIC):
+    # the same questions of what's inside: a tarball, or a disk to decompress
+    try:
+      with lzma.open(path) as f:
+        inner = f.read(4096)
+    except (lzma.LZMAError, EOFError, OSError):
+      return 'tar'
+    if inner[257:262] != b'ustar' and (inner.startswith(QCOW2_MAGIC) or _is_disk(inner)):
+      return 'xz'
+    return 'tar'
+  if head.startswith(COMPRESSED):
+    return 'tar'
+  if head[257:262] == b'ustar':
+    return 'tar'
+  if _is_disk(head):
+    return 'raw'
+  return 'tar'
+
+
+def _unxz(path, dest):
+  try:
+    with lzma.open(path) as src, open(dest, 'wb') as out:
+      shutil.copyfileobj(src, out, 1024 * 1024)
+  except (lzma.LZMAError, EOFError) as err:
+    raise BaseImageError(f"unable to decompress the base image: {err}")
+
+
+def _disk_in_tar(archive):
+  """
+  The member name if the tarball holds just one disk image (Debian ships its
+  cloud images as a tar.xz of disk.raw), else None: a root filesystem
+  tarball has more than one file.
+  """
+  with tarfile.open(archive, 'r:*') as tar:
+    files = []
+    for member in tar:
+      if member.isfile():
+        files.append(member)
+      elif not member.isdir():
+        return None
+      if len(files) > 1:
+        return None
+    if len(files) != 1 or not files[0].name.endswith(('.raw', '.img', '.qcow2')):
+      return None
+    head = tar.extractfile(files[0]).read(4096)
+  if head.startswith(QCOW2_MAGIC) or _is_disk(head):
+    return files[0].name
+  return None
+
+
+def _extract_member(archive, name, dest):
+  """ Write one member of the tarball to dest, leaving its runs of zeros as holes. """
+  chunk = 1024 * 1024
+  zeros = bytes(chunk)
+  with tarfile.open(archive, 'r:*') as tar, open(dest, 'wb') as out:
+    src = tar.extractfile(name)
+    while True:
+      data = src.read(chunk)
+      if not data:
+        break
+      if data == zeros[:len(data)]:
+        out.seek(len(data), os.SEEK_CUR)
+      else:
+        out.write(data)
+    out.truncate()
+
+
+def disk_to_tar(image, fmt, dest, run=subprocess.run):
+  """
+  Copy the root filesystem out of a disk image (fmt 'qcow2' or 'raw') into
+  the tarball dest, with libguestfs: guestfish opens the image read-only,
+  finds the OS on it (its partitions, LVM and mount points) and tars up /.
+  Owners are kept as numbers: the appliance's own user names would map
+  them wrongly.
+  """
+  guestfish = shutil.which('guestfish')
+  if guestfish is None:
+    raise BaseImageError("the base image is a disk image, and reading one needs libguestfs's guestfish, which isn't installed (dnf install guestfs-tools).")
+  env = dict(os.environ)
+  # run qemu directly, not through libvirt, which the container hasn't got
+  env.setdefault('LIBGUESTFS_BACKEND', 'direct')
+  env.setdefault('LIBGUESTFS_CACHEDIR', GUESTFS_CACHE)
+  try:
+    os.makedirs(env['LIBGUESTFS_CACHEDIR'], exist_ok=True)
+  except OSError as err:
+    raise BaseImageError(f"unable to make libguestfs's cache directory {env['LIBGUESTFS_CACHEDIR']}: {err}")
+  if not os.access('/dev/kvm', os.R_OK | os.W_OK):
+    log.warning("this job server has no /dev/kvm, so reading the disk image runs under emulation and is slow.")
+  log.info(f"Copying the base image's files out of the {fmt} disk image with libguestfs")
+  try:
+    result = run([guestfish, '--ro', f'--format={fmt}', '-a', image, '-i',
+                  'tar-out', '/', dest, 'numericowner:true'],
+                 env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                 timeout=GUESTFS_TIMEOUT)
+  except subprocess.TimeoutExpired:
+    raise BaseImageError(f"libguestfs took over {GUESTFS_TIMEOUT} seconds to read the disk image.")
+  except OSError as err:
+    raise BaseImageError(f"unable to run guestfish: {err}")
+  if result.returncode != 0:
+    detail = ' '.join((result.stderr or '').strip().splitlines()[-3:])
+    raise BaseImageError(f"libguestfs couldn't read the disk image: {detail or 'exit status ' + str(result.returncode)}")
+
+
+def unpack(archive, root, workdir, arch='x86_64', run=subprocess.run):
+  """
+  Unpack a base image into root: an OCI image archive (index.json and
+  blobs/, as Rocky's Container-Base images are), a plain root filesystem
+  tarball, or a cloud disk image (qcow2, or raw, either of them perhaps xz
+  compressed or alone in a tarball).  A disk image's files are copied out
+  as a tarball, which then unpacks with the same checks as any other.
+  workdir is scratch space outside root.
   """
   try:
+    fmt = detect_format(archive)
+    if fmt == 'xz':
+      _unxz(archive, os.path.join(workdir, 'decompressed'))
+      archive = os.path.join(workdir, 'decompressed')
+      fmt = detect_format(archive)
+      if fmt == 'xz':
+        raise BaseImageError("the base image is xz compressed twice.")
+    if fmt == 'tar':
+      member = _disk_in_tar(archive)
+      if member is not None:
+        disk = os.path.join(workdir, 'disk')
+        _extract_member(archive, member, disk)
+        archive, fmt = disk, detect_format(disk)
+    if fmt in ('qcow2', 'raw'):
+      rootfs = os.path.join(workdir, 'rootfs.tar')
+      disk_to_tar(archive, fmt, rootfs, run=run)
+      archive = rootfs
     oci = _is_oci_archive(archive)
-  except (tarfile.TarError, OSError) as err:
-    raise BaseImageError(f"the base image isn't a tar archive this job server can read: {err}")
+  except (tarfile.TarError, OSError, EOFError) as err:
+    raise BaseImageError(f"the base image isn't an archive or disk image this job server can read: {err}")
   try:
     os.makedirs(root, exist_ok=True)
     if oci:
@@ -331,6 +500,34 @@ def reset_identity(root):
     with open(path, 'w') as f:
       f.write(text)
     os.chmod(path, 0o444 if name == 'machine-id' else 0o644)
+
+
+def clean_unpacked(root):
+  """
+  Remove what a cloud disk image brings that belongs to the machine it was
+  installed on, not to an image: its boot menu (grub's config and the boot
+  loader entries for its kernel, which mProv's own kernel replaces, and its
+  rescue kernel), its host name, which would override the one each node
+  gets, and any SSH host keys, which every node would share.  Run once, straight after unpacking,
+  before mProv installs anything.  Returns the paths removed.
+  """
+  removed = []
+  patterns = ('boot/loader/entries/*', 'boot/grub2/grub.cfg', 'boot/efi/EFI/*/grub.cfg',
+              # the rescue kernel belongs to no package, so removing the
+              # base's kernel packages leaves it
+              'boot/vmlinuz-0-rescue-*', 'boot/initramfs-0-rescue-*',
+              'etc/hostname', 'etc/ssh/ssh_host_*')
+  for pattern in patterns:
+    for path in sorted(glob.glob(os.path.join(root, pattern))):
+      rel = os.path.relpath(path, root)
+      # never through a linked directory ("boot -> /boot" would reach the
+      # build host's); a link itself is removed, not what it points to
+      _check_parents(root, rel)
+      if os.path.isdir(path) and not os.path.islink(path):
+        continue
+      os.unlink(path)
+      removed.append('/' + rel)
+  return removed
 
 
 def unmask_units(root):
