@@ -185,6 +185,23 @@ class UpdateImage(JobServerPlugin):
       return None
     return True
 
+  def convert_host_rpmdb(self, qimg, imgDir, ver):
+    '''
+    Convert a new EL8 image's rpm database to the image's own format (#329).
+    A Rocky 9 job server's rpm creates the database of a new image in
+    sqlite during the host-side --installroot installs; the image's EL8 rpm
+    can only read sqlite, so its first install from inside the image would
+    fail and fall back to --rebuilddb with alarming errors.  Do the
+    rebuild up front instead.  An image without rpmdb.sqlite (an EL8 job
+    server's bdb database, or a rebuild of an existing image) is left alone.
+    '''
+    if float(ver) >= 9 or not os.path.lexists(imgDir + '/var/lib/rpm/rpmdb.sqlite'):
+      return
+    log.info("Converting the EL8 image's rpm database from the host's sqlite to bdb")
+    if os.system(f'chroot {qimg} rpm --rebuilddb'):
+      # the package install's own --rebuilddb fallback (#97) tries again
+      log.warning("unable to convert the EL8 image's rpm database; the package install will try again.")
+
   def strip_base_image(self, qimg):
     '''
     Remove what a base image brings that an mProv image mustn't have:
@@ -405,6 +422,8 @@ class UpdateImage(JobServerPlugin):
           self.js.update_job_status(self.jobModule, 3, jobid=self.jobid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           self.threadOk = False
           return
+      # before the first install from inside the image
+      self.convert_host_rpmdb(qimg, imgDir, ver)
     
 
     # ca-certificates is in now: add the mPCC's CA to the image's bundle,
