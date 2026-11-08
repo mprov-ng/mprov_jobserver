@@ -658,3 +658,19 @@ def test_dns_leaves_out_only_the_bmc_with_missing_fields(js, dirs, no_interfaces
     ["10.0.0.53", "node03-bmc.cluster.local"],
   ]
   assert "[W] dnsmasq/dns: leaving a BMC on network cluster-net out of DNS" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mprov_url", ["https://192.168.250.1/", "http://192.168.250.1/"])
+def test_ipxe_loads_from_the_mpcc_over_plain_http(js, dirs, conf_plugin, monkeypatch, mprov_url):
+  """ An enrolled job server's mprovURL is https:// (mprov_control_center
+  #381), but iPXE can't check the mPCC's own CA, and a NIC ROM's iPXE may
+  not do HTTPS at all: every node failed to boot on the rig with "Could not
+  start download: Operation not supported". """
+  starts(monkeypatch)
+  js.mprovURL = mprov_url
+  conf_plugin.dnsOk = conf_plugin.dhcpOk = True
+  conf_plugin.handle_jobs()
+  _, _, tftproot = dirs
+  menu = (tftproot / "menu.ipxe").read_text()
+  assert "chain --replace --autofree http://192.168.250.1//ipxe/" in menu
+  assert "https://192.168.250.1" not in menu

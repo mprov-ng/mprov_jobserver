@@ -402,3 +402,14 @@ def test_a_refused_build_credential_says_why(reply, says, retry):
     ident.build_credential(Session(reply), URL, "compute")
   assert says in str(err.value)
   assert err.value.retry is retry
+
+
+@pytest.mark.parametrize("url, http", [
+  ("https://10.0.0.1/", "http://10.0.0.1/"),
+  ("https://10.0.0.1:8443/mprov/", "http://10.0.0.1/mprov/"),
+  ("https://[fd00::1]/", "http://[fd00::1]/"),
+  ("http://10.0.0.1:8080/", "http://10.0.0.1:8080/"),
+])
+def test_the_http_url_is_the_same_host_on_80(url, http):
+  """ For iPXE, which loads from the mPCC over plain HTTP. """
+  assert ident.http_url(url) == http

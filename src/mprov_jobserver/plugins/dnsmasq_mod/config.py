@@ -8,6 +8,7 @@ import psutil
 import signal
 from .service import write_if_changed, running_dnsmasq
 from mprov_jobserver.log import get_logger
+from mprov_jobserver import identity as ident
 
 log = get_logger(__name__)
 
@@ -63,7 +64,11 @@ class DnsmasqConfig(JobServerPlugin):
     def handle_jobs(self):
         # Generates some general configuration stuff 
         data={
-            'mprov_url': self.js.mprovURL,
+            # iPXE loads /ipxe/ and /static/ over plain HTTP: it can't
+            # check the mPCC's own CA, and the NIC ROM's may not do HTTPS
+            # at all.  An enrolled job server's mprovURL is https://
+            # (mprov_control_center#381).
+            'mprov_url': ident.http_url(self.js.mprovURL),
             'enableDHCP': True,
             'bootserver': self.hostname,
             'bootserver6': self.bootserver6,

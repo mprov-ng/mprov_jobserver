@@ -361,6 +361,21 @@ def https_url(url):
   return urlunsplit(('https', host, parts.path or '/', '', ''))
 
 
+def http_url(url):
+  '''
+  The mPCC's plain-HTTP URL for its URL: the same host and path on port 80.
+  For what can't do HTTPS with the mPCC's CA: iPXE, which loads /ipxe/,
+  /static/ and the images over HTTP (mprov_control_center#381).
+  '''
+  parts = urlsplit(url)
+  if parts.scheme == 'http':
+    return url
+  host = parts.hostname or ''
+  if ':' in host:
+    host = f'[{host}]'
+  return urlunsplit(('http', host, parts.path or '/', '', ''))
+
+
 # ---- an image build's credential (mprov_control_center#381, C2) ------------
 
 def build_credential(session, mprov_url, image):
