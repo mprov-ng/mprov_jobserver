@@ -1519,3 +1519,44 @@ def test_a_link_the_image_left_at_the_credentials_path_isnt_followed(js, plugin,
   # the link was removed, not what it points at, and nothing was written there
   assert (elsewhere / "keep").exists()
   assert sorted(os.listdir(elsewhere)) == ["keep"]
+
+
+# managed files (#96)
+
+def test_managed_files_are_placed_before_the_image_gen_scripts(js, plugin, images, commands, monkeypatch):
+  order = []
+  monkeypatch.setattr(image_update_module.managed_files, "place_files",
+                      lambda session, url, root, config, allow_setuid=False: order.append(("files", config, allow_setuid)))
+  popen = commands.popen
+
+  def run(args, **kwargs):
+    if args[0].endswith("/tmp/mprov/script-runner.sh"):
+      order.append(("scripts",))
+    return popen(args, **kwargs)
+  monkeypatch.setattr(subprocess, "Popen", run)
+  files = {"files": [{"slug": "motd"}]}
+  pending_build(js, image(config=files))
+  plugin.handle_jobs()
+  assert order[0] == ("files", files, False)
+  assert order[1] == ("scripts",)
+
+
+def test_a_managed_file_that_cant_be_placed_fails_the_build(js, plugin, images, commands, monkeypatch, caplog):
+  def fail(*args, **kwargs):
+    raise image_update_module.managed_files.PlacementError("file chrony-conf: no user or group root:chrony in the image")
+  monkeypatch.setattr(image_update_module.managed_files, "place_files", fail)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  assert "no user or group root:chrony" in caplog.text
+
+
+def test_setuid_managed_files_follow_the_setting(js, plugin, images, commands, monkeypatch):
+  seen = []
+  monkeypatch.setattr(image_update_module.managed_files, "place_files",
+                      lambda session, url, root, config, allow_setuid=False: seen.append(allow_setuid))
+  plugin.allowSetuidFiles = True
+  pending_build(js)
+  plugin.handle_jobs()
+  assert seen == [True]

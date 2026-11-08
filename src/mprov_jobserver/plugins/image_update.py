@@ -22,6 +22,7 @@ from os.path import dirname, basename, isfile, join
 import glob
 from mprov_jobserver.log import get_logger
 from mprov_jobserver import identity as ident
+from mprov_jobserver import managed_files
 from mprov_jobserver.version import jobserver_version
 
 log = get_logger(__name__)
@@ -93,6 +94,9 @@ class image_update(JobServerPlugin):
   # How long uninstalling a 0.6-era pip-installed job server from an image
   # being rebuilt may take.
   pipUninstallTimeout = 300
+  # managed files from the mPCC (#96) may set setuid or setgid only if this
+  # is on: a managed file shouldn't quietly become a setuid binary
+  allowSetuidFiles = False
 
   # override default load config because we have to check that mprov-webserver is also enabled.
   def load_config(self):
@@ -694,6 +698,17 @@ class image_update(JobServerPlugin):
         self.removePipInstall(imgDir, imageDetails['slug'])
         if not self.installBundle(imgDir, imageDetails['slug']):
           log.error("Unable to install the job server into the image.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
+
+        # the mPCC's managed files for this image (#96), after the base OS
+        # and before the image-gen scripts (and Ansible), so they can use
+        # them.  Nothing is bind-mounted into the image yet.
+        try:
+          managed_files.place_files(self.js.session, self.js.mprovURL, imgDir, imageDetails.get('config'),
+                                    allow_setuid=bool(self.allowSetuidFiles))
+        except (managed_files.PlacementError, OSError) as err:
+          log.error(f"unable to place the managed files in image {imageDetails['slug']}, failing job: {err}")
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
 
