@@ -1,0 +1,14 @@
+- bmc-rotate:
+    # check the BMCs' HTTPS certificates (Redfish).  Off by default: BMCs
+    # mostly have self-signed ones.  The mPCC's report flags a change made
+    # without checking.
+    verifyBMC: False
+    # the CA certificate file to check them with, if not the OS bundle
+    bmcCABundle: ''
+    # how many BMCs to work on at once
+    parallel: 4
+    # IPMI, for a BMC without Redfish
+    ipmiChannel: 1
+    ipmiInterface: 'lanplus'
+    # seconds to wait for a BMC
+    timeout: 15
