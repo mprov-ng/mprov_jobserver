@@ -35,7 +35,7 @@ Plugins may override `load_config`/`set_job_*` when they claim specific job IDs 
 - **Import**: `JobServer.load_plugins()` (`src/mprov_jobserver/app.py`) does `getattr(mprov_jobserver.plugins, mod.replace('-','_'))` and checks it's a `JobServerPlugin` subclass. Availability therefore also depends on the package `__init__` exporting the module.
 - **Activation**: only modules listed under `global.jobmodules` in `jobserver.yaml` are ever started.
 - **Reload-per-start**: each heartbeat, the supervisor `importlib.reload()`s the plugin module before instantiating it, so a running daemon picks up edited plugin code.
-- **One thread at a time per module**; a thread is restarted on the next heartbeat after it exits. A plugin raising `SystemExit`/an unhandled exception kills the daemon process — several plugins deliberately `sys.exit(1)` on misconfiguration (e.g. image plugins requiring `mprov-webserver`).
+- **One thread at a time per module**; a thread is restarted on the next heartbeat after it exits. Since #337 an mPCC that goes away mid-run no longer ends a thread: `update_job_status()`/`claim_job()` swallow `requests.RequestException` (no jobs this run / skip that job), and `JobServerPlugin.run()` catches it around `load_config`+`handle_jobs`, marks the plugin failed and says so in one line via `js.mpcc_unreachable()` (once per module while the mPCC is down) — the supervisor restarts the thread next heartbeat and fails any job it left RUNNING (#180). A plugin raising `SystemExit`/any other unhandled exception still ends loudly — several plugins deliberately `sys.exit(1)` on misconfiguration (e.g. image plugins requiring `mprov-webserver`).
 
 ## Cross-plugin dependencies (enforced in code)
 
