@@ -20,9 +20,13 @@ log names the file and its version, never its contents: a rendered file
 holds the image's Configuration Parameters.
 
 What's placed is recorded in /var/lib/mprov/placed-files.json in the
-image.  A file that's no longer attached is removed at the next build, or,
-if the path belonged to a package before it was placed, the package is
-reinstalled to bring its own file back.
+image.  A file that's no longer attached is removed at the next build.  If
+the path belonged to a package before it was placed, the package is then
+reinstalled to bring its own file back, and the file is checked against the
+package's digest: rpm leaves an existing %config(noreplace) file alone on a
+reinstall and still succeeds, so the placed copy is always removed first, and
+the reinstall's exit code isn't trusted (#348).  A package file that can't be
+restored fails the build, with the placed copy already gone.
 
 Any problem fails the build, so nothing half-configured is packed.  Every
 entry is checked before anything is written:
@@ -34,6 +38,7 @@ entry is checked before anything is written:
   image-update setting allowSetuidFiles is on;
 - owner and group are names or numeric ids.
 """
+import hashlib
 import json
 import os
 import posixpath
@@ -213,31 +218,90 @@ def save_manifest(root, manifest):
   os.replace(tmp, os.path.join(parent, posixpath.basename(MANIFEST)))
 
 
+# rpm's FILEDIGESTALGO: the OpenPGP hash algorithm ids; none means MD5
+DIGESTS = {1: 'md5', 2: 'sha1', 8: 'sha256', 9: 'sha384', 10: 'sha512', 11: 'sha224'}
+
+
+def package_digests(root, package, dest):
+  '''
+  The digests the installed package records for dest (one per installed
+  instance), and the algorithm, or None if rpm can't say.  An empty digest
+  means rpm has no content for the path (a %ghost file, a directory).
+  '''
+  algo = chroot(root, ['rpm', '-q', '--queryformat', '%{FILEDIGESTALGO}\\n', package])
+  files = chroot(root, ['rpm', '-q', '--queryformat', '[%{FILENAMES}\\t%{FILEDIGESTS}\\n]', package])
+  if algo.returncode != 0 or files.returncode != 0:
+    return None
+  ids = algo.stdout.split()
+  name = DIGESTS.get(int(ids[0]), None) if ids and ids[0].isdigit() else 'md5'
+  if name is None:
+    return None
+  digests = {line.split('\t', 1)[1] for line in files.stdout.splitlines()
+             if '\t' in line and line.split('\t', 1)[0] == dest}
+  return (name, digests) if digests else None
+
+
+def file_digest(path, name):
+  digest = hashlib.new(name)
+  with open(path, 'rb') as f:
+    for chunk in iter(lambda: f.read(1 << 16), b''):
+      digest.update(chunk)
+  return digest.hexdigest()
+
+
 def remove(root, dest, record):
-  ''' Undo an earlier placement of dest. '''
+  '''
+  Undo an earlier placement of dest.  Raises PlacementError if dest was a
+  package's file and the package can't bring it back.
+  '''
   package = record.get('package') if isinstance(record, dict) else None
-  if package:
-    # the path was the package's before it was placed: bring its file back
-    result = chroot(root, ['dnf', '-y', 'reinstall', package])
-    if result.returncode == 0:
-      log.info(f"restored {dest} from package {package} (file {record.get('slug')} no longer attached)")
-    else:
-      log.warning(f"unable to restore {dest} from package {package}; leaving the placed copy there.")
-    return
+  slug = record.get('slug') if isinstance(record, dict) else None
   try:
     parent = safe_parent(root, dest, create=False)
   except PlacementError as err:
+    if package:
+      raise PlacementError(f"unable to restore {dest} from package {package}: {err}") from err
     log.warning(f"not removing {dest}: {err}")
     return
-  if parent is None:
+  target = os.path.join(parent, posixpath.basename(dest)) if parent is not None else None
+  removed = False
+  if target is not None:
+    try:
+      if not stat.S_ISDIR(os.lstat(target).st_mode):
+        os.unlink(target)
+        removed = True
+    except FileNotFoundError:
+      pass
+  if not package:
+    if removed:
+      log.info(f"removed {dest} (file {slug} no longer attached)")
     return
-  target = os.path.join(parent, posixpath.basename(dest))
-  try:
-    if stat.S_ISREG(os.lstat(target).st_mode):
-      os.unlink(target)
-      log.info(f"removed {dest} (file {record.get('slug')} no longer attached)")
-  except FileNotFoundError:
-    pass
+  # the path was the package's before it was placed: with the placed copy
+  # gone, a reinstall writes the package's own file, even a noreplace one
+  if chroot(root, ['rpm', '-q', package]).returncode != 0:
+    log.info(f"removed {dest} (file {slug} no longer attached; package {package} is no longer installed)")
+    return
+  result = chroot(root, ['dnf', '-y', 'reinstall', package])
+  problem = None
+  if result.returncode != 0:
+    problem = f"dnf reinstall failed ({result.stderr.strip()[-200:] or result.stdout.strip()[-200:]})"
+  else:
+    expected = package_digests(root, package, dest)
+    parent = safe_parent(root, dest, create=False)
+    target = os.path.join(parent, posixpath.basename(dest)) if parent is not None else None
+    if expected is None:
+      problem = f"rpm has no digest for it in {package}"
+    elif expected[1] == {''}:
+      # no content in the package (a %ghost file): nothing to bring back
+      pass
+    elif target is None or not os.path.isfile(target) or os.path.islink(target):
+      problem = "the reinstall didn't write it"
+    elif file_digest(target, expected[0]) not in expected[1]:
+      problem = "it doesn't match the package's digest after the reinstall"
+  if problem:
+    raise PlacementError(f"unable to restore {dest} from package {package} (file {slug} no longer "
+                         f"attached): {problem}.  The placed copy has been removed.")
+  log.info(f"restored {dest} from package {package} (file {slug} no longer attached)")
 
 
 def place_files(session, mprov_url, root, config, allow_setuid=False):
