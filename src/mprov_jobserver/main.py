@@ -22,6 +22,34 @@ def exitHandler(signum, frame):
 signal.signal(signal.SIGINT, exitHandler)
 signal.signal(signal.SIGTERM, exitHandler)
 
+def copy_default_config(dest):
+    """
+    Copy the packaged config (jobserver.yaml and the plugins' YAMLs) into
+    dest, for a job server started without one.  Each file is created 0600:
+    the config and a plugin's settings can hold secrets.  Uses
+    importlib.resources.files(); contents() and open_text() are deprecated
+    (#346).  False, said, if a file can't be copied.
+    """
+    sources = [(importlib.resources.files('mprov_jobserver'), dest),
+               (importlib.resources.files('mprov_jobserver.plugins'), os.path.join(dest, 'plugins'))]
+    for package, target in sources:
+        try:
+            os.makedirs(target, exist_ok=True)
+            for entry in sorted(package.iterdir(), key=lambda e: e.name):
+                if not entry.name.endswith('.yaml') or not entry.is_file():
+                    continue
+                path = os.path.join(target, entry.name)
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, 'w') as out:
+                    out.write(entry.read_text())
+                os.chmod(path, 0o600)
+                log.info(f"copied {entry.name} to {target}")
+        except OSError as e:
+            log.error(f"copying the default config to {target}: {e}")
+            return False
+    return True
+
+
 def main():
     global jobServer
     runonce=False
@@ -35,36 +63,10 @@ def main():
         configfile = "/etc/mprov/jobserver.yaml"
         # using the default config file, see if one exists.
         if not os.path.isfile(configfile):
-            # no config file in the default location, let's copy one in and 
+            # no config file in the default location, let's copy one in and
             # say something to the user about editing it.
-            for entry in importlib.resources.contents('mprov_jobserver'): 
-                if entry[-4:] == "yaml":
-                    log.info(entry)
-
-                    # make the standard config directory
-                    os.makedirs('/etc/mprov/', exist_ok=True)
-                    try: 
-                        with importlib.resources.open_text('mprov_jobserver', entry) as yaml_file:
-                            with open('/etc/mprov/' + entry, "w") as yaml_file_out:
-                                yaml_file_out.write(yaml_file.read())
-                                os.chmod('/etc/mprov/' + entry, 0o600)
-                        
-                    except Exception as e:
-                        log.error(f"copying {entry} to /etc/mprov/: {e}")
-                        sys.exit(1)
-                    
-            # that succeeded so let's grab the plugin information
-            os.makedirs('/etc/mprov/plugins', exist_ok=True)
-            for p_entry in importlib.resources.contents('mprov_jobserver.plugins'):
-                if p_entry[-4:] == 'yaml':
-                    try:
-                        with importlib.resources.open_text('mprov_jobserver.plugins', p_entry) as p_yaml_file:
-                            with open('/etc/mprov/plugins/' + p_entry, 'w') as p_yaml_out_file:
-                                p_yaml_out_file.write(p_yaml_file.read())
-                    except OSError:
-                        log.error('copying ' + p_entry + ' to /etc/mprov/plugins/')
-                        sys.exit(1)
-            
+            if not copy_default_config('/etc/mprov'):
+                sys.exit(1)
             # if we make it here, we have copied the config to /etc/mprov/ so prompt the user to go modify it
             log.info('A fresh config has been copied to /etc/mprov/  Please go there')
             log.info('and edit the .yaml files in that directory to setup your environment.')
