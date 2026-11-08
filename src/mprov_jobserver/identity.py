@@ -23,6 +23,7 @@ import hashlib
 import os
 import tempfile
 import warnings
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from cryptography import x509
@@ -293,3 +294,108 @@ def token_from(value, path):
 def token_id(token):
   ''' A short, non-secret id for a token, to remember one that was refused. '''
   return hashlib.sha256(token.encode()).hexdigest()[:16]
+
+
+# ---- a booted node's certificate (mprov_control_center#381, C2) ------------
+#
+# The mPCC's boot scripts enroll a node as it boots (static/mprov_enroll.py)
+# and keep its key, certificate and the mPCC's CA in /etc/mprov/tls, as
+# separate files; the stateful installer copies them to disk.  The mPCC's
+# scripts renew it (mprov_control_center#506); the job server only uses it.
+
+NODE_TLS_DIR = '/etc/mprov/tls'
+NODE_KEY, NODE_CERT = 'node.key', 'node.crt'
+
+
+class NodeCredential():
+  ''' A node's key, certificate and CA, as paths, and its certificate. '''
+
+  def __init__(self, cert_path, key_path, ca_path, cert):
+    self.cert_path = cert_path
+    self.key_path = key_path
+    self.ca_path = ca_path
+    self.cert = cert
+
+
+def node_credential(tls_dir=None, now=None):
+  '''
+  The node's credential in tls_dir (/etc/mprov/tls), if it has all three
+  files and the certificate is in date and its key's; else None.  An
+  expired one is said: the node needs to enroll again.
+  '''
+  tls_dir = tls_dir or NODE_TLS_DIR
+  cert_path, key_path, ca_path = (os.path.join(tls_dir, name) for name in (NODE_CERT, NODE_KEY, CA_CERT))
+  if not all(os.path.isfile(path) for path in (cert_path, key_path, ca_path)):
+    return None
+  try:
+    with open(cert_path, 'rb') as f:
+      cert = x509.load_pem_x509_certificate(f.read())
+    with open(key_path, 'rb') as f:
+      key = serialization.load_pem_private_key(f.read(), password=None)
+  except (OSError, ValueError) as err:
+    log.error(f"unable to read this node's credential in {tls_dir}: {err}")
+    return None
+  if cert.public_key().public_numbers() != key.public_key().public_numbers():
+    log.error(f"the key in {key_path} isn't the certificate's.")
+    return None
+  now = now or utcnow()
+  if not cert.not_valid_before_utc <= now < cert.not_valid_after_utc:
+    log.error(f"this node's certificate (in {cert_path}) expired {cert.not_valid_after_utc:%Y-%m-%d %H:%M} UTC; "
+              "it needs to enroll again: netboot it, or let it re-enroll from the mPCC's admin.")
+    return None
+  return NodeCredential(cert_path, key_path, ca_path, cert)
+
+
+def https_url(url):
+  '''
+  The mPCC's HTTPS URL for its URL: the same host and path on port 443, as
+  the mPCC's boot scripts use it (static/mprov_enroll.py).  A node's
+  configuration has the plain-HTTP URL it boots from.
+  '''
+  parts = urlsplit(url)
+  if parts.scheme == 'https':
+    return url
+  host = parts.hostname or ''
+  if ':' in host:
+    host = f'[{host}]'
+  return urlunsplit(('https', host, parts.path or '/', '', ''))
+
+
+def http_url(url):
+  '''
+  The mPCC's plain-HTTP URL for its URL: the same host and path on port 80.
+  For what can't do HTTPS with the mPCC's CA: iPXE, which loads /ipxe/,
+  /static/ and the images over HTTP (mprov_control_center#381).
+  '''
+  parts = urlsplit(url)
+  if parts.scheme == 'http':
+    return url
+  host = parts.hostname or ''
+  if ':' in host:
+    host = f'[{host}]'
+  return urlunsplit(('http', host, parts.path or '/', '', ''))
+
+
+# ---- an image build's credential (mprov_control_center#381, C2) ------------
+
+def build_credential(session, mprov_url, image):
+  '''
+  A 2-hour credential for the script runner inside an image this job server
+  is building: POST /enroll/build/ {csr, image}, on session, which has the
+  job server's own certificate.  It can only read that image.  Returns (key
+  PEM, certificate PEM, CA PEM).  Raises EnrollError.
+  '''
+  url = mprov_url + 'enroll/build/'
+  key_pem, csr = new_key_and_csr('build ' + str(image))
+  try:
+    response = session.post(url, json={'csr': csr, 'image': image}, timeout=TIMEOUT)
+  except requests.RequestException as err:
+    raise EnrollError(f"unable to reach the mPCC at {url}: {err}", retry=True)
+  if response.status_code == 200:
+    cert_pem, ca_pem = _issued(response, url)
+    return key_pem, cert_pem, ca_pem
+  if response.status_code == 404:
+    raise EnrollError(f"the mPCC at {mprov_url} has no build credentials (it answered 404 for {url}); "
+                      "it needs to be 0.7.0 or later.")
+  raise EnrollError(f"the mPCC refused a build credential for image {image} "
+                    f"({response.status_code}: {_detail(response)}).", retry=response.status_code >= 500)

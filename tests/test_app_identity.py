@@ -202,8 +202,8 @@ def test_a_script_runner_never_enrolls(server, tmp_path, ca, monkeypatch):
   server.register = False
   assert server.use_identity() is True
   assert made == []
-  # as before #381, whatever key it has, even none (the nads image)
-  assert server.session.headers["Authorization"] == "Api-Key "
+  # with no key either (the nads image), no Authorization at all
+  assert "Authorization" not in server.session.headers
 
 
 def test_a_script_runner_uses_a_certificate_that_is_there(server, ca):
@@ -494,3 +494,100 @@ def test_the_config_wins_over_the_environment(tmp_path, monkeypatch):
                                   "MPROV_CA_FINGERPRINT": "ab"})
   assert (server.tlsDir, server.enrollToken, server.caFingerprint, server.enrollTokenFile) == \
     ("/etc/js-tls", "c", "ef", "/run/token")
+
+
+# a script runner on a booted node (4b): the node's own certificate
+
+def node_tls(server, tmp_path, ca, **kwargs):
+  from test_identity import node_files
+  (tmp_path / "node").mkdir()
+  server.nodeTlsDir = node_files(tmp_path / "node", ca, **kwargs)
+  return tmp_path / "node"
+
+
+def test_a_script_runner_on_a_node_uses_the_nodes_certificate(server, tmp_path, ca, caplog):
+  node = node_tls(server, tmp_path, ca)
+  server.register = False
+  server.apikey = "baked-key"
+  server.mprovURL = "http://10.0.0.1/"
+  assert server.use_identity() is True
+  assert server.auth == "cert"
+  assert server.session.cert == (str(node / "node.crt"), str(node / "node.key"))
+  assert server.session.verify == str(node / "ca.crt")
+  assert "Authorization" not in server.session.headers
+  # over HTTPS to the same host, as the mPCC's boot scripts use it
+  assert server.mprovURL == "https://10.0.0.1/"
+  assert server.tlsPaths == {"cert": str(node / "node.crt"), "key": str(node / "node.key"),
+                             "ca": str(node / "ca.crt")}
+  assert "this node's certificate" in caplog.text
+
+
+def test_a_job_server_certificate_comes_before_a_nodes(server, tmp_path, ca):
+  """ The script runner in an image build, with its build credential. """
+  node_tls(server, tmp_path, ca)
+  ident.Identity(server.tlsDir).save(*credential(ca))
+  server.register = False
+  server.use_identity()
+  assert server.session.cert == os.path.join(server.tlsDir, "jobserver.pem")
+  assert server.tlsPaths["cert"] == server.tlsPaths["key"] == os.path.join(server.tlsDir, "jobserver.pem")
+
+
+def test_a_registered_job_server_never_uses_a_nodes_certificate(server, tmp_path, ca):
+  node_tls(server, tmp_path, ca)
+  server.apikey = "k"
+  server.use_identity()
+  assert server.auth == "apikey"
+
+
+def test_an_image_built_before_0_7_still_uses_the_key(server, tmp_path):
+  server.nodeTlsDir = str(tmp_path / "none")
+  server.register = False
+  server.apikey = "baked-key"
+  server.mprovURL = "http://10.0.0.1/"
+  server.use_identity()
+  assert server.session.headers["Authorization"] == "Api-Key baked-key"
+  assert server.mprovURL == "http://10.0.0.1/"
+  assert server.tlsPaths is None
+
+
+def test_a_refused_node_certificate_falls_back_to_the_key(server, tmp_path, ca):
+  node_tls(server, tmp_path, ca)
+  server.register = False
+  server.apikey = "baked-key"
+  server.use_identity()
+  server.auth_refused(refused())
+  server.use_identity()
+  assert server.auth == "apikey"
+  assert server.session.headers["Authorization"] == "Api-Key baked-key"
+
+
+def test_a_site_ca_bundle_is_kept_for_a_node(server, tmp_path, ca):
+  node_tls(server, tmp_path, ca)
+  server.register = False
+  server.caBundle, server._caBundleSet = "/etc/mprov/site-ca.pem", True
+  server.session.verify = "/etc/mprov/site-ca.pem"
+  server.use_identity()
+  assert server.session.verify == "/etc/mprov/site-ca.pem"
+
+
+def test_a_script_runner_never_renews_its_certificate(server, ca, monkeypatch):
+  """ In an image build it's a 2-hour build credential, always "due", which
+  the mPCC refuses to renew (found on the rig); on a node it's the mPCC's
+  scripts' to renew (mprov_control_center#506). """
+  due_credential(ca, server)
+  server.register = False
+  server.use_identity()
+  monkeypatch.setattr(app.ident, "renew", lambda *a: pytest.fail("a script runner renewed"))
+  monkeypatch.setattr(app.ident, "enroll", lambda *a: pytest.fail("a script runner enrolled"))
+  server.maybe_renew()
+
+
+def test_a_refused_node_certificate_says_what_a_node_needs(server, tmp_path, ca, caplog):
+  """ Not an enrollment token: a node enrolls at boot (found on the rig). """
+  node_tls(server, tmp_path, ca)
+  server.register = False
+  server.use_identity()
+  server.auth_refused(refused())
+  assert "refused this node's certificate" in caplog.text
+  assert "Netboot the node" in caplog.text
+  assert "MPROV_ENROLL_TOKEN" not in caplog.text

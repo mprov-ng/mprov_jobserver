@@ -181,6 +181,10 @@ class JobServer ():
   # token is sent; unset, MPROV_CA_FINGERPRINT.  Not needed with caBundle,
   # or with the mPCC's ca.crt next to the config file.
   caFingerprint = ""
+  # where a booted node's own key and certificate are (the mPCC's boot
+  # scripts enroll it): what a script runner on a node authenticates with.
+  # Unset, /etc/mprov/tls.
+  nodeTlsDir = ""
   # how this job server authenticates: 'cert', 'apikey' or None (not yet)
   auth = None
   _caBundleSet = False
@@ -190,6 +194,9 @@ class JobServer ():
   _refusedCert = None
   _refusedToken = None
   _identityProblem = None
+  # the certificate, key and CA files authenticating with, for the scripts
+  # the script runner runs (entity.json's tls)
+  tlsPaths = None
   _sharedKeyRefused = False
   _nextRenewCheck = 0.0
   # this host's stable id for the mPCC; unset, a random one is kept in
@@ -942,6 +949,11 @@ class JobServer ():
     if cert is not None:
       self.use_certificate(identity, cert)
       return True
+    if not self.register:
+      node = ident.node_credential(self.nodeTlsDir)
+      if node is not None and ident.fingerprint(node.cert) != self._refusedCert:
+        self.use_node_certificate(node)
+        return True
     if self.apikey or not self.register:
       self.use_apikey()
       return True
@@ -960,9 +972,14 @@ class JobServer ():
                   "MPROV_SHARED_KEY_MODE=off refuses it, and 0.8.0 drops it.  Enroll this job server "
                   "with a token from the mPCC instead (MPROV_ENROLL_TOKEN).")
     self.auth = 'apikey'
+    self.tlsPaths = None
     self.session.cert = None
-    # as before #381: a script runner may have none (the nads image)
-    self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    # a script runner may have none (the nads image): then it sends no
+    # Authorization at all, for the endpoints that don't need one
+    if self.apikey:
+      self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    else:
+      self.session.headers.pop('Authorization', None)
     self._addressSessions = None
 
   def use_certificate(self, identity, cert):
@@ -975,10 +992,31 @@ class JobServer ():
     self._certFingerprint = fp
     self._identityProblem = None
     self.session.cert = identity.credential_path
+    self.tlsPaths = {'cert': identity.credential_path, 'key': identity.credential_path, 'ca': identity.ca_path}
     if not self._caBundleSet and os.path.isfile(identity.ca_path):
       self.session.verify = identity.ca_path
     self.session.headers.pop('Authorization', None)
     # rebuilt with the new certificate when next used
+    self._addressSessions = None
+
+  def use_node_certificate(self, node):
+    '''
+    Authenticate with this node's own certificate, over HTTPS to the same
+    host, as the mPCC's boot scripts do: a node's configuration has the
+    plain-HTTP URL it boots from (mprov_control_center#381).
+    '''
+    fp = ident.fingerprint(node.cert)
+    if self.auth != 'cert' or self._certFingerprint != fp:
+      log.info(f"authenticating with this node's certificate, valid until {node.cert.not_valid_after_utc:%Y-%m-%d} UTC.")
+    self.auth = 'cert'
+    self._certFingerprint = fp
+    self._identityProblem = None
+    self.tlsPaths = {'cert': node.cert_path, 'key': node.key_path, 'ca': node.ca_path}
+    self.mprovURL = ident.https_url(self.mprovURL)
+    self.session.cert = (node.cert_path, node.key_path)
+    if not self._caBundleSet:
+      self.session.verify = node.ca_path
+    self.session.headers.pop('Authorization', None)
     self._addressSessions = None
 
   def enrollment_trust(self, identity):
@@ -1045,8 +1083,14 @@ class JobServer ():
     if (response.status_code == 401 and self.auth == 'cert'
         and 'TLS-Client-Certificate' in response.headers.get('WWW-Authenticate', '')):
       if self._refusedCert != self._certFingerprint:
-        log.error("the mPCC refused this job server's certificate: it was revoked or has expired, or the job "
-                  "server was deleted.  It needs a new enrollment token (MPROV_ENROLL_TOKEN).")
+        if self.register:
+          log.error("the mPCC refused this job server's certificate: it was revoked or has expired, or the job "
+                    "server was deleted.  It needs a new enrollment token (MPROV_ENROLL_TOKEN).")
+        else:
+          # a node's certificate (or an image build's): enrolled at boot by
+          # the mPCC's scripts, not with a token
+          log.error("the mPCC refused this node's certificate: it was revoked or has expired, or the system was "
+                    "deleted.  Netboot the node, or let it re-enroll from the mPCC's admin, to get a new one.")
       self._refusedCert = self._certFingerprint
       self.auth = None
       self.sessionOk = False
@@ -1065,7 +1109,10 @@ class JobServer ():
     its renewal window, or, for one still on the shared API key, enroll if
     it now can (a token, or the mPCC's CA to check it against, turned up).
     '''
-    if self.auth not in ('cert', 'apikey'):
+    # only a job server renews or enrolls: a script runner's certificate is
+    # an image build's 2-hour one, or a node's, which the mPCC's own scripts
+    # renew (mprov_control_center#506)
+    if self.auth not in ('cert', 'apikey') or not self.register:
       return
     now = time.monotonic()
     if now < self._nextRenewCheck:

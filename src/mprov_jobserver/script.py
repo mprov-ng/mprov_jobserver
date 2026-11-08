@@ -2,6 +2,7 @@
 import requests
 import socket
 from mprov_jobserver.tls import ca_bundle
+from mprov_jobserver import identity as ident
 import yaml, os, sys, time
 from mprov_jobserver.log import get_logger
 from mprov_jobserver.config import merge_config
@@ -17,8 +18,13 @@ class MProvScript():
   config_data = {}
   mprovURL = "http://127.0.0.1:8080/"
   apikey = ""
-  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102)
+  # CA bundle for HTTPS to the mPCC; unset, the OS bundle is used (#102),
+  # or the mPCC's CA next to the node's certificate
   caBundle = ""
+  # where this node's own key and certificate are, which the mPCC's boot
+  # scripts enrolled it for (mprov_control_center#381).  Unset,
+  # /etc/mprov/tls.  Without one, the shared API key is used.
+  nodeTlsDir = ""
   heartbeatInterval = 10
   runonce = True
   sessionOk = False
@@ -68,11 +74,22 @@ class MProvScript():
     pass
 
   def startSession(self):
-    
-    self.session.headers.update({
-      'Authorization': 'Api-Key ' + self.apikey,
-      'Content-Type': 'application/json'
-      })
+    caBundleSet = bool(self.caBundle)
+    self.session.headers.update({'Content-Type': 'application/json'})
+    # this node's own certificate, over HTTPS to the same host, as the
+    # mPCC's boot scripts use it; else the shared API key, for an image built
+    # before 0.7.0 (mprov_control_center#381)
+    node = ident.node_credential(self.nodeTlsDir)
+    if node is not None:
+      self.mprovURL = ident.https_url(self.mprovURL)
+      self.session.cert = (node.cert_path, node.key_path)
+      self.session.headers.pop('Authorization', None)
+    elif self.apikey:
+      self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    else:
+      # no key either (the nads image, or a node whose enrollment failed):
+      # only the endpoints that need none will answer
+      self.session.headers.pop('Authorization', None)
     # A script reports its own version for the mPCC's logs and exemption
     # list, and doesn't check the mPCC's in return: scripts are baked into
     # images that can't be rebuilt with every mPCC release, so an mPCC on a
@@ -86,7 +103,9 @@ class MProvScript():
     except FileNotFoundError as err:
       log.error(f"{err}.")
       return False
-    if self.caBundle:
+    if node is not None and not caBundleSet:
+      self.session.verify = node.ca_path
+    elif self.caBundle:
       self.session.verify = self.caBundle
     try:
       response = self.session.get(self.mprovURL, stream=True)

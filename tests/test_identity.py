@@ -321,3 +321,95 @@ def test_no_token_is_none(tmp_path, content):
 def test_a_token_id_doesnt_give_the_token_away():
   assert "secret" not in ident.token_id("secret")
   assert ident.token_id("secret") == ident.token_id("secret") != ident.token_id("other")
+
+
+# a booted node's credential (C2) and the URL it's used on
+
+def node_files(tmp_path, ca, days=30, start=None, other_key=False):
+  key_pem, cert_pem, ca_pem = credential(ca, days=days, start=start)
+  if other_key:
+    key_pem, _ = ident.new_key_and_csr("other")
+  (tmp_path / "node.key").write_bytes(key_pem)
+  (tmp_path / "node.crt").write_text(cert_pem)
+  (tmp_path / "ca.crt").write_text(ca_pem)
+  return str(tmp_path)
+
+
+def test_a_nodes_credential_is_its_three_files(tmp_path, ca):
+  node = ident.node_credential(node_files(tmp_path, ca))
+  assert (node.cert_path, node.key_path, node.ca_path) == (
+    str(tmp_path / "node.crt"), str(tmp_path / "node.key"), str(tmp_path / "ca.crt"))
+  assert node.cert.not_valid_after_utc > NOW
+
+
+@pytest.mark.parametrize("missing", ["node.key", "node.crt", "ca.crt"])
+def test_a_node_missing_a_file_has_none(tmp_path, ca, missing):
+  node_files(tmp_path, ca)
+  (tmp_path / missing).unlink()
+  assert ident.node_credential(str(tmp_path)) is None
+
+
+def test_a_node_whose_key_isnt_the_certificates_has_none(tmp_path, ca, caplog):
+  assert ident.node_credential(node_files(tmp_path, ca, other_key=True)) is None
+  assert "isn't the certificate's" in caplog.text
+
+
+def test_an_expired_node_certificate_says_to_enroll_again(tmp_path, ca, caplog):
+  assert ident.node_credential(node_files(tmp_path, ca, start=NOW - datetime.timedelta(days=31))) is None
+  assert "enroll again" in caplog.text
+
+
+def test_no_node_credential_by_default_in_a_test(tmp_path):
+  assert ident.node_credential(str(tmp_path / "none")) is None
+
+
+@pytest.mark.parametrize("url, https", [
+  ("http://10.0.0.1/", "https://10.0.0.1/"),
+  ("http://10.0.0.1:8080/", "https://10.0.0.1/"),
+  ("http://mpcc.cluster/mprov/", "https://mpcc.cluster/mprov/"),
+  ("http://[fd00::1]:80/", "https://[fd00::1]/"),
+  ("http://10.0.0.1", "https://10.0.0.1/"),
+  ("https://mpcc:8443/", "https://mpcc:8443/"),
+])
+def test_the_https_url_is_the_same_host_on_443(url, https):
+  """ As the mPCC's boot scripts make it (static/mprov_enroll.py). """
+  assert ident.https_url(url) == https
+
+
+# an image build's credential
+
+def test_a_build_credential_is_for_the_image_and_a_new_key(ca):
+  session = Session(lambda body: Reply(200, {"certificate": ca.sign(body["csr"]), "ca": ca.pem, "kind": "build"}))
+  key_pem, cert_pem, ca_pem = ident.build_credential(session, URL, "compute")
+  url, body = session.posts[0]
+  assert url == URL + "enroll/build/"
+  assert body["image"] == "compute"
+  cert = x509.load_pem_x509_certificate(cert_pem.encode())
+  key = serialization.load_pem_private_key(key_pem, password=None)
+  assert cert.public_key().public_numbers() == key.public_key().public_numbers()
+  assert ca_pem == ca.pem
+
+
+@pytest.mark.parametrize("reply, says, retry", [
+  (Reply(404, None), "0.7.0 or later", False),
+  (Reply(403, {"detail": "Needs a job server's certificate."}), "403", False),
+  (Reply(400, {"image": "No such image."}), "No such image", False),
+  (Reply(503, {"detail": "busy"}), "503", True),
+  (requests.exceptions.ConnectionError("refused"), "unable to reach", True),
+])
+def test_a_refused_build_credential_says_why(reply, says, retry):
+  with pytest.raises(ident.EnrollError) as err:
+    ident.build_credential(Session(reply), URL, "compute")
+  assert says in str(err.value)
+  assert err.value.retry is retry
+
+
+@pytest.mark.parametrize("url, http", [
+  ("https://10.0.0.1/", "http://10.0.0.1/"),
+  ("https://10.0.0.1:8443/mprov/", "http://10.0.0.1/mprov/"),
+  ("https://[fd00::1]/", "http://[fd00::1]/"),
+  ("http://10.0.0.1:8080/", "http://10.0.0.1:8080/"),
+])
+def test_the_http_url_is_the_same_host_on_80(url, http):
+  """ For iPXE, which loads from the mPCC over plain HTTP. """
+  assert ident.http_url(url) == http
