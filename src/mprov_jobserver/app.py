@@ -974,8 +974,12 @@ class JobServer ():
     self.auth = 'apikey'
     self.tlsPaths = None
     self.session.cert = None
-    # as before #381: a script runner may have none (the nads image)
-    self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    # a script runner may have none (the nads image): then it sends no
+    # Authorization at all, for the endpoints that don't need one
+    if self.apikey:
+      self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    else:
+      self.session.headers.pop('Authorization', None)
     self._addressSessions = None
 
   def use_certificate(self, identity, cert):

@@ -202,8 +202,8 @@ def test_a_script_runner_never_enrolls(server, tmp_path, ca, monkeypatch):
   server.register = False
   assert server.use_identity() is True
   assert made == []
-  # as before #381, whatever key it has, even none (the nads image)
-  assert server.session.headers["Authorization"] == "Api-Key "
+  # with no key either (the nads image), no Authorization at all
+  assert "Authorization" not in server.session.headers
 
 
 def test_a_script_runner_uses_a_certificate_that_is_there(server, ca):

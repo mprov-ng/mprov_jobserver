@@ -88,3 +88,15 @@ def test_a_node_script_without_a_certificate_uses_the_key(tmp_path, connected):
   assert script.startSession()
   assert script.session.headers["Authorization"] == "Api-Key baked-key"
   assert script.mprovURL == "http://10.0.0.1/"
+
+
+def test_a_node_script_with_no_certificate_or_key_sends_no_authorization(tmp_path, connected):
+  """ The nads image, or a node whose enrollment failed. """
+  script = MProvScript.__new__(MProvScript)
+  script.session = Session(connected)
+  script.session.headers["Authorization"] = "Api-Key old"
+  script.nodeTlsDir = str(tmp_path / "none")
+  script.mprovURL = "http://10.0.0.1/"
+  script.apikey = ""
+  assert script.startSession()
+  assert "Authorization" not in script.session.headers

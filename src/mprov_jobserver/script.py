@@ -84,8 +84,12 @@ class MProvScript():
       self.mprovURL = ident.https_url(self.mprovURL)
       self.session.cert = (node.cert_path, node.key_path)
       self.session.headers.pop('Authorization', None)
-    else:
+    elif self.apikey:
       self.session.headers['Authorization'] = 'Api-Key ' + self.apikey
+    else:
+      # no key either (the nads image, or a node whose enrollment failed):
+      # only the endpoints that need none will answer
+      self.session.headers.pop('Authorization', None)
     # A script reports its own version for the mPCC's logs and exemption
     # list, and doesn't check the mPCC's in return: scripts are baked into
     # images that can't be rebuilt with every mPCC release, so an mPCC on a
