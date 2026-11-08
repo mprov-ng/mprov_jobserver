@@ -21,9 +21,16 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from os.path import dirname, basename, isfile, join
 import glob
 from mprov_jobserver.log import get_logger
+from mprov_jobserver import identity as ident
 from mprov_jobserver.version import jobserver_version
 
 log = get_logger(__name__)
+
+# where an image build's 2-hour credential goes in the image, as the script
+# runner in it sees it, and the job server settings it doesn't get
+# (mprov_control_center#381)
+BUILD_TLS_DIR = '/tmp/mprov/tls'
+BUILD_DROPPED_SETTINGS = ('apikey', 'enrollToken', 'enrollTokenFile', 'caFingerprint', 'nodeTlsDir')
 
 # Where the job server image keeps the node-image bundle (#309), and where
 # a bundle goes in a node image.  BUNDLE_LINK is the path script-runner.sh
@@ -208,6 +215,22 @@ class image_update(JobServerPlugin):
       return False
     for tmp, final in pulled:
       os.replace(tmp, final)
+    return True
+
+  def remove_build_credential(self, path):
+    '''
+    Remove an image build's credential directory (or whatever the image
+    left at that path), never following a link.  False, said, if it
+    couldn't be.
+    '''
+    try:
+      if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+        os.unlink(path)
+      elif os.path.isdir(path):
+        shutil.rmtree(path)
+    except OSError as err:
+      log.error(f"unable to remove {path}: {err}")
+      return False
     return True
 
   def packImage(self, busybox, imgDir, dest):
@@ -701,10 +724,32 @@ class image_update(JobServerPlugin):
         log.debug(localConfig[0]['global']['jobmodules'])
         localConfig[0]['global']['jobmodules'] = ['script-runner']
         localConfig[0]['global']['runonce'] = True
+        # A job server with its own certificate gives the script runner in
+        # the image a 2-hour credential that can only read this image,
+        # instead of the shared API key, which image-gen scripts used to
+        # write into every image (mprov_control_center#381).  It's removed
+        # before the image is packed.
+        buildTls = mprovDir + '/tls'
+        if not self.remove_build_credential(buildTls):
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
+        if getattr(self.js, 'auth', None) == 'cert':
+          try:
+            ident.Identity(buildTls).save(*ident.build_credential(self.js.session, self.js.mprovURL, imageDetails['slug']))
+          except (ident.EnrollError, OSError) as err:
+            log.error(f"unable to get a build credential for image {imageDetails['slug']}, failing job: {err}")
+            self.remove_build_credential(buildTls)
+            self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+            continue
+          for setting in BUILD_DROPPED_SETTINGS:
+            localConfig[0]['global'].pop(setting, None)
+          localConfig[0]['global']['tlsDir'] = BUILD_TLS_DIR
+          localConfig[0]['global']['mprovURL'] = self.js.mprovURL
         try:
           fd = os.open(jobserverYaml, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         except OSError as err:
           log.error(f"Unable to create {jobserverYaml}, failing job: {err}")
+          self.remove_build_credential(buildTls)
           self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
           continue
         os.fchmod(fd, 0o600)
@@ -775,6 +820,12 @@ class image_update(JobServerPlugin):
             os.unlink(jobserverYaml)
           except FileNotFoundError:
             pass
+          self.remove_build_credential(buildTls)
+        # never pack an image with the build credential in it
+        if os.path.lexists(buildTls):
+          log.error(f"{buildTls} is still there, so the image isn't packed with it; failing job.")
+          self.js.update_job_status(self.jobModule, 3, jobid=jid, jobquery='jobserver=' + str(self.js.id) + '&status=2')
+          continue
 
         # grab a copy of busybox into a root-only directory under the image
         # store.  A fixed /tmp path is world-writable: another user could

@@ -158,6 +158,21 @@ signs for it, good for 90 days.
 - **Without a certificate or a token** the job server falls back to
   `MPROV_APIKEY`, with a warning, and keeps trying to enroll. That fallback
   goes in 0.8.0.
+- **Image builds.** A job server with its certificate never puts the API key
+  in an image. The script runner in the image being built gets a 2-hour
+  credential of its own, which can only read that image. It goes in the
+  image's `/tmp/mprov/tls` and is removed before the image is packed. The
+  build fails if the credential can't be had, or can't be removed.
+- **On a booted node**, the script runner and the Python post-boot scripts
+  (`MProvScript`) use the node's own certificate. The mPCC's boot scripts
+  enroll the node for it as it boots, in `/etc/mprov/tls` (`nodeTlsDir`).
+  They talk to the mPCC over HTTPS on the same host. An image built before
+  0.7.0, which has no node certificate, still uses its key.
+- **Scripts** the script runner runs get no `apikey` in `entity.json` with a
+  certificate. Instead, `tls` gives the `cert`, `key` and `ca` files to use,
+  e.g. with `curl --cert`, and `mprovURL` is the `https://` URL. An image-gen
+  script must not copy those files into the image: they're the build's, and
+  the booted node has its own.
 
 **Don't edit `/etc/mprov/jobserver.yaml` in a container.** It is written
 from a template on every start, so your changes are gone at the next

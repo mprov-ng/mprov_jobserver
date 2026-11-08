@@ -195,10 +195,16 @@ class script_runner(JobServerPlugin):
     # add the mprovURL to the entity. 
     entity['mprovURL'] = self.js.mprovURL
     
-    # only add the API key for images that will be sync'ed 
-    # to registered machines only.
-    # nads images are public, so don't sync the api key.
-    if entityId == "nads" and sysimage:
+    # How the scripts reach the mPCC (mprov_control_center#381).  With a
+    # certificate (the node's own, or an image build's 2-hour one) there's no
+    # key at all: the mPCC is reached over HTTPS with the files in tls,
+    # {cert, key, ca} paths, which an image-gen script must never copy into
+    # the image (a booted node has its own, in /etc/mprov/tls).  Otherwise
+    # the shared API key, as before 0.7.0, except for the public nads image.
+    if getattr(self.js, 'auth', None) == 'cert' and getattr(self.js, 'tlsPaths', None):
+      entity['apikey'] = ""
+      entity['tls'] = dict(self.js.tlsPaths)
+    elif entityId == "nads" and sysimage:
       entity['apikey'] = ""
     else:
       # add our apikey to the entity

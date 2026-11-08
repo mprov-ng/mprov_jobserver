@@ -613,3 +613,28 @@ def test_an_image_can_switch_off_its_distro_scripts(js, plugin, monkeypatch):
   js.session.routes["systemimages/compute/"] = entity(config_params="disable_scripts: [group-tool]\n")
   plugin.handle_jobs()
   assert sorted(plugin.ran) == ["base", "image-tool"]
+
+
+# with a certificate (mprov_control_center#381, 4b)
+
+def test_with_a_certificate_the_entity_has_no_key_but_the_tls_files(js, plugin, monkeypatch):
+  """ An image build's 2-hour credential, or a booted node's own: no secret
+  goes into entity.json, only where the files are. """
+  js.auth = "cert"
+  js.tlsPaths = {"cert": "/tmp/mprov/tls/jobserver.pem", "key": "/tmp/mprov/tls/jobserver.pem",
+                 "ca": "/tmp/mprov/tls/ca.crt"}
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  plugin.handle_jobs()
+  seen = plugin.entities[0]
+  assert seen["apikey"] == ""
+  assert seen["tls"] == js.tlsPaths
+
+
+def test_with_the_key_the_entity_is_as_before(js, plugin, monkeypatch):
+  js.auth = "apikey"
+  argv(monkeypatch, "-i", "compute")
+  js.session.routes["systemimages/compute/"] = entity()
+  plugin.handle_jobs()
+  assert plugin.entities[0]["apikey"] == "test-key"
+  assert "tls" not in plugin.entities[0]

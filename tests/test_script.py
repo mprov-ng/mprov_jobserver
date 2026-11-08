@@ -48,3 +48,43 @@ def test_ip_address_is_the_address_string(family, host):
   finally:
     client.close()
     server.close()
+
+
+# a booted node's own certificate (mprov_control_center#381, 4b)
+
+@pytest.fixture
+def connected():
+  server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  server.bind(("127.0.0.1", 0))
+  server.listen(1)
+  client = socket.create_connection(server.getsockname()[:2])
+  yield ConnectedResponse(client)
+  client.close()
+  server.close()
+
+
+def test_a_node_script_uses_the_nodes_certificate(tmp_path, connected):
+  from test_identity import FakeCA, node_files
+  node = tmp_path / "node"
+  node.mkdir()
+  script = MProvScript.__new__(MProvScript)
+  script.session = Session(connected)
+  script.nodeTlsDir = node_files(node, FakeCA())
+  script.mprovURL = "http://10.0.0.1/"
+  script.apikey = "baked-key"
+  assert script.startSession()
+  assert script.session.cert == (str(node / "node.crt"), str(node / "node.key"))
+  assert script.session.verify == str(node / "ca.crt")
+  assert "Authorization" not in script.session.headers
+  assert script.mprovURL == "https://10.0.0.1/"
+
+
+def test_a_node_script_without_a_certificate_uses_the_key(tmp_path, connected):
+  script = MProvScript.__new__(MProvScript)
+  script.session = Session(connected)
+  script.nodeTlsDir = str(tmp_path / "none")
+  script.mprovURL = "http://10.0.0.1/"
+  script.apikey = "baked-key"
+  assert script.startSession()
+  assert script.session.headers["Authorization"] == "Api-Key baked-key"
+  assert script.mprovURL == "http://10.0.0.1/"

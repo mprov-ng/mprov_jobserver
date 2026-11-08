@@ -21,6 +21,7 @@ import requests
 import yaml
 
 import mprov_jobserver.app as app
+import mprov_jobserver.plugins.image_update as image_update_module
 from conftest import Commands
 from mprov_jobserver.plugins.image_update import image_update
 from mprov_jobserver.plugins.plugin import JobServerPlugin
@@ -1390,3 +1391,131 @@ def test_an_unreadable_host_resolv_conf_fails_the_job(js, rhel, commands, monkey
   assert not rhel.threadOk
   assert job_states(js) == [(3, 9)]
   assert not commands.matching("groupinstall")
+
+
+# an image build's 2-hour credential instead of the shared key
+# (mprov_control_center#381, 4b)
+
+def on_certificate(js, monkeypatch, fail=None):
+  """ A job server with its own certificate; the mPCC hands out build
+  credentials (recorded), or refuses with fail. """
+  from mprov_jobserver import identity as ident
+  js.auth = "cert"
+  js.config_data["global"].update({"apikey": "fleet-key", "enrollToken": "tok", "caFingerprint": "ab"})
+  asked = []
+
+  def build_credential(session, url, image):
+    asked.append((url, image))
+    if fail is not None:
+      raise fail
+    return b"-----BEGIN PRIVATE KEY-----\nk\n-----END PRIVATE KEY-----\n", \
+      "-----BEGIN CERTIFICATE-----\nc\n-----END CERTIFICATE-----\n", "CA PEM"
+  monkeypatch.setattr(image_update_module.ident, "build_credential", build_credential)
+  return asked
+
+
+def seen_at_script_run(images, commands, monkeypatch):
+  seen = {}
+  popen = commands.popen
+
+  def run(args, **kwargs):
+    if args[0].endswith("/tmp/mprov/script-runner.sh"):
+      mprov = images / "compute/tmp/mprov"
+      seen["config"] = (mprov / "jobserver.yaml").read_text()
+      tls = mprov / "tls"
+      seen["tls"] = sorted(os.listdir(tls)) if tls.is_dir() else None
+      if tls.is_dir():
+        seen["tls_mode"] = stat.S_IMODE(os.stat(tls).st_mode)
+        seen["pem_mode"] = stat.S_IMODE(os.stat(tls / "jobserver.pem").st_mode)
+    return popen(args, **kwargs)
+  monkeypatch.setattr(subprocess, "Popen", run)
+  return seen
+
+
+def test_a_job_server_on_its_certificate_gives_the_build_a_credential_not_the_key(
+    js, plugin, images, commands, monkeypatch):
+  asked = on_certificate(js, monkeypatch)
+  seen = seen_at_script_run(images, commands, monkeypatch)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert asked == [(js.mprovURL, "compute")]
+  config = yaml.load(seen["config"].replace("- !include", "# !include"), Loader=yaml.SafeLoader)[0]["global"]
+  # no key, no enrollment settings, the credential where the runner looks
+  for setting in ("apikey", "enrollToken", "caFingerprint"):
+    assert setting not in config
+  assert "fleet-key" not in seen["config"]
+  assert config["tlsDir"] == "/tmp/mprov/tls"
+  assert config["mprovURL"] == js.mprovURL
+  assert seen["tls"] == ["ca.crt", "jobserver.pem"]
+  assert seen["tls_mode"] == 0o700
+  assert seen["pem_mode"] == 0o600
+  # gone before the image is packed, and the build went on
+  assert not (images / "compute/tmp/mprov/tls").exists()
+  assert commands.matching("tar c")
+  # the job server's own settings are as they were
+  assert js.config_data["global"]["apikey"] == "fleet-key"
+
+
+def test_a_job_server_on_the_key_builds_as_before(js, plugin, images, commands, monkeypatch):
+  js.auth = "apikey"
+  js.config_data["global"]["apikey"] = "fleet-key"
+  seen = seen_at_script_run(images, commands, monkeypatch)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert "fleet-key" in seen["config"]
+  assert seen["tls"] is None
+
+
+def test_no_build_credential_fails_the_build_and_never_falls_back_to_the_key(
+    js, plugin, images, commands, monkeypatch, caplog):
+  from mprov_jobserver import identity as ident
+  on_certificate(js, monkeypatch, fail=ident.EnrollError("the mPCC refused a build credential for image compute"))
+  seen = seen_at_script_run(images, commands, monkeypatch)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert "config" not in seen
+  assert not commands.matching("tar c")
+  assert "unable to get a build credential" in caplog.text
+  assert not (images / "compute/tmp/mprov/tls").exists()
+
+
+def test_the_credential_is_removed_when_the_scripts_fail(js, plugin, images, commands, monkeypatch):
+  on_certificate(js, monkeypatch)
+  commands.fail = ["script-runner.sh"]
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not (images / "compute/tmp/mprov/tls").exists()
+
+
+def test_a_credential_that_cant_be_removed_isnt_packed(js, plugin, images, commands, monkeypatch, caplog):
+  on_certificate(js, monkeypatch)
+  real = image_update.remove_build_credential
+  calls = []
+
+  def stuck(self, path):
+    calls.append(path)
+    # the first call clears the way; the one after the scripts can't
+    return real(self, path) if len(calls) == 1 else False
+  monkeypatch.setattr(image_update, "remove_build_credential", stuck)
+  pending_build(js)
+  plugin.handle_jobs()
+  assert job_states(js) == [(3, 9)]
+  assert not commands.matching("tar c")
+  assert "isn't packed with it" in caplog.text
+
+
+def test_a_link_the_image_left_at_the_credentials_path_isnt_followed(js, plugin, images, commands, monkeypatch):
+  on_certificate(js, monkeypatch)
+  elsewhere = images / "elsewhere"
+  elsewhere.mkdir()
+  (elsewhere / "keep").write_text("x")
+  (images / "compute/tmp/mprov").mkdir(parents=True, exist_ok=True)
+  os.chmod(images / "compute/tmp/mprov", 0o700)
+  os.symlink(str(elsewhere), str(images / "compute/tmp/mprov/tls"))
+  pending_build(js)
+  plugin.handle_jobs()
+  # the link was removed, not what it points at, and nothing was written there
+  assert (elsewhere / "keep").exists()
+  assert sorted(os.listdir(elsewhere)) == ["keep"]
