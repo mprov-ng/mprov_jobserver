@@ -177,20 +177,32 @@ class Ipmi():
 
   def run(self, pair, args):
     ''' ipmitool, logged in as pair, with args.  (rc, output). '''
-    pwfile = self._private('login', pair['password'])
+    password = pair.get('password') or ''
+    # an empty password (a factory default) isn't a secret, and ipmitool
+    # won't read an empty -f file (#343)
+    pwfile = self._private('login', password) if password else None
+    login = ['-f', pwfile] if pwfile else ['-P', '']
     env = {k: v for k, v in os.environ.items() if k != 'IPMI_PASSWORD'}
     try:
-      result = subprocess.run(['ipmitool', '-I', self.interface, '-H', self.address, '-U', pair['username'],
-                               '-f', pwfile] + args, capture_output=True, text=True, env=env, timeout=self.timeout)
+      # -v: without it, ipmitool doesn't say why a login was refused
+      # ("RAKP 2 HMAC is invalid" for a wrong password), and a refused
+      # password looks just like a BMC that doesn't answer (#343)
+      result = subprocess.run(['ipmitool', '-v', '-I', self.interface, '-H', self.address,
+                               '-U', pair.get('username') or ''] + login + args,
+                              capture_output=True, text=True, env=env, timeout=self.timeout)
       return result.returncode, (result.stdout or '') + (result.stderr or '')
     except subprocess.TimeoutExpired:
       return 1, 'ipmitool timed out'
     finally:
-      os.unlink(pwfile)
+      if pwfile:
+        os.unlink(pwfile)
 
   def probe(self, pair):
     ''' Raises Unreachable if the BMC doesn't answer IPMI at all. '''
     rc, out = self.run(pair, ['mc', 'guid'])
+    if rc != 0 and 'Unable to read password' in out:
+      # our side, not the BMC's: never "unreachable" (#343)
+      raise RuntimeError(f"ipmitool couldn't read the login password: {out.strip()[-200:]}")
     if rc != 0 and not IPMI_REFUSED.search(out):
       raise Unreachable(f"no answer over IPMI either: {out.strip()[-200:]}")
 
@@ -367,13 +379,17 @@ class bmc_rotate(JobServerPlugin):
       current = secret.get('current') or {}
       if not address:
         raise RuntimeError("the request has no BMC address")
-      bmc = self.connect(address, workdir, current)
+      # a pair to see whether the BMC answers IPMI with: for a "find" the
+      # mPCC has already cleared the current one, so the first candidate (#343)
+      candidates = list(secret.get('candidates') or [])
+      probe = current if current.get('username') else (candidates[0] if candidates else current)
+      bmc = self.connect(address, workdir, probe)
       result['method'] = bmc.method
       result['tls_verified'] = bool(self.verify()) if bmc.method == 'redfish' else None
       if kind == 'check':
         self.check(bmc, current, result)
       elif kind == 'find':
-        self.find(bmc, list(secret.get('candidates') or []), result)
+        self.find(bmc, candidates, result)
       elif kind == 'change':
         self.change(bmc, current, secret.get('new') or {}, result, touched)
       else:

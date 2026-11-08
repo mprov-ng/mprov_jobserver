@@ -353,3 +353,69 @@ def test_the_default_timeout_allows_a_slow_bmc():
   import yaml
   shipped = yaml.safe_load(open(os.path.join(os.path.dirname(bmc_module.__file__), "bmc-rotate.yaml")))
   assert bmc_rotate.timeout == shipped[0]["bmc-rotate"]["timeout"] == 60
+
+
+# ipmitool's real output, from ipmi_sim (#343)
+IPMI_WRONG_PASSWORD = ("Unable to Get Channel Cipher Suites\n> RAKP 2 HMAC is invalid\n"
+                       "Error: Unable to establish IPMI v2 / RMCP+ session\n")
+IPMI_NO_ANSWER = "Error: Unable to establish IPMI v2 / RMCP+ session\n"
+
+
+def ipmitool_says(monkeypatch, out, rc=1):
+  seen = []
+
+  def run(argv, **kwargs):
+    seen.append(argv)
+    return subprocess.CompletedProcess(argv, rc, "", out)
+  monkeypatch.setattr(bmc_module.subprocess, "run", run)
+  return seen
+
+
+def test_ipmitool_is_asked_why_a_login_failed(monkeypatch, tmp_path):
+  """ Without -v, ipmitool prints the same line for a wrong password as for
+  a BMC that doesn't answer (#343). """
+  seen = ipmitool_says(monkeypatch, "", rc=0)
+  Ipmi("10.9.0.5", str(tmp_path), 1, "lanplus", 5).login(CUR)
+  assert seen[0][:2] == ["ipmitool", "-v"]
+
+
+def test_a_wrong_ipmi_password_is_refused_not_unreachable(monkeypatch, tmp_path):
+  ipmitool_says(monkeypatch, IPMI_WRONG_PASSWORD)
+  ipmi = Ipmi("10.9.0.5", str(tmp_path), 1, "lanplus", 5)
+  ipmi.probe(CUR)
+  assert ipmi.login(CUR) is False
+
+
+def test_an_ipmi_bmc_that_doesnt_answer_is_unreachable(monkeypatch, tmp_path):
+  ipmitool_says(monkeypatch, IPMI_NO_ANSWER)
+  with pytest.raises(Unreachable):
+    Ipmi("10.9.0.5", str(tmp_path), 1, "lanplus", 5).probe(CUR)
+
+
+def test_a_find_probes_with_a_candidate_not_the_cleared_current_pair(plugin, monkeypatch):
+  """ The mPCC clears the current credentials when a change goes
+  unconfirmed; probing IPMI with them made every find "unreachable" (#343). """
+  probed = []
+
+  def connect(address, workdir, pair):
+    probed.append(pair)
+    return FakeBMC([NEW])
+  monkeypatch.setattr(plugin, "connect", connect)
+  secret = {"kind": "find", "bmc": {"ipaddress": "10.9.0.5"}, "current": {"username": "", "password": ""},
+            "candidates": [CUR, NEW]}
+  result = plugin.rotate(secret, "/tmp", SECRETS)
+  assert probed == [CUR]
+  assert (result["status"], result["verified"]) == ("succeeded", "1")
+
+
+def test_an_empty_ipmi_password_is_given_as_an_empty_argument(monkeypatch, tmp_path):
+  seen = ipmitool_says(monkeypatch, "", rc=0)
+  Ipmi("10.9.0.5", str(tmp_path), 1, "lanplus", 5).login({"username": "admin", "password": ""})
+  assert seen[0][seen[0].index("-U"):seen[0].index("-U") + 4] == ["-U", "admin", "-P", ""]
+  assert "-f" not in seen[0]
+
+
+def test_a_password_file_problem_isnt_unreachable(monkeypatch, tmp_path):
+  ipmitool_says(monkeypatch, "Unable to read password from file /tmp/x\n")
+  with pytest.raises(RuntimeError, match="couldn't read the login password"):
+    Ipmi("10.9.0.5", str(tmp_path), 1, "lanplus", 5).probe(CUR)
