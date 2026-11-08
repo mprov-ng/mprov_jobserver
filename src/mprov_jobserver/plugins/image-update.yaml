@@ -1,3 +1,6 @@
 - image-update:
     imageDir: '/export/images'
     imageList: null
+    # managed files from the mPCC may set setuid or setgid bits only if this
+    # is on (#96)
+    allowSetuidFiles: False

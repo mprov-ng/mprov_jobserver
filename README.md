@@ -85,6 +85,39 @@ Images built before 0.7.0 have the job server pip-installed onto their own
 Python. Rebuilding one with 0.7.0 removes that copy and puts the bundle in
 its place.
 
+### Managed files
+
+Files uploaded to the mPCC with a "Destination in the Image" are placed into
+every image they're attached to, through its OS distro, system groups or the
+image itself (#96, mprov_control_center#519). This happens after the base OS
+is installed and before the image-gen scripts (and Ansible) run, so those can
+use them.
+
+- **Templates and uploads:** a template is the copy the mPCC rendered for that
+  image, with its Configuration Parameters. Any other file is copied as
+  uploaded.
+- **Owner, group and mode:** each file gets the owner and group named in the
+  mPCC, resolved inside the image, and its mode. Missing parent directories
+  are made root:root 0755.
+- **Logging:** the log names each file and its version, never its contents.
+- **What fails the build:** a file that can't be placed fails the build,
+  including:
+  - a destination outside the image or under `/proc`, `/sys`, `/dev`, `/run`
+    or `/tmp/mprov`, or through a symlink;
+  - an existing directory at the destination;
+  - an owner or group the image doesn't have;
+  - a template that doesn't render;
+  - more than 10 MiB.
+- **Setuid and setgid:** these modes are refused unless the image-update
+  setting `allowSetuidFiles` is on.
+
+What was placed is recorded in `/var/lib/mprov/placed-files.json` in the
+image. At the next build, a file that's no longer attached is removed. If the
+path belonged to a package before it was placed, the package is reinstalled
+to bring its own file back instead (a warning, and the placed copy stays, if
+that fails). A changed file reaches an image only when it's rebuilt; the mPCC
+shows which images need it.
+
 ### Building images from a published base image
 
 An OS distro on the mPCC can name a base image (`base_image_url`, with
