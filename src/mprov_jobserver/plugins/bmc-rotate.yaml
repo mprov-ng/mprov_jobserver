@@ -10,5 +10,7 @@
     # IPMI, for a BMC without Redfish
     ipmiChannel: 1
     ipmiInterface: 'lanplus'
-    # seconds to wait for a BMC
-    timeout: 15
+    # seconds to wait for a BMC.  BMCs can take half a minute to apply an
+    # account change; one slower than this is reported unconfirmed, and the
+    # mPCC's "Find which credentials work" recovers it.
+    timeout: 60

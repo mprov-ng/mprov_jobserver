@@ -256,7 +256,10 @@ class bmc_rotate(JobServerPlugin):
   parallel = 4
   ipmiChannel = 1
   ipmiInterface = 'lanplus'
-  timeout = 15
+  # seconds to wait for a BMC.  BMCs can take half a minute to apply an
+  # account change; one that takes longer than this is reported
+  # unconfirmed, which the mPCC's "find" then sorts out.
+  timeout = 60
 
   def verify(self):
     if not self.verifyBMC:

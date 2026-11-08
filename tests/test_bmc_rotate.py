@@ -345,3 +345,11 @@ def test_redfish_changes_the_account_with_its_etag(monkeypatch):
   assert (method, url) == ("PATCH", "https://[fd00::5]/redfish/v1/AccountService/Accounts/2")
   assert body == {"Password": NEW["password"]}
   assert headers == {"If-Match": 'W/"5"'}
+
+
+def test_the_default_timeout_allows_a_slow_bmc():
+  """ BMCs can take half a minute to apply an account change; at 15s the
+  rig's slow BMC was reported unconfirmed although the change landed. """
+  import yaml
+  shipped = yaml.safe_load(open(os.path.join(os.path.dirname(bmc_module.__file__), "bmc-rotate.yaml")))
+  assert bmc_rotate.timeout == shipped[0]["bmc-rotate"]["timeout"] == 60
