@@ -3,6 +3,7 @@ Managed files (#96, mprov_control_center#519): the files the mPCC attaches
 to an image are placed into it while it's built, safely: nothing outside the
 image tree, nothing secret in the log, nothing half-done packed.
 """
+import hashlib
 import json
 import os
 import stat
@@ -28,12 +29,21 @@ def image(tmp_path):
   return root
 
 
+PACKAGE_CHRONY = b"pool 2.rocky.pool.ntp.org iburst\n"
+
+
 @pytest.fixture
-def chroot(monkeypatch):
-  """ chroot <image> chown/rpm/dnf, recorded; chown succeeds for known names. """
+def chroot(monkeypatch, tmp_path):
+  """
+  chroot <image> chown/rpm/dnf, recorded; chown succeeds for known names.
+  A reinstall acts like rpm's with %config(noreplace) files: it writes a
+  package's file only where the path is missing (#348).
+  """
   calls = []
   known = {"root", "chrony", "0"}
-  state = {"owned": {}, "reinstall_ok": True}
+  state = {"owned": {}, "reinstall_ok": True, "installed": {"chrony"},
+           "packages": {"chrony": {"/etc/chrony.conf": PACKAGE_CHRONY}}, "writes": True}
+  image = tmp_path / "image"
 
   def run(root, args):
     calls.append(args)
@@ -41,11 +51,28 @@ def chroot(monkeypatch):
       user, group = args[1].split(":")
       ok = user in known and group in known
       return subprocess.CompletedProcess(args, 0 if ok else 1, "", "" if ok else f"chown: invalid group: '{args[1]}'")
-    if args[0] == "rpm":
+    if args[:2] == ["rpm", "-qf"]:
       owner = state["owned"].get(args[-1])
       return subprocess.CompletedProcess(args, 0 if owner else 1, owner or f"file {args[-1]} is not owned by any package", "")
+    if args[:2] == ["rpm", "-q"]:
+      package = args[-1]
+      if package not in state["installed"]:
+        return subprocess.CompletedProcess(args, 1, f"package {package} is not installed\n", "")
+      if len(args) == 3:
+        return subprocess.CompletedProcess(args, 0, f"{package}-1.0-1.el9.x86_64\n", "")
+      if "%{FILEDIGESTALGO}" in args[3]:
+        return subprocess.CompletedProcess(args, 0, "8\n", "")
+      lines = [f"{path}\t{hashlib.sha256(data).hexdigest() if data is not None else ''}\n"
+               for path, data in state["packages"][package].items()]
+      return subprocess.CompletedProcess(args, 0, "".join(lines), "")
     if args[0] == "dnf":
-      return subprocess.CompletedProcess(args, 0 if state["reinstall_ok"] else 1, "", "")
+      if not state["reinstall_ok"]:
+        return subprocess.CompletedProcess(args, 1, "", "Installed package chrony-1.0-1.el9.x86_64 not available.")
+      for path, data in state["packages"][args[-1]].items():
+        target = image / path.lstrip("/")
+        if data is not None and state["writes"] and not os.path.lexists(target):
+          target.write_bytes(state.get("write_instead") or data)
+      return subprocess.CompletedProcess(args, 0, "", "")
     raise AssertionError(f"unexpected chroot {args}")
   monkeypatch.setattr(mf, "chroot", run)
   run.calls, run.state = calls, state
@@ -212,25 +239,79 @@ def test_a_file_no_longer_attached_is_removed(image, chroot, session, media):
   assert list(manifest(image)) == ["/etc/chrony.conf"]
 
 
-def test_a_package_owned_file_is_restored_from_its_package(image, chroot, session, caplog):
-  (image / "etc/chrony.conf").write_text("package default")
+def placed_over_chrony(image, chroot, session):
+  (image / "etc/chrony.conf").write_bytes(PACKAGE_CHRONY)
   chroot.state["owned"]["/etc/chrony.conf"] = "chrony"
   mf.place_files(session, MPROV_URL, str(image), config(CHRONY))
   assert manifest(image)["/etc/chrony.conf"]["package"] == "chrony"
+  assert (image / "etc/chrony.conf").read_bytes() == SECRET_LINE
+
+
+def test_a_package_owned_file_is_restored_from_its_package(image, chroot, session, caplog):
+  placed_over_chrony(image, chroot, session)
   mf.place_files(session, MPROV_URL, str(image), config())
   assert ["dnf", "-y", "reinstall", "chrony"] in chroot.calls
+  assert (image / "etc/chrony.conf").read_bytes() == PACKAGE_CHRONY
   assert "restored /etc/chrony.conf from package chrony" in caplog.text
   assert manifest(image) == {}
 
 
-def test_a_package_that_cant_be_reinstalled_leaves_the_file(image, chroot, session, caplog):
-  (image / "etc/chrony.conf").write_text("package default")
-  chroot.state["owned"]["/etc/chrony.conf"] = "chrony"
-  mf.place_files(session, MPROV_URL, str(image), config(CHRONY))
-  chroot.state["reinstall_ok"] = False
+def test_a_noreplace_file_is_removed_before_the_reinstall(image, chroot, session):
+  # rpm leaves an existing noreplace file alone on a reinstall, and succeeds
+  placed_over_chrony(image, chroot, session)
   mf.place_files(session, MPROV_URL, str(image), config())
-  assert (image / "etc/chrony.conf").read_bytes() == SECRET_LINE
-  assert "unable to restore /etc/chrony.conf" in caplog.text
+  assert SECRET_LINE not in (image / "etc/chrony.conf").read_bytes()
+
+
+def test_a_reinstall_that_doesnt_write_the_file_fails_the_build(image, chroot, session):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["writes"] = False
+  with pytest.raises(mf.PlacementError, match="unable to restore /etc/chrony.conf from package chrony.*didn't write it"):
+    mf.place_files(session, MPROV_URL, str(image), config())
+  assert not (image / "etc/chrony.conf").exists()
+  # still recorded, so the next build tries again
+  assert "/etc/chrony.conf" in manifest(image)
+
+
+def test_a_restored_file_that_doesnt_match_the_package_fails_the_build(image, chroot, session):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["write_instead"] = b"not what the package records\n"
+  with pytest.raises(mf.PlacementError, match="doesn't match the package's digest"):
+    mf.place_files(session, MPROV_URL, str(image), config())
+
+
+def test_a_package_that_cant_be_reinstalled_fails_the_build_without_the_file(image, chroot, session):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["reinstall_ok"] = False
+  with pytest.raises(mf.PlacementError, match="dnf reinstall failed.*not available.*placed copy has been removed"):
+    mf.place_files(session, MPROV_URL, str(image), config())
+  assert not (image / "etc/chrony.conf").exists()
+
+
+def test_a_package_no_longer_installed_just_removes_the_file(image, chroot, session, caplog):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["installed"].discard("chrony")
+  mf.place_files(session, MPROV_URL, str(image), config())
+  assert not (image / "etc/chrony.conf").exists()
+  assert not [c for c in chroot.calls if c[0] == "dnf"]
+  assert "package chrony is no longer installed" in caplog.text
+  assert manifest(image) == {}
+
+
+def test_a_ghost_file_isnt_expected_back(image, chroot, session):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["packages"]["chrony"]["/etc/chrony.conf"] = None
+  mf.place_files(session, MPROV_URL, str(image), config())
+  assert not (image / "etc/chrony.conf").exists()
+  assert manifest(image) == {}
+
+
+def test_a_restore_never_logs_the_contents(image, chroot, session, caplog):
+  placed_over_chrony(image, chroot, session)
+  chroot.state["reinstall_ok"] = False
+  with pytest.raises(mf.PlacementError) as err:
+    mf.place_files(session, MPROV_URL, str(image), config())
+  assert b"s3cr3t" not in caplog.text.encode() and "s3cr3t" not in str(err.value)
 
 
 def test_a_package_owner_is_remembered_across_builds(image, chroot, session):
