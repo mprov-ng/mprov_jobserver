@@ -568,3 +568,15 @@ def test_a_site_ca_bundle_is_kept_for_a_node(server, tmp_path, ca):
   server.session.verify = "/etc/mprov/site-ca.pem"
   server.use_identity()
   assert server.session.verify == "/etc/mprov/site-ca.pem"
+
+
+def test_a_script_runner_never_renews_its_certificate(server, ca, monkeypatch):
+  """ In an image build it's a 2-hour build credential, always "due", which
+  the mPCC refuses to renew (found on the rig); on a node it's the mPCC's
+  scripts' to renew (mprov_control_center#506). """
+  due_credential(ca, server)
+  server.register = False
+  server.use_identity()
+  monkeypatch.setattr(app.ident, "renew", lambda *a: pytest.fail("a script runner renewed"))
+  monkeypatch.setattr(app.ident, "enroll", lambda *a: pytest.fail("a script runner enrolled"))
+  server.maybe_renew()

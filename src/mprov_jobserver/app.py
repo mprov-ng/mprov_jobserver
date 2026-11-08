@@ -1103,7 +1103,10 @@ class JobServer ():
     its renewal window, or, for one still on the shared API key, enroll if
     it now can (a token, or the mPCC's CA to check it against, turned up).
     '''
-    if self.auth not in ('cert', 'apikey'):
+    # only a job server renews or enrolls: a script runner's certificate is
+    # an image build's 2-hour one, or a node's, which the mPCC's own scripts
+    # renew (mprov_control_center#506)
+    if self.auth not in ('cert', 'apikey') or not self.register:
       return
     now = time.monotonic()
     if now < self._nextRenewCheck:

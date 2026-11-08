@@ -520,8 +520,10 @@ class script_runner(JobServerPlugin):
   def download_file(self, url):
     local_filename = url.split('/')[-1]
     local_filename = self.scriptTmpDir + "/" + local_filename
-    # NOTE the stream=True parameter below
-    with requests.get(url, stream=True) as r:
+    # on the job server's session, so an https:// mPCC is checked against
+    # its CA, as every other call to it is: a plain requests.get trusts only
+    # the public CAs (mprov_control_center#381)
+    with self.js.session.get(url, stream=True) as r:
         r.raise_for_status()
         with open(local_filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192): 

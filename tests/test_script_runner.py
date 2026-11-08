@@ -638,3 +638,18 @@ def test_with_the_key_the_entity_is_as_before(js, plugin, monkeypatch):
   plugin.handle_jobs()
   assert plugin.entities[0]["apikey"] == "test-key"
   assert "tls" not in plugin.entities[0]
+
+
+def test_scripts_are_downloaded_on_the_job_servers_session(js, plugin, monkeypatch, tmp_path):
+  """ So an https:// mPCC is checked against its CA: a plain requests.get
+  trusts only the public CAs, and every image-gen script failed with a
+  certificate error (mprov_control_center#381, found on the rig). """
+  def plain_get(*args, **kwargs):
+    raise AssertionError("downloaded outside the job server's session")
+  monkeypatch.setattr(script_runner_module.requests, "get", plain_get)
+  js.session.routes["media/image-gen/tool.sh"] = b"#!/bin/sh\necho hi\n"
+  os.makedirs(plugin.scriptTmpDir, exist_ok=True)
+  path = plugin.download_file(js.mprovURL + "media/image-gen/tool.sh")
+  with open(path, "rb") as f:
+    assert f.read() == b"#!/bin/sh\necho hi\n"
+  assert os.stat(path).st_mode & 0o777 == 0o755
