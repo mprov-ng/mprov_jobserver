@@ -640,16 +640,23 @@ def test_with_the_key_the_entity_is_as_before(js, plugin, monkeypatch):
   assert "tls" not in plugin.entities[0]
 
 
-def test_scripts_are_downloaded_on_the_job_servers_session(js, plugin, monkeypatch, tmp_path):
-  """ So an https:// mPCC is checked against its CA: a plain requests.get
-  trusts only the public CAs, and every image-gen script failed with a
-  certificate error (mprov_control_center#381, found on the rig). """
-  def plain_get(*args, **kwargs):
-    raise AssertionError("downloaded outside the job server's session")
-  monkeypatch.setattr(script_runner_module.requests, "get", plain_get)
-  js.session.routes["media/image-gen/tool.sh"] = b"#!/bin/sh\necho hi\n"
+def test_scripts_are_checked_against_the_job_servers_ca(js, plugin, monkeypatch, tmp_path):
+  """ A plain requests.get trusts only the public CAs, and every image-gen
+  script failed with a certificate error against an https:// mPCC
+  (mprov_control_center#381, found on the rig).  Not on the session itself:
+  scripts are static files, with no API version for its version check. """
+  from conftest import FakeResponse
+  js.session.verify = "/tmp/mprov/tls/ca.crt"
+  seen = {}
+
+  def get(url, **kwargs):
+    seen.update(url=url, **kwargs)
+    return FakeResponse(200, b"#!/bin/sh\necho hi\n")
+  monkeypatch.setattr(script_runner_module.requests, "get", get)
+  monkeypatch.setattr(js.session, "get", lambda *a, **k: pytest.fail("downloaded on the session"))
   os.makedirs(plugin.scriptTmpDir, exist_ok=True)
   path = plugin.download_file(js.mprovURL + "media/image-gen/tool.sh")
+  assert seen["verify"] == "/tmp/mprov/tls/ca.crt"
   with open(path, "rb") as f:
     assert f.read() == b"#!/bin/sh\necho hi\n"
   assert os.stat(path).st_mode & 0o777 == 0o755

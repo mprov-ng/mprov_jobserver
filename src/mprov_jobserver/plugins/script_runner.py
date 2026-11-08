@@ -520,10 +520,12 @@ class script_runner(JobServerPlugin):
   def download_file(self, url):
     local_filename = url.split('/')[-1]
     local_filename = self.scriptTmpDir + "/" + local_filename
-    # on the job server's session, so an https:// mPCC is checked against
-    # its CA, as every other call to it is: a plain requests.get trusts only
-    # the public CAs (mprov_control_center#381)
-    with self.js.session.get(url, stream=True) as r:
+    # checked against the CA the job server checks the mPCC with: a plain
+    # requests.get trusts only the public CAs, so an https:// mPCC failed
+    # (mprov_control_center#381).  Not on the session itself: scripts are
+    # static files, which carry no API version for its version check.
+    verify = getattr(self.js.session, 'verify', True)
+    with requests.get(url, stream=True, verify=verify) as r:
         r.raise_for_status()
         with open(local_filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192): 
