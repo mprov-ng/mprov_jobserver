@@ -1083,8 +1083,14 @@ class JobServer ():
     if (response.status_code == 401 and self.auth == 'cert'
         and 'TLS-Client-Certificate' in response.headers.get('WWW-Authenticate', '')):
       if self._refusedCert != self._certFingerprint:
-        log.error("the mPCC refused this job server's certificate: it was revoked or has expired, or the job "
-                  "server was deleted.  It needs a new enrollment token (MPROV_ENROLL_TOKEN).")
+        if self.register:
+          log.error("the mPCC refused this job server's certificate: it was revoked or has expired, or the job "
+                    "server was deleted.  It needs a new enrollment token (MPROV_ENROLL_TOKEN).")
+        else:
+          # a node's certificate (or an image build's): enrolled at boot by
+          # the mPCC's scripts, not with a token
+          log.error("the mPCC refused this node's certificate: it was revoked or has expired, or the system was "
+                    "deleted.  Netboot the node, or let it re-enroll from the mPCC's admin, to get a new one.")
       self._refusedCert = self._certFingerprint
       self.auth = None
       self.sessionOk = False

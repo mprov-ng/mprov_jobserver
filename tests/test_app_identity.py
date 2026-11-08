@@ -580,3 +580,14 @@ def test_a_script_runner_never_renews_its_certificate(server, ca, monkeypatch):
   monkeypatch.setattr(app.ident, "renew", lambda *a: pytest.fail("a script runner renewed"))
   monkeypatch.setattr(app.ident, "enroll", lambda *a: pytest.fail("a script runner enrolled"))
   server.maybe_renew()
+
+
+def test_a_refused_node_certificate_says_what_a_node_needs(server, tmp_path, ca, caplog):
+  """ Not an enrollment token: a node enrolls at boot (found on the rig). """
+  node_tls(server, tmp_path, ca)
+  server.register = False
+  server.use_identity()
+  server.auth_refused(refused())
+  assert "refused this node's certificate" in caplog.text
+  assert "Netboot the node" in caplog.text
+  assert "MPROV_ENROLL_TOKEN" not in caplog.text
