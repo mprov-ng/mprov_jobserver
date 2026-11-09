@@ -5,8 +5,6 @@ description: How to install, configure, containerize, and run mprov_jobserver �
 tags: [mprov, jobserver, deployment, docker, systemd, install, ci]
 ---
 
-# Operations & Deployment
-
 ## Supported deployment: container
 
 The job server runs as a container; **bare-metal install is no longer supported or documented** (#300). `install_mprov_jobserver.sh` and the systemd unit files (`src/mprov_jobserver/systemd/`) are still in the repo, but nothing here documents or tests running the job server as a system service. The PyPI package stays published because `image-update` puts a job server into every built image — since 0.7.0 as the portable Python bundle rather than a pip install (#309) — so nodes get `script-runner` and `MProvScript` (see [Script Execution](../workflows/script-execution.md)). From 0.7.0 the package requires **Python ≥ 3.11** (`setup.cfg`, #311), enforced by the `mprov_jobserver` launcher; node images need no particular Python of their own for the job server, which carries its own.
@@ -28,10 +26,6 @@ First run of the `mprov_jobserver` binary with no `/etc/mprov/jobserver.yaml` co
 ## Dev stack
 
 `dev-docker-compose.yml` runs the dev image with `network_mode: host`, `privileged: true`, systemd init, volumes for `/etc/mprov` config and `/export` (images/repos/tftpboot persistence — `/tftpboot` was deliberately moved under `/export/tftpboot` for persistence), env from `stack.env` (copied from `stack.env.example`; git ignores `stack.env`), and `wait-for-it.sh` gating on the local mPCC at `localhost:80`.
-
-## CI
-
-`.github/workflows/`: `ci_build.yml` (build/publish), `dockerimage-dev.yml` (dev container image → `ghcr.io/mprov-ng/mprov-jobserver`, versioned `X.Y.Z.devN` from `VERSION` on pushes to main, with concurrency so only the newest push publishes, #247), `lint.yml` (ruff errors-only + ShellCheck on every PR/push, independent of the image build, #187), `update_website.yml`, and `openwiki-update.yml` (this documentation). Pull requests run the dev/release workflows as dry runs that stop after the tests; `.github/dependabot.yml` keeps Actions deps current. The **pytest suite in `tests/`** runs inside the just-built jobserver image via `tests/Dockerfile` (adds pytest + `genders` for `nodeattr` checks), so tests use the same Rocky build, Python, and dnsmasq that ship. `gen_changelog.sh` generates release notes from git history; `VERSION` is the source of truth for releases.
 
 ## Operational checklists
 

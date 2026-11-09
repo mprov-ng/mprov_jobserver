@@ -30,7 +30,7 @@ Every password is scrubbed (`scrub()`, replacing each secret with `***`) from an
 - `ipmiChannel` (1), `ipmiInterface` (`lanplus`).
 - `timeout` (60s, raised in #341) — BMCs can take half a minute to apply an account change; one slower than this is reported unconfirmed, and the mPCC's "find which credentials work" recovers it.
 
-IPMI-vs-Redfish discrimination matters: `IPMI_REFUSED` matches RAKP/unauthorized/invalid-credential errors (credentials refused) as distinct from the BMC not answering at all (`Unreachable`), which decides whether the job fails or moves to the next method.
+IPMI-vs-Redfish discrimination matters: `IPMI_REFUSED` matches RAKP/unauthorized/invalid-credential errors (credentials refused) as distinct from the BMC not answering at all (`Unreachable`), which decides whether the job fails or moves to the next method. `ipmitool` therefore always runs with `-v` (#343): without it a refused login prints the same line as a silent BMC, so a wrong current password was misreported unreachable. A `find` probes IPMI with the **first candidate**, not the request's `current` pair — by then the mPCC has already cleared `current`, and an empty username/password made every IPMI find report unreachable. An empty password (a factory default) is passed as `-P ""` since `ipmitool` won't read an empty `-f` file, and `Unable to read password` is raised as a job-server error, never taken for `Unreachable`.
 
 ## Where to start when changing this area
 

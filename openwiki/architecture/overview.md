@@ -11,7 +11,7 @@ The job server is a single Python process made of three parts: the `JobServer` o
 
 ## Process lifecycle
 
-Entry point: `src/mprov_jobserver/main.py` (installed as the `mprov_jobserver` script, see `setup.cfg`). It installs SIGINT/SIGTERM handlers that call `JobServer.stop()`, parses `-r` (runonce) and `-c <configfile>`, and — if no config exists at `/etc/mprov/jobserver.yaml` — copies the package's template YAMLs (`src/mprov_jobserver/jobserver.yaml` plus `plugins/*.yaml`) into `/etc/mprov/`, tells the user to edit them, and exits.
+Entry point: `src/mprov_jobserver/main.py` (installed as the `mprov_jobserver` script, see `setup.cfg`). It installs SIGINT/SIGTERM handlers that call `JobServer.stop()`, parses `-r` (runonce) and `-c <configfile>`, and — if no config exists at `/etc/mprov/jobserver.yaml` — copies the package's template YAMLs (`src/mprov_jobserver/jobserver.yaml` plus `plugins/*.yaml`) into `/etc/mprov/` via `copy_default_config()`, tells the user to edit them, and exits. The copy uses `importlib.resources.files()` (`contents()`/`open_text()` are deprecated on the bundle's Python 3.11, #346) and creates **every** file 0600, including the plugins' YAMLs, whose settings can hold secrets.
 
 `JobServer.__init__` (`src/mprov_jobserver/app.py`) then:
 
