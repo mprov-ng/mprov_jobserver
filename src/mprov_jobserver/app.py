@@ -726,6 +726,20 @@ class JobServer ():
         log.error("will try again on the next heartbeat.")
         return
 
+    if response.status_code in (401, 403):
+      # auth_refused has said why if it's how we authenticate (#350): the
+      # reply isn't invalid, so don't say so
+      if not getattr(response, 'mprov_auth_reported', False):
+        result = self.reply_object(response) or {}
+        detail = result.get('detail') or (response.text or '').strip()[-200:]
+        log.error(f"the mPCC refused this job server's heartbeat (HTTP {response.status_code}): {detail}")
+      return
+    if not 200 <= response.status_code < 300:
+      log.error(f"the mPCC answered the heartbeat with HTTP {response.status_code}; will try again on the next "
+                f"heartbeat.")
+      log.error((response.text or '').strip()[-500:])
+      return
+
     result = self.reply_object(response)
     if result is None or 'pk' not in result:
       log.error("mPCC gave us an invalid reply.")
@@ -1094,6 +1108,7 @@ class JobServer ():
       self._refusedCert = self._certFingerprint
       self.auth = None
       self.sessionOk = False
+      response.mprov_auth_reported = True
     elif (response.status_code == 403 and self.auth == 'apikey'
           and "shared API key isn't accepted" in (response.text or '')):
       if not self._sharedKeyRefused:
@@ -1101,6 +1116,7 @@ class JobServer ():
         log.error("the mPCC no longer accepts the shared API key: this job server needs an enrollment token "
                   "(MPROV_ENROLL_TOKEN, or the mPCC's enroll_token).")
       self._nextRenewCheck = 0.0
+      response.mprov_auth_reported = True
     return response
 
   def maybe_renew(self):

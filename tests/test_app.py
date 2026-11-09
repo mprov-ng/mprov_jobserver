@@ -577,6 +577,73 @@ def test_a_failed_heartbeat_keeps_the_last_features(server):
   assert server.features == {"addjs-version"}
 
 
+# a heartbeat the mPCC refuses (#350)
+
+CERT_REFUSED = {"detail": "The client certificate is unknown, revoked or expired."}
+
+
+def answers_heartbeat(server, monkeypatch, status, body, headers=None):
+  """ The registration POST answered with status, through the session's hooks as requests runs them. """
+  def post(url, data=None, **kwargs):
+    response = FakeResponse(status, body)
+    response.headers = headers or {}
+    for hook in server.session.hooks["response"]:
+      hook(response)
+    return response
+  monkeypatch.setattr(server.session, "post", post)
+
+
+def errors(caplog):
+  return [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+
+
+def test_a_refused_certificate_is_only_explained_once(server, monkeypatch, caplog):
+  server.auth = "cert"
+  server._certFingerprint = "fp"
+  # a certificate always sends the host id: don't make a real one
+  monkeypatch.setattr(server, "host_id", lambda: "host-1")
+  server.session.hooks["response"].append(server.auth_refused)
+  answers_heartbeat(server, monkeypatch, 401, CERT_REFUSED,
+                    {"WWW-Authenticate": 'TLS-Client-Certificate realm="mprov"'})
+  server.register_server()
+  assert len(errors(caplog)) == 1
+  assert "refused this job server's certificate" in errors(caplog)[0]
+  assert "invalid reply" not in caplog.text
+  assert "unknown, revoked or expired" not in caplog.text
+
+
+def test_a_refused_shared_key_is_only_explained_once(server, monkeypatch, caplog):
+  server.auth = "apikey"
+  server.session.hooks["response"].append(server.auth_refused)
+  answers_heartbeat(server, monkeypatch, 403,
+                    {"detail": "The shared API key isn't accepted here (MPROV_SHARED_KEY_MODE=off)."})
+  server.register_server()
+  assert len(errors(caplog)) == 1
+  assert "no longer accepts the shared API key" in errors(caplog)[0]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refusal_the_hook_doesnt_know_says_so_with_its_status(server, monkeypatch, caplog, status):
+  server.auth = "apikey"
+  server.session.hooks["response"].append(server.auth_refused)
+  answers_heartbeat(server, monkeypatch, status, {"detail": "Invalid token."})
+  server.register_server()
+  assert errors(caplog) == [f"the mPCC refused this job server's heartbeat (HTTP {status}): Invalid token."]
+
+
+def test_another_error_status_isnt_called_an_invalid_reply(server, monkeypatch, caplog):
+  answers_heartbeat(server, monkeypatch, 502, "Bad Gateway")
+  server.register_server()
+  assert "HTTP 502" in errors(caplog)[0]
+  assert "invalid reply" not in caplog.text
+
+
+def test_a_success_without_an_id_is_still_an_invalid_reply(server, caplog):
+  server.session.write_routes[("POST", "jobservers/")] = {"name": "js01"}
+  server.register_server()
+  assert "mPCC gave us an invalid reply." in errors(caplog)
+
+
 # An address per network, each with its own heartbeat (#114)
 
 ADDRESS_FEATURES = ["jobserver-addresses", "jobserver-address-heartbeat"]
