@@ -50,4 +50,3 @@ Useful CLI flags (global): `-c <configfile>`, `-r` runonce mode, `-d` do not reg
 - **nads LLDP TLV parsing internals** — `src/mprov_jobserver/plugins/nads.py` implements a hand-rolled LLDP decoder (borrowed from lldp.discovery); only its role is documented in [Network Services](workflows/network-services.md).
 - **libgenders output format** — `src/mprov_jobserver/plugins/libgenders.py` generates `/etc/genders`; covered briefly, not in depth.
 - **mPCC side of the API contract** — the mPCC (separate repo `mprov-ng/mpcc`) defines the REST serializers; field semantics here are inferred from client usage.
- defines the REST serializers; field semantics here are inferred from client usage.
