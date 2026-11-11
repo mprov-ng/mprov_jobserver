@@ -1,6 +1,6 @@
 from jinja2 import Environment, PackageLoader, select_autoescape
 from mprov_jobserver.plugins.plugin import JobServerPlugin
-from .service import write_if_changed, remove_stale
+from .service import write_if_changed, remove_stale, hosts_dir_readme
 import os
 
 jenv = Environment(
@@ -47,6 +47,9 @@ class DnsmasqDHCPConfig(JobServerPlugin):
 
         # make sure the mprov hosts dir exists
         os.makedirs(self.mprovDnsmasqDir + '/dhcp/', exist_ok=True)
+        # say which files get pruned here; dnsmasq skips dotfiles and doesn't
+        # need a reload for it
+        write_if_changed(self.mprovDnsmasqDir + '/dhcp/.README', hosts_dir_readme('dhcp'))
         # now the interfaces
         for network in data['networks']: 
         

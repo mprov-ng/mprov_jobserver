@@ -6,7 +6,7 @@ import dns.resolver
 import subprocess
 import psutil
 import signal
-from .service import write_if_changed, running_dnsmasq
+from .service import write_if_changed, running_dnsmasq, ROOT_README
 from mprov_jobserver.log import get_logger
 from mprov_jobserver import identity as ident
 
@@ -75,6 +75,11 @@ class DnsmasqConfig(JobServerPlugin):
         }
         os.makedirs(self.dnsmasqConfDir, exist_ok=True)
         os.makedirs(self.tftproot, exist_ok=True)
+        # a visible note on the hosts directories under mprovDnsmasqDir.  It's
+        # written here, after the DNS and DHCP workers have finished, as they
+        # run at the same time and would share its temporary file.
+        os.makedirs(self.mprovDnsmasqDir, exist_ok=True)
+        write_if_changed(self.mprovDnsmasqDir + '/README', ROOT_README)
         if write_if_changed(self.dnsmasqConfDir + '/ipxe.conf', jenv.get_template('dnsmasq/ipxe.conf.j2').render(data)):
             self.mainChanged = True
 

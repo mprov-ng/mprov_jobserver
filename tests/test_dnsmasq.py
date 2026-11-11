@@ -605,7 +605,7 @@ def test_a_network_that_drops_out_loses_its_hosts_file(js, dirs, no_interfaces, 
   route = both_networks(js, kind)
   worker(js, dirs)
   hosts = mprov / kind
-  assert sorted(p.name for p in hosts.iterdir()) == [f"cluster-net-{kind}.conf", f"old-net-{kind}.conf"]
+  assert sorted(p.name for p in hosts.iterdir()) == [".README", f"cluster-net-{kind}.conf", f"old-net-{kind}.conf"]
   # an operator's own files, and other names, are left alone
   (hosts / "site-extra.conf").write_text("# by hand\n")
   (hosts / f".scratch-{kind}.conf").write_text("")
@@ -613,7 +613,7 @@ def test_a_network_that_drops_out_loses_its_hosts_file(js, dirs, no_interfaces, 
   js.session.routes[route] = [NETWORK]
   plugin = worker(js, dirs)
   assert plugin.hostsChanged and plugin.completed
-  assert sorted(p.name for p in hosts.iterdir()) == [f".scratch-{kind}.conf", f"cluster-net-{kind}.conf", "site-extra.conf"]
+  assert sorted(p.name for p in hosts.iterdir()) == [".README", f".scratch-{kind}.conf", f"cluster-net-{kind}.conf", "site-extra.conf"]
   # and nothing more to do next time
   plugin = worker(js, dirs)
   assert not plugin.hostsChanged
@@ -626,7 +626,8 @@ def test_no_networks_at_all_removes_every_hosts_file(js, dirs, no_interfaces, ki
   worker(js, dirs)
   js.session.routes[route] = []
   assert worker(js, dirs).hostsChanged
-  assert list((mprov / kind).iterdir()) == []
+  # only the README is left
+  assert [p.name for p in (mprov / kind).iterdir()] == [".README"]
 
 
 @pytest.mark.parametrize("kind, worker", [("dns", dns_worker), ("dhcp", dhcp_worker)])
@@ -637,7 +638,7 @@ def test_an_error_reply_removes_nothing(js, dirs, no_interfaces, kind, worker):
   js.session.routes[route] = (500, [])
   plugin = worker(js, dirs)
   assert not plugin.hostsChanged
-  assert len(list((mprov / kind).iterdir())) == 2
+  assert len(list((mprov / kind).glob(f"*-{kind}.conf"))) == 2
 
 
 def test_dns_leaves_out_only_the_bmc_with_missing_fields(js, dirs, no_interfaces, capsys):
@@ -674,3 +675,36 @@ def test_ipxe_loads_from_the_mpcc_over_plain_http(js, dirs, conf_plugin, monkeyp
   menu = (tftproot / "menu.ipxe").read_text()
   assert "chain --replace --autofree http://192.168.250.1//ipxe/" in menu
   assert "https://192.168.250.1" not in menu
+
+
+@pytest.mark.parametrize("kind, worker", [("dns", dns_worker), ("dhcp", dhcp_worker)])
+def test_hosts_dirs_get_a_readme_dnsmasq_skips(js, dirs, no_interfaces, kind, worker):
+  _, mprov, _ = dirs
+  route = both_networks(js, kind)
+  worker(js, dirs)
+  readme = mprov / kind / ".README"
+  text = readme.read_text()
+  # it names the files that get pruned, and is a dotfile, which dnsmasq's
+  # hostsdir/dhcp-hostsdir doesn't load, and doesn't end in the suffix
+  assert f'"*-{kind}.conf"' in text and "deleted" in text
+  assert not readme.name.endswith(f"-{kind}.conf")
+  # a network dropping out prunes its file but keeps the README
+  js.session.routes[route] = [NETWORK]
+  worker(js, dirs)
+  assert readme.read_text() == text
+  # an edited README is put back, without counting as a hosts change
+  readme.write_text("edited\n")
+  plugin = worker(js, dirs)
+  assert readme.read_text() == text and not plugin.hostsChanged
+
+
+def test_config_writes_a_readme_on_the_hosts_dirs(js, dirs, conf_plugin, monkeypatch):
+  starts(monkeypatch)
+  conf_plugin.handle_jobs()
+  _, mprov, _ = dirs
+  text = (mprov / "README").read_text()
+  assert "dns/*-dns.conf" in text and "dhcp/*-dhcp.conf" in text and ".README" in text
+  # it doesn't change on a rerun, so isn't rewritten
+  mtime = (mprov / "README").stat().st_mtime_ns
+  conf_plugin.handle_jobs()
+  assert (mprov / "README").stat().st_mtime_ns == mtime
