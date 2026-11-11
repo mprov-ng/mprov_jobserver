@@ -268,7 +268,7 @@ def test_builds_an_image(js, plugin, images, commands):
   # packed, registered with this job server as the host, and recorded
   assert commands.matching(f"tar c -C{img} ")
   assert js.session.writes[-1] == (
-    "PATCH", "systemimages/compute/?addjs", {"slug": "compute", "needs_rebuild": False, "jobservers": [1]})
+    "PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]})
   assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
   assert job_states(js) == [(4, 9)]
 
@@ -1360,6 +1360,75 @@ def test_build_without_the_check_is_hosted_as_before(js, plugin, images, command
   assert "version" not in addjs_data(js)
   assert job_states(js) == [(4, 9)]
   assert (images / "compute" / "compute.img").exists()
+
+
+# A job server's certificate may send only these keys with ?addjs; the mPCC
+# refuses (403) a body with any other, so a build lost its registration to
+# the needs_rebuild it sent (#352).
+ADDJS_KEYS = {"slug", "jobservers", "version"}
+
+
+@pytest.mark.parametrize("features", [frozenset(), frozenset({"addjs-version"})])
+def test_a_build_sends_only_what_its_certificate_may(js, plugin, images, commands, features):
+  js.features = features
+  pending_build(js)
+  plugin.handle_jobs()
+  assert set(addjs_data(js)) <= ADDJS_KEYS
+  assert addjs_data(js)["jobservers"] == [1]
+
+
+@pytest.mark.parametrize("features", [frozenset(), frozenset({"addjs-version"})])
+def test_adding_an_image_it_has_sends_only_what_its_certificate_may(js, plugin, images, features):
+  js.features = features
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
+  plugin.updateImageJobservers()
+  assert set(addjs_data(js)) <= ADDJS_KEYS
+
+
+REFUSED = (403, {"detail": "mprov.js.abc may not PATCH this."})
+
+
+def test_a_refused_registration_after_a_build_is_logged_and_retried(js, plugin, images, commands, caplog):
+  # not silent any more: the error says what the mPCC said.  The job still
+  # succeeds, since the image is built and published, and the version is
+  # recorded so the next pass registers it.
+  pending_build(js)
+  js.session.write_routes[ADDJS] = REFUSED
+  plugin.handle_jobs()
+  assert job_states(js) == [(4, 9)]
+  assert (images / "compute" / "compute.img").exists()
+  assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
+  refused = [r for r in caplog.records if "refused to add us as a host of image compute" in r.getMessage()]
+  assert len(refused) == 1
+  assert refused[0].levelname == "ERROR"
+  assert "403" in refused[0].getMessage() and "may not PATCH this" in refused[0].getMessage()
+
+  # the next pass asks again, and this time it's let in
+  js.session.write_routes.pop(ADDJS)
+  js.session.writes.clear()
+  js.session.routes["systemimages/compute/"] = image(needs_rebuild=False, jobservers=[])
+  js.session.routes["images/"] = [{"slug": "compute"}]
+  plugin.updateImageJobservers()
+  assert js.session.writes == [("PATCH", "systemimages/compute/?addjs", {"slug": "compute", "jobservers": [1]})]
+
+
+def test_a_refused_registration_of_an_image_it_has_is_logged_and_kept(js, plugin, images, caplog):
+  # a refusal isn't a 409: we keep the version and ask again next pass
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
+  js.session.write_routes[ADDJS] = REFUSED
+  plugin.updateImageJobservers()
+  assert json.loads((images / "image-versions").read_text()) == {"compute": 4}
+  [refused] = [r for r in caplog.records if "refused to add us as a host of image compute" in r.getMessage()]
+  assert refused.levelname == "ERROR"
+  assert "403" in refused.getMessage() and "may not PATCH this" in refused.getMessage()
+
+
+def test_a_409_isnt_logged_as_a_refusal(js, plugin, images, caplog):
+  js.features = frozenset({"addjs-version"})
+  hosted(js, images, image(needs_rebuild=False, jobservers=[7]), local_version=4)
+  js.session.write_routes[ADDJS] = (409, {"detail": "Image compute is at version 5, not 4.", "version": 5})
+  plugin.updateImageJobservers()
+  assert not [r for r in caplog.records if "refused to add us" in r.getMessage()]
 
 
 # the chroot's dnf needs the image's resolv.conf from the first build (#281)

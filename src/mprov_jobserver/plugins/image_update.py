@@ -125,26 +125,38 @@ class image_update(JobServerPlugin):
       image_update.load_config()
     return super().load_config()
 
-  def addAsHost(self, image, version):
-    # tell the mPCC we host this image too, at the version we have.  Only our
-    # id: the mPCC merges it into the image's current hosts.  Sending the list
-    # from our GET put back every host a rebuild had cleared since (#248,
+  def patchAsHost(self, image, version):
+    # tell the mPCC we host this image too, at the version we have, and
+    # return its response.  The one place this request is made, for a
+    # build and for an image we already have.  Only our id: the mPCC merges
+    # it into the image's current hosts.  Sending the list from our GET put
+    # back every host a rebuild had cleared since (#248,
     # mprov_control_center#396).
-    # no needs_rebuild: we only add ourselves when the image doesn't need
-    # one, and sending False would clear a rebuild asked for since our GET (#226).
-    # False if the mPCC says the image has moved past our version (only an
-    # mPCC that checks it, see addjs_version()); we're not a host then.
+    # Only the keys a job server's certificate may send here (slug,
+    # jobservers, version): the mPCC refuses (403) a body with any other.  So
+    # no needs_rebuild, which a build used to send, and lost its
+    # registration to (#352); the mPCC clears it itself when it queues the
+    # build, and sending False would clear a rebuild asked for since (#226).
+    # A 409 (the image moved past our version, only from an mPCC that checks
+    # it, see addjs_version()) is left to the caller; any other refusal is
+    # logged here, and the next pass of updateImageJobservers() asks again.
     data = {
       'slug': image,
       'jobservers': [self.js.id],
       **addjs_version(self.js, version),
     }
-    response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
-    if response.status_code == 409:
+    response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(image) + '/?addjs', data=json.dumps(data))
+    if response.status_code != 409 and not 199 < response.status_code < 300:
+      log.error(f"the mPCC refused to add us as a host of image {image} "
+                f"(status {response.status_code}: {ident._detail(response)}); we'll ask again on the next pass.")
+    return response
+
+  def addAsHost(self, image, version):
+    # add ourselves as a host of an image we already have.  False if the
+    # mPCC says the image has moved past our version; we're not a host then.
+    if self.patchAsHost(image, version).status_code == 409:
       log.warning(f"not hosting image {image}: the mPCC has it past our version {version}; we'll fetch it again.")
       return False
-    if response.status_code <= 199 or response.status_code >= 300:
-      log.error(f"mPCC wouldn't let us add ourselves, status code: {response.status_code}")
     return True
 
   def publishedFiles(self, imgDir, slug):
@@ -902,16 +914,11 @@ class image_update(JobServerPlugin):
         # never a newer file a pull or another build has put there since
         published = self.publishedFiles(imgDir, imageDetails['slug'])
 
-        # update the 'jobservers' field to be us, so that the 
-        data = {
-          'slug': imageDetails['slug'],
-          'needs_rebuild': False,
-          'jobservers':[
-            self.js.id,
-          ],
-          **addjs_version(self.js, imageDetails['version']),
-        }
-        response = self.js.session.patch(self.js.mprovURL + 'systemimages/' + str(data['slug']) + '/?addjs', data=json.dumps(data))
+        # register ourselves as the image's host.  A refusal other than 409 is
+        # logged, and the job still succeeds: the image is built and
+        # published, and the next pass of updateImageJobservers() registers
+        # it, since image-versions below records the version we built (#352).
+        response = self.patchAsHost(imageDetails['slug'], imageDetails['version'])
         if response.status_code == 409:
           # the image was rebuilt (its version moved on) while we built it,
           # so what we built is the wrong version: don't host it, take it
