@@ -1,0 +1,22 @@
+- ib-discover:
+    # Finds the InfiniBand switches with ibnetdiscover (infiniband-diags),
+    # and records them, their ports, and each node's HCA port GUID and
+    # switch port in the mPCC (mPCC 0.7.6 or later).  Run it on one job
+    # server with an HCA on the fabric; in a container, it needs
+    # /dev/infiniband.
+    #
+    # seconds between runs
+    interval: 3600
+    # The API token of a staff user that may view systems, networks, network
+    # types, switches, switch ports and network interfaces, add and change
+    # switches, add switch ports and change network interfaces.  Better in a
+    # file only the job server can read: tokenFile, by default
+    # ib-discover-token next to jobserver.yaml.
+    token: ''
+    tokenFile: ''
+    ibnetdiscover: '/usr/sbin/ibnetdiscover'
+    # the HCA and its port to discover from; unset, ibnetdiscover's default
+    hca: ''
+    hcaPort: 0
+    # seconds to let ibnetdiscover run
+    timeout: 300

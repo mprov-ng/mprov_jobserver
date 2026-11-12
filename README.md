@@ -322,6 +322,7 @@ These are the job modules that ship with the job server. Use the
 names in the `jobmodules:` config list (and the `-m` argument):
 
 - `dnsmasq` — serves the DNS, DHCP, and TFTP services used for provisioning (each service is toggled separately with `enableDNS`, `enableDHCP`, `enableTFTP` in the plugin config).
+- `ib-discover` — every `interval` seconds, runs `ibnetdiscover` and records the InfiniBand switches, the switch ports nodes are plugged into, and each node's HCA port GUID and switch port in the mPCC (0.7.6 or later). Only fills in what's empty. Run it on one job server with an HCA on the fabric; it needs a staff user's API token (`token` or `tokenFile`, see `plugins/ib-discover.yaml`) and infiniband-diags.
 - `image-delete` — deletes system images from disk.
 - `image-sync` — keeps a local copy of the mPCC's system images up to date in a separate image directory. Must run on image *source* nodes together with `mprov-webserver`.
 - `image-update` — builds and updates system images from image-gen scripts. Requires `mprov-webserver`.
