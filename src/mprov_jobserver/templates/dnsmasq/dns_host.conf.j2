@@ -10,8 +10,12 @@
 
 {% if 'hostaliases' in host and host.hostaliases != ""  and host.hostaliases != None %}
   {% for alias in host.hostaliases.split(" ") %}
+    {% if host.ipaddress %}
 
     {{host.ipaddress}} {{alias}}.{{host.domain}}
+    {% else %}
+# WARNING: no ip address for {{alias}}.{{host.domain}}
+    {% endif %}
   {% endfor %}
 {%endif%}
 
