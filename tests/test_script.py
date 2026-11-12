@@ -79,6 +79,39 @@ def test_a_node_script_uses_the_nodes_certificate(tmp_path, connected):
   assert script.mprovURL == "https://10.0.0.1/"
 
 
+def test_a_second_session_still_uses_the_nodes_ca(tmp_path, connected):
+  # scripts call startSession() again after __init__() has (#360)
+  from test_identity import FakeCA, node_files
+  node = tmp_path / "node"
+  node.mkdir()
+  script = MProvScript.__new__(MProvScript)
+  script.session = Session(connected)
+  script.nodeTlsDir = node_files(node, FakeCA())
+  script.mprovURL = "http://10.0.0.1/"
+  script.caBundle = ""
+  assert script.startSession()
+  assert script.startSession()
+  assert script.session.verify == str(node / "ca.crt")
+  assert script.caBundle == ""
+  assert script.mprovURL == "https://10.0.0.1/"
+
+
+def test_a_configured_ca_bundle_is_used_every_time(tmp_path, connected):
+  from test_identity import FakeCA, node_files
+  node = tmp_path / "node"
+  node.mkdir()
+  bundle = tmp_path / "mpcc-ca.crt"
+  bundle.write_text("CA\n")
+  script = MProvScript.__new__(MProvScript)
+  script.session = Session(connected)
+  script.nodeTlsDir = node_files(node, FakeCA())
+  script.mprovURL = "http://10.0.0.1/"
+  script.caBundle = str(bundle)
+  assert script.startSession()
+  assert script.startSession()
+  assert script.session.verify == str(bundle)
+
+
 def test_a_node_script_without_a_certificate_uses_the_key(tmp_path, connected):
   script = MProvScript.__new__(MProvScript)
   script.session = Session(connected)

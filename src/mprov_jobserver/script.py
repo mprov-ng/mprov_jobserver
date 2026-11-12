@@ -74,7 +74,6 @@ class MProvScript():
     pass
 
   def startSession(self):
-    caBundleSet = bool(self.caBundle)
     self.session.headers.update({'Content-Type': 'application/json'})
     # this node's own certificate, over HTTPS to the same host, as the
     # mPCC's boot scripts use it; else the shared API key, for an image built
@@ -97,16 +96,19 @@ class MProvScript():
     if self.script_version:
       self.session.headers.update({VERSION_HEADER: self.script_version})
 
-    # connect to the mPCC
+    # connect to the mPCC.  The bundle is resolved into a local, not into
+    # self.caBundle: scripts call this again after __init__() has, and an
+    # unset caBundle turned into the OS bundle's path would read as set the
+    # second time, so the node's own CA would no longer be used (#360).
     try:
-      self.caBundle = ca_bundle(self.caBundle)
+      bundle = ca_bundle(self.caBundle)
     except FileNotFoundError as err:
       log.error(f"{err}.")
       return False
-    if node is not None and not caBundleSet:
+    if node is not None and not self.caBundle:
       self.session.verify = node.ca_path
-    elif self.caBundle:
-      self.session.verify = self.caBundle
+    elif bundle:
+      self.session.verify = bundle
     try:
       response = self.session.get(self.mprovURL, stream=True)
     except Exception as err:
