@@ -44,6 +44,7 @@
       # - image-sync # REQUIRES mprov-webserver
       #- dnsmasq
       # - script-runner
+      # - ib-discover # InfiniBand fabric discovery; one job server on the fabric
 
 # include any plugin yamls.        
 - !include plugins/*.yaml

@@ -89,7 +89,8 @@ RUN dnf update -y && \
     genisoimage \
     procps \
     rsync \
-    cpio
+    cpio \
+    infiniband-diags
 
 # guestfs-tools reads cloud disk images (qcow2, raw) as image bases (#279),
 # in a small VM of its own with this kernel; image-update caches that VM's
