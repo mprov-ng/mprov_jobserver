@@ -201,6 +201,24 @@ def test_dns_lists_nics_bmcs_and_switches(js, dirs, no_interfaces):
   ]
 
 
+def test_dns_warns_for_aliases_of_a_nic_without_an_ip(js, dirs, no_interfaces):
+  # the aliases used to come out as "None web.cluster.local", which dnsmasq
+  # rejects as a bad address; now each is a comment saying why it's missing
+  js.session.routes.update({
+    "networks/?managedns=True": [NETWORK],
+    "networkinterfaces/?network=cluster-net": [dict(NIC, ipaddress=None, hostaliases="web db")],
+    "systembmcs/?network=3&detail": [],
+    "switches/?network=cluster-net": [SWITCH],
+  })
+  _, hosts = run_dns(js, dirs)
+  text = hosts.read_text()
+  assert "None" not in text
+  assert "# WARNING: no ip address for web.cluster.local" in text.splitlines()
+  assert "# WARNING: no ip address for db.cluster.local" in text.splitlines()
+  # and only the switch is an actual record
+  assert [line.split() for line in config_lines(hosts)] == [["10.0.0.250", "switch01.cluster.local"]]
+
+
 def test_dns_handles_404_null_for_nics_and_bmcs(js, dirs, no_interfaces):
   js.session.routes.update({
     "networks/?managedns=True": [NETWORK],
