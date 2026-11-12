@@ -22,7 +22,7 @@ The `JobServer` class (`src/mprov_jobserver/app.py`) authenticates to the mPCC w
 | Core daemon, config, mPCC session | — | [Architecture Overview](architecture/overview.md) |
 | Plugin framework | — | [Plugin Framework](architecture/plugin-framework.md) |
 | Repo mirroring & image build/serve/delete | `repo-update`, `repo-sync`, `image-update`, `image-sync`, `image-delete`, `repo-delete`, `mprov-webserver` | [Image & Repo Provisioning](workflows/image-provisioning.md) |
-| DNS / DHCP / PXE / node discovery / genders | `dnsmasq` (pxe/dns/dhcp ±update/delete), `nads`, `libgenders` | [Network Services](workflows/network-services.md) |
+| DNS / DHCP / PXE / node discovery / InfiniBand / genders | `dnsmasq` (pxe/dns/dhcp ±update/delete), `nads`, `ib-discover`, `libgenders` | [Network Services](workflows/network-services.md) |
 | Script execution on images and hosts | `script-runner` | [Script Execution](workflows/script-execution.md) |
 | BMC credential change/check/recovery | `bmc-rotate` | [BMC Credential Rotation](workflows/bmc-rotation.md) |
 | Packaging, container, systemd, CI | — | [Operations & Deployment](operations/deployment.md) |
