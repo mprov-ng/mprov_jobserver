@@ -7,7 +7,7 @@ netifaces
 pyparted==3.11.7
 sh
 pyroute2==0.8.1
-dnspython>=2.0
+dnspython>=2.9.2 # https://pypi.org/project/dnspython/ - ISC; 2.9.2 fixes GHSA-vvf4-9x63-8xvv
 distro
 psutil
 cryptography>=42 # https://pypi.org/project/cryptography/ - Apache 2.0 or BSD; the job server's key and certificate (mprov_control_center#381)
