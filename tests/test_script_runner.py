@@ -281,19 +281,21 @@ def failing_plugin(js, tmp_path, monkeypatch):
   return plugin
 
 
-def compute_routes():
-  """ The entity plus a download stub for each script file it references. """
+def compute_routes(body=b"#!/bin/sh\nexit 0\n"):
+  """
+  The entity plus a download for each script file it references, each with
+  the given body (a bytes script, or a function of the slug giving one).
+  The scripts run for real.
+  """
   routes = {"systemimages/compute/": entity()}
   for slug in ("base", "group-tool", "image-tool"):
-    routes[f"media/scripts/{slug}.sh"] = b"#!/bin/sh\nexit 0\n"
+    routes[f"media/scripts/{slug}.sh"] = body(slug) if callable(body) else body
   return routes
 
 
 def test_a_failing_script_fails_the_run(js, tmp_path, monkeypatch, capsys):
-  # the real runScript, with every script's subprocess exiting 7
-  monkeypatch.setattr(script_runner_module.subprocess, "run",
-                      lambda *a, **k: types.SimpleNamespace(returncode=7))
-  js.session.routes.update(compute_routes())
+  # the real runScript, with every script exiting 7
+  js.session.routes.update(compute_routes(b"#!/bin/sh\nexit 7\n"))
   js.runonce = True
   plugin = failing_plugin(js, tmp_path, monkeypatch)
   argv(monkeypatch, "-i", "compute")
@@ -306,9 +308,13 @@ def test_a_failing_script_fails_the_run(js, tmp_path, monkeypatch, capsys):
      "http://mpcc/media/scripts/image-tool.sh")}
   assert plugin.failed is True
   assert js.job_updates == [("script-runner", 3, None)]
-  out = capsys.readouterr().out
+  captured = capsys.readouterr()
+  out = captured.out
   assert "script-runner complete." not in out
   assert "script-runner: 3 script(s) failed." in out
+  # each script's own exit code, tagged with its name, on stderr (#362)
+  for slug in ("base", "group-tool", "image-tool"):
+    assert f"{slug}.sh: exit code 7 (failed)" in captured.err.splitlines()
 
 
 def test_a_script_that_never_ran_fails_the_run(js, tmp_path, monkeypatch):
@@ -330,9 +336,7 @@ def test_a_script_that_never_ran_fails_the_run(js, tmp_path, monkeypatch):
 
 def test_a_failing_script_is_still_cleaned_up(js, tmp_path, monkeypatch):
   # entity.json is removed and /etc/nologin lifted even when a script fails
-  monkeypatch.setattr(script_runner_module.subprocess, "run",
-                      lambda *a, **k: types.SimpleNamespace(returncode=1))
-  js.session.routes.update(compute_routes())
+  js.session.routes.update(compute_routes(b"#!/bin/sh\nexit 1\n"))
   js.runonce = True
   plugin = failing_plugin(js, tmp_path, monkeypatch)
   argv(monkeypatch, "-i", "compute")
@@ -343,9 +347,7 @@ def test_a_failing_script_is_still_cleaned_up(js, tmp_path, monkeypatch):
 
 
 def test_successful_scripts_run_and_report_no_failure(js, tmp_path, monkeypatch, capsys):
-  # the real runScript with every script's subprocess exiting 0
-  monkeypatch.setattr(script_runner_module.subprocess, "run",
-                      lambda *a, **k: types.SimpleNamespace(returncode=0))
+  # the real runScript with every script exiting 0
   js.session.routes.update(compute_routes())
   js.runonce = True
   plugin = failing_plugin(js, tmp_path, monkeypatch)
@@ -356,6 +358,63 @@ def test_successful_scripts_run_and_report_no_failure(js, tmp_path, monkeypatch,
   assert plugin.failed is False
   assert js.job_updates == []
   assert "script-runner complete." in capsys.readouterr().out
+
+
+def test_script_output_is_prefixed_with_the_scripts_name(js, tmp_path, monkeypatch, capsys):
+  # scripts run side by side, so each line a script prints carries its file
+  # name to tell them apart, in the order it printed them (#362)
+  def chatty(slug):
+    return f"#!/bin/sh\necho 'hello from {slug}'\necho 'bye from {slug}'\nprintf 'no newline'\n".encode()
+  js.session.routes.update(compute_routes(chatty))
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert plugin.failed is False
+  lines = capsys.readouterr().out.splitlines()
+  for slug in ("base", "group-tool", "image-tool"):
+    assert [line for line in lines if line.startswith(f"{slug}.sh: ")] == [
+      f"{slug}.sh: hello from {slug}",
+      f"{slug}.sh: bye from {slug}",
+      f"{slug}.sh: no newline",
+      f"{slug}.sh: exit code 0",
+    ]
+  # nothing a script printed reached stdout unprefixed
+  assert not [line for line in lines if " from " in line and ".sh: " not in line]
+
+
+def test_script_stderr_is_tagged_apart_from_its_stdout(js, tmp_path, monkeypatch, capsys):
+  # stderr lines go to the job server's stderr, tagged as stderr, each
+  # stream in its own order (#362)
+  def mixed(slug):
+    return (f"#!/bin/sh\necho 'out 1 {slug}'\necho 'err 1 {slug}' >&2\n"
+            f"echo 'out 2 {slug}'\necho 'err 2 {slug}' >&2\n").encode()
+  js.session.routes.update(compute_routes(mixed))
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert plugin.failed is False
+  captured = capsys.readouterr()
+  out, err = captured.out.splitlines(), captured.err.splitlines()
+  for slug in ("base", "group-tool", "image-tool"):
+    assert [line for line in out if line.startswith(f"{slug}.sh")] == [
+      f"{slug}.sh: out 1 {slug}", f"{slug}.sh: out 2 {slug}", f"{slug}.sh: exit code 0"]
+    assert [line for line in err if line.startswith(f"{slug}.sh")] == [
+      f"{slug}.sh (stderr): err 1 {slug}", f"{slug}.sh (stderr): err 2 {slug}"]
+  assert "err " not in captured.out
+  assert "out " not in captured.err
+
+
+def test_undecodable_script_output_doesnt_fail_the_script(js, tmp_path, monkeypatch, capsys):
+  # a script printing bytes that aren't UTF-8 still runs to its own exit code
+  js.session.routes.update(compute_routes(b"#!/bin/sh\nprintf 'bad \\377 byte\\n'\nexit 0\n"))
+  js.runonce = True
+  plugin = failing_plugin(js, tmp_path, monkeypatch)
+  argv(monkeypatch, "-i", "compute")
+  plugin.handle_jobs()
+  assert all(rc == 0 for rc in plugin.scriptResults.values())
+  assert "base.sh: bad \ufffd byte" in capsys.readouterr().out
 
 
 # the mPCC's merge (#269): an mPCC that serves `config` does the merge, with

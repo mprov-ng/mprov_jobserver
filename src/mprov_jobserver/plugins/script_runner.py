@@ -12,6 +12,8 @@ from pathlib import Path
 from mprov_jobserver.log import get_logger
 
 log = get_logger(__name__)
+# serialises the lines relayed from the scripts' output (#362)
+outputLock = Lock()
 # import pprint
 
 def slug_of(value):
@@ -508,14 +510,47 @@ class script_runner(JobServerPlugin):
     try:
       # grab the file
       local_file = self.download_file(filename)
-      # run the file, and record its return code (#174)
-      return_code = subprocess.run(local_file, shell=True).returncode
+      name = os.path.basename(local_file)
+      # run the file, and record its return code (#174).  Its output is
+      # read here, not left on our own stdout and stderr, so each line can
+      # carry the script's name: scripts run in threads side by side, and
+      # their raw output couldn't be told apart (#362).  The lines are
+      # printed, not logged, so they show whatever the log level, as the
+      # raw output did; stderr's go to our stderr, tagged as such.  Each
+      # stream keeps its own order, but not its order against the other.
+      with subprocess.Popen(local_file, shell=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, errors='replace',
+                            bufsize=1) as proc:
+        errReader = Thread(target=self.relayOutput, args=(proc.stderr, f"{name} (stderr): ", sys.stderr))
+        errReader.start()
+        try:
+          self.relayOutput(proc.stdout, f"{name}: ", sys.stdout)
+        finally:
+          errReader.join()
+      return_code = proc.returncode
+      # and how it ended, tagged the same way
+      if return_code == 0:
+        self.emit(sys.stdout, f"{name}: exit code 0")
+      else:
+        self.emit(sys.stderr, f"{name}: exit code {return_code} (failed)")
     except Exception as e:
       # a script that never started is a failure, not a success
       return_code = f"error: {e}"
     with self.scriptLock:
       self.scriptResults[filename] = return_code
     
+
+  def relayOutput(self, pipe, prefix, stream):
+    ''' Copy a script's output from pipe to stream, a line at a time, each line prefixed. '''
+    for line in pipe:
+      self.emit(stream, prefix + line.rstrip('\r\n'))
+
+  def emit(self, stream, line):
+    # one write per line, under one lock for every script's reader, so
+    # concurrent scripts' lines can't break into each other
+    with outputLock:
+      stream.write(line + "\n")
+      stream.flush()
 
   def download_file(self, url):
     local_filename = url.split('/')[-1]
