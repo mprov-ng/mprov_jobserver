@@ -38,7 +38,7 @@ dhcp-option=tag:{{network.slug}},option:domain-name,{{network.domain}}
 {% endfor %}
 
 # the place to look for dhcp host entries
-dhcp-hostsdir=/var/lib/mprov/dhcp/
+dhcp-hostsdir={{ hostsdir }}/
 
 {% if enableTFTP %}
 # enable the tftp server

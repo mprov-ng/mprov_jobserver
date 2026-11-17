@@ -313,6 +313,38 @@ def test_all_generated_config_passes_dnsmasq_test_together(js, dirs, conf_plugin
   assert ok, out
 
 
+@pytest.mark.parametrize("kind, key, route", [
+  ("dhcp", "dhcp-hostsdir", "networks/?isdhcp=True"),
+  ("dns", "hostsdir", "networks/?managedns=True"),
+])
+def test_dnsmasq_reads_hosts_from_mprov_dnsmasq_dir(js, dirs, no_interfaces, kind, key, route):
+  # The hosts dir in the config follows mprovDnsmasqDir instead of a fixed
+  # /var/lib/mprov path, so a site that moves it still gets its hosts read
+  # (#356).  The trailing slash matches the shipped default's.
+  conf, mprov, tftproot = dirs
+  site_dir = mprov.parent / "site-mprov"
+  js.session.routes.update({
+    route: [NETWORK],
+    "networkinterfaces/?network=cluster-net": [NIC],
+    "systembmcs/?network=3&detail": [],
+    "switches/?network=cluster-net": [SWITCH],
+  })
+  worker = DnsmasqDHCPConfig(js) if kind == "dhcp" else DnsmasqDNSConfig(js)
+  worker.dnsmasqConfDir = f"{conf}/"
+  worker.mprovDnsmasqDir = f"{site_dir}/"
+  worker.tftproot = str(tftproot)
+  worker.enableTFTP = False
+  worker.handle_jobs()
+
+  main_conf = conf / f"{kind}.conf"
+  [configured] = [line.split("=", 1)[1] for line in config_lines(main_conf) if line.startswith(key + "=")]
+  assert configured == f"{site_dir}/{kind}/"
+  assert (pathlib.Path(configured) / f"cluster-net-{kind}.conf").is_file()
+  assert "/var/lib/mprov" not in main_conf.read_text()
+  ok, out = dnsmasq_test(main_conf)
+  assert ok, out
+
+
 class FakeSh:
   """ Stands in for the sh module in build_ipxe(): records the commands and
   runs ``on`` hooks instead of git and make. """

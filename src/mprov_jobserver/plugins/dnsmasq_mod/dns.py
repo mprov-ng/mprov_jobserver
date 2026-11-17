@@ -86,6 +86,10 @@ class DnsmasqDNSConfig(JobServerPlugin):
             'hostname': self.hostname,
             'networks': response.json(),
             'enableDNS': True,
+            # where the hosts files below are written; dnsmasq is told to read
+            # the same place, normalised so '/var/lib/mprov/' + '/dns' doesn't
+            # leak a double slash into the config (#356)
+            'hostsdir': os.path.normpath(self.mprovDnsmasqDir + '/dns'),
         }
         if write_if_changed(self.dnsmasqConfDir + 'dns.conf', jenv.get_template('dnsmasq/dns.conf.j2').render(data)):
             self.mainChanged = True

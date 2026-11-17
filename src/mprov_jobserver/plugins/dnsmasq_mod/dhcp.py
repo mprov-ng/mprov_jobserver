@@ -41,6 +41,10 @@ class DnsmasqDHCPConfig(JobServerPlugin):
             'enableDHCP': True,
             'enableTFTP': self.enableTFTP,
             'tftproot': self.tftproot,
+            # where the hosts files below are written; dnsmasq is told to read
+            # the same place, normalised so '/var/lib/mprov/' + '/dhcp' doesn't
+            # leak a double slash into the config (#356)
+            'hostsdir': os.path.normpath(self.mprovDnsmasqDir + '/dhcp'),
         }
         if write_if_changed(self.dnsmasqConfDir + 'dhcp.conf', jenv.get_template('dnsmasq/dhcp.conf.j2').render(data)):
             self.mainChanged = True
