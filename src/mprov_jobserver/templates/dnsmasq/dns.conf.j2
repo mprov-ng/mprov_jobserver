@@ -4,8 +4,8 @@
 # do not read /etc/hosts.
 #no-hosts
 
-# do read in the mprov hosts files in /var/lib/mprov
-hostsdir=/var/lib/mprov/dns/
+# do read in the mprov hosts files (mprovDnsmasqDir)
+hostsdir={{ hostsdir }}/
 
 # only reply to interfaces we are listening on
 local-service
